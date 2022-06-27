@@ -1,0 +1,12 @@
+{
+	plugin: {
+		media_engine: {
+			ceskatelevize: {
+				title: "Česká Televize",
+				extra_columns: {
+					title: "Title"
+				}
+			}
+		}
+	}
+}

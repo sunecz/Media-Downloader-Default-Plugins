@@ -1,0 +1,9 @@
+{
+	plugin: {
+		server: {
+			youtube: {
+				title: "YouTube"
+			}
+		}
+	}
+}

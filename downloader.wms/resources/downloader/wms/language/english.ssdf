@@ -1,0 +1,27 @@
+{
+	plugin: {
+		downloader: {
+			wms: {
+				title: "Web Media Stream Downloader",
+				progress: {
+					compute_total_size: "Computing total size..."
+				},
+				configuration: {
+					titles: {
+						general: "Downloading"
+					},
+					fields: {
+						maxRetryAttempts: "Maximum number of retry attempts",
+						asyncTotalSize:   "Compute data stream size asynchronously"
+					}
+				},
+				prompts: {
+					retry_segment_download: {
+						title: "Retry download?",
+						text:  "A segment could not be downloaded. Do you want to retry its download?"
+					}
+				}
+			}
+		}
+	}
+}

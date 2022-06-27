@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
+<project default="create_jar" name="Create non-runnable Jar">
+	<property name="dir.rtd" value="."  />
+	<property name="dir.wrk" value=".." />
+	<property name="dir.bin" value="${dir.rtd}/bin" />
+	<property name="dir.src" value="${dir.rtd}/src" />
+	<!-- Predefined paths -->
+	<property name="dir.prj" value="${dir.wrk}/Media-Downloader/resources/plugin" />
+	<property name="dir.jar" value="${dir.rtd}/jar"                               />
+	<!-- Variables for plugins -->
+	<property name="plg.bin" value="sune/app/mediadown" />
+	<property name="plg.res" value="resources" />
+	<!-- Builds all the JARs -->
+	<target name="create_jar">
+		<!-- Build all media engines -->
+		<antcall target="build_media_engine"><param name="var.name" value="novaplus"      /></antcall>
+		<antcall target="build_media_engine"><param name="var.name" value="iprima"        /></antcall>
+		<antcall target="build_media_engine"><param name="var.name" value="ceskatelevize" /></antcall>
+		<!-- Build all downloaders -->
+		<antcall target="build_downloader"><param name="var.name" value="smf" /></antcall>
+		<antcall target="build_downloader"><param name="var.name" value="wms" /></antcall>
+		<!-- Build all servers -->
+		<antcall target="build_server"><param name="var.name" value="html5"   /></antcall>
+		<antcall target="build_server"><param name="var.name" value="youtube" /></antcall>
+		<!-- Build all search engines -->
+		<!-- No search engines currently available -->
+		<!-- Build all media transformers -->
+		<!-- No media transformers currently available -->
+		<!-- Build all drm engines -->
+		<antcall target="build_drm_engine"><param name="var.name" value="ceskatelevize" /></antcall>
+	</target>
+	<!-- Builds a media engine -->
+	<target name="build_media_engine">
+		<antcall target="build_generic_jar">
+			<!-- Debug variables -->
+			<param name="var.type" value="media_engine" />
+			<param name="var.name" value="${var.name}"  />
+			<!-- Build variables -->
+			<param name="var.jar"  value="media-engine-${var.name}.jar"  />
+			<param name="var.bin"  value="${plg.bin}/media_engine/${var.name}" />
+			<param name="var.res"  value="${plg.res}/media_engine/${var.name}" />
+		</antcall>
+	</target>
+	<!-- Builds a downloader -->
+	<target name="build_downloader">
+		<antcall target="build_generic_jar">
+			<!-- Debug variables -->
+			<param name="var.type" value="downloader"  />
+			<param name="var.name" value="${var.name}" />
+			<!-- Build variables -->
+			<param name="var.jar"  value="downloader-${var.name}.jar"        />
+			<param name="var.bin"  value="${plg.bin}/downloader/${var.name}" />
+			<param name="var.res"  value="${plg.res}/downloader/${var.name}" />
+		</antcall>
+	</target>
+	<!-- Builds a server -->
+	<target name="build_server">
+		<antcall target="build_generic_jar">
+			<!-- Debug variables -->
+			<param name="var.type" value="server"      />
+			<param name="var.name" value="${var.name}" />
+			<!-- Build variables -->
+			<param name="var.jar"  value="server-${var.name}.jar"        />
+			<param name="var.bin"  value="${plg.bin}/server/${var.name}" />
+			<param name="var.res"  value="${plg.res}/server/${var.name}" />
+		</antcall>
+	</target>
+	<!-- Builds a search engine -->
+	<target name="build_search_engine">
+		<antcall target="build_generic_jar">
+			<!-- Debug variables -->
+			<param name="var.type" value="search_engine" />
+			<param name="var.name" value="${var.name}"   />
+			<!-- Build variables -->
+			<param name="var.jar"  value="search-engine-${var.name}.jar"  />
+			<param name="var.bin"  value="${plg.bin}/search_engine/${var.name}" />
+			<param name="var.res"  value="${plg.res}/search_engine/${var.name}" />
+		</antcall>
+	</target>
+	<!-- Builds a media transformer -->
+	<target name="build_transformer">
+		<antcall target="build_generic_jar">
+			<!-- Debug variables -->
+			<param name="var.type" value="media_transformer" />
+			<param name="var.name" value="${var.name}"  />
+			<!-- Build variables -->
+			<param name="var.jar"  value="media-transformer-${var.name}.jar"  />
+			<param name="var.bin"  value="${plg.bin}/media_transformer/${var.name}" />
+			<param name="var.res"  value="${plg.res}/media_transformer/${var.name}" />
+		</antcall>
+	</target>
+	<!-- Builds a DRM engine -->
+	<target name="build_drm_engine">
+		<antcall target="build_generic_jar">
+			<!-- Debug variables -->
+			<param name="var.type" value="drm_engine" />
+			<param name="var.name" value="${var.name}"  />
+			<!-- Build variables -->
+			<param name="var.jar"  value="drm-engine-${var.name}.jar"  />
+			<param name="var.bin"  value="${plg.bin}/drm_engine/${var.name}" />
+			<param name="var.res"  value="${plg.res}/drm_engine/${var.name}" />
+		</antcall>
+	</target>
+	<!-- Builds a generic JAR with compiled source and resources -->
+	<target name="build_generic_jar">
+		<echo message="Building ${var.type} ${var.name}..." />
+		<jar destfile="${dir.jar}/${var.type}/${var.name}/plugin.jar">
+			<manifest>
+				<attribute name="Class-Path" value="." />
+			</manifest>
+			<fileset dir="${dir.bin}">
+				<include name="**/${var.bin}/**" />
+				<include name="**/${var.res}/**" />
+			</fileset>
+		</jar>
+		<copy file="${dir.jar}/${var.type}/${var.name}/plugin.jar" tofile="${dir.prj}/${var.jar}" />
+		<echo message="Building ${var.type} ${var.name} source..." />
+		<zip destfile="${dir.jar}/${var.type}/${var.name}/source.jar" basedir="${dir.rtd}">
+			<include name="${var.type}.${var.name}/${var.bin}/**" />
+			<include name="${var.type}.${var.name}/${var.res}/**" />
+		</zip>
+	</target>
+</project>

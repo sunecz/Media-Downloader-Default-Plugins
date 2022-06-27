@@ -1,0 +1,12 @@
+{
+	plugin: {
+		downloader: {
+			smf: {
+				title: "Single Media File Downloader",
+				progress: {
+					compute_total_size: "Vypočítávání celkové velikosti..."
+				}
+			}
+		}
+	}
+}

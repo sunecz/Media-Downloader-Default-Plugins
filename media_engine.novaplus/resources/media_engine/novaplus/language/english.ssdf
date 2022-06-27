@@ -1,0 +1,9 @@
+{
+	plugin: {
+		media_engine: {
+			novaplus: {
+				title: "NovaPlus"
+			}
+		}
+	}
+}

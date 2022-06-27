@@ -1,0 +1,18 @@
+// This file is used only by an IDE, each plugin is built automatically using the build script.
+module sune.app.mediadown.default_plugins {
+	requires transitive sune.app.mediadown;
+	requires transitive sune.app.mediadownloader.drm;
+	requires javafx.web;
+	requires jdk.jsobject;
+	requires ssdf2;
+	requires org.jsoup;
+	requires java.net.http;
+	exports sune.app.mediadown.downloader.smf;
+	exports sune.app.mediadown.downloader.wms;
+	exports sune.app.mediadown.media_engine.iprima;
+	exports sune.app.mediadown.media_engine.novaplus;
+	exports sune.app.mediadown.media_engine.ceskatelevize;
+	exports sune.app.mediadown.server.html5;
+	exports sune.app.mediadown.server.youtube;
+	exports sune.app.mediadown.drm_engine.ceskatelevize;
+}

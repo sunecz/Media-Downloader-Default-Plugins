@@ -1,0 +1,27 @@
+{
+	plugin: {
+		downloader: {
+			wms: {
+				title: "Web Media Stream Downloader",
+				progress: {
+					compute_total_size: "Vypočítávání celkové velikosti..."
+				},
+				configuration: {
+					titles: {
+						general: "Stahování"
+					},
+					fields: {
+						maxRetryAttempts: "Maximální počet pokusů o opakování",
+						asyncTotalSize:   "Vypočítat velikost datového proudu asynchronně"
+					}
+				},
+				prompts: {
+					retry_segment_download: {
+						title: "Opětovné stažení?",
+						text:  "Segment se nepodařilo stáhnout. Chcete znovu zkusit jeho stažení?"
+					}
+				}
+			}
+		}
+	}
+}

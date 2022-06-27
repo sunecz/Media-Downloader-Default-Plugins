@@ -1,0 +1,9 @@
+{
+	plugin: {
+		drm_engine: {
+			ceskatelevize: {
+				title: "Česká Televize (DRM)"
+			}
+		}
+	}
+}

@@ -1,0 +1,19 @@
+{
+	plugin: {
+		media_engine: {
+			iprima: {
+				title: "iPrima",
+				configuration: {
+					titles: {
+						general: "iPrima"
+					},
+					fields: {
+						useDefaultAuthData: "Použít výchozí autentizační data",
+						authData_email:     "Email",
+						authData_password:  "Heslo"
+					}
+				}
+			}
+		}
+	}
+}

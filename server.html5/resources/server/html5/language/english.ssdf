@@ -1,0 +1,9 @@
+{
+	plugin: {
+		server: {
+			html5: {
+				title: "HTML5"
+			}
+		}
+	}
+}
