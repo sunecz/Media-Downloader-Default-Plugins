@@ -11,6 +11,30 @@
 						authData_username: "Uživatelské jméno",
 						authData_password: "Heslo"
 					}
+				},
+				dialog: {
+					obtain_episodes: {
+						title: "Upřesnit výběr epizod",
+						description: "Bylo nalezeno %{page_count} stránek epizod. Jelikož je web"
+							+ " TV Barrandov velmi pomalý, získání všech epizod může trvat VELMI dlouhou dobu."
+							+ " Pokud chcete získat jen některé epizody, můžete upřesnit výběr pomocí možností"
+							+ " níže.",
+						option: {
+							date_range: {
+								label: "V rozmezí dat",
+								from:  "Od",
+								to:    "Do"
+							},
+							page_range: {
+								label: "V rozmezí stránek",
+								from:  "Od",
+								to:    "Do"
+							},
+							all: {
+								label: "Všechny"
+							}
+						}
+					}
 				}
 			}
 		}

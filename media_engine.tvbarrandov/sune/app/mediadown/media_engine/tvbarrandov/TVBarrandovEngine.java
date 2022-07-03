@@ -14,6 +14,8 @@ import java.net.http.HttpResponse;
 import java.net.http.HttpResponse.BodyHandlers;
 import java.time.Duration;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -31,14 +33,30 @@ import java.util.stream.Stream;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 
+import javafx.geometry.Insets;
+import javafx.geometry.Pos;
+import javafx.scene.control.ButtonType;
+import javafx.scene.control.DatePicker;
+import javafx.scene.control.Dialog;
+import javafx.scene.control.DialogPane;
+import javafx.scene.control.Label;
+import javafx.scene.control.RadioButton;
+import javafx.scene.control.Toggle;
+import javafx.scene.control.ToggleGroup;
 import javafx.scene.image.Image;
+import javafx.scene.layout.HBox;
+import javafx.scene.layout.VBox;
+import javafx.scene.text.Font;
 import sune.app.mediadown.Episode;
+import sune.app.mediadown.MediaDownloader;
 import sune.app.mediadown.MediaGetter;
 import sune.app.mediadown.MediaGetters;
 import sune.app.mediadown.Program;
 import sune.app.mediadown.Shared;
 import sune.app.mediadown.configuration.Configuration.ConfigurationProperty;
 import sune.app.mediadown.engine.MediaEngine;
+import sune.app.mediadown.gui.control.IntegerTextField;
+import sune.app.mediadown.language.Translation;
 import sune.app.mediadown.media.Media;
 import sune.app.mediadown.media.MediaConstants;
 import sune.app.mediadown.media.MediaFormat;
@@ -54,6 +72,7 @@ import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.util.Cache;
 import sune.app.mediadown.util.CheckedBiFunction;
 import sune.app.mediadown.util.CheckedSupplier;
+import sune.app.mediadown.util.FXUtils;
 import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.JavaScript;
 import sune.app.mediadown.util.NoNullCache;
@@ -117,7 +136,7 @@ public final class TVBarrandovEngine implements MediaEngine {
 		return internal_getEpisodes(program, _dwp, (p, a) -> true);
 	}
 	
-	private final boolean parseEpisodesPage(Program program, List<Episode> episodes, Document document,
+	private static final boolean parseEpisodesPage(Program program, List<Episode> episodes, Document document,
 			WorkerProxy proxy, CheckedBiFunction<WorkerProxy, Episode, Boolean> function) throws Exception {
 		for(Element elEpisode : document.select(SELECTOR_EPISODES)) {
 			String url = elEpisode.selectFirst("a.show-box__container").absUrl("href");
@@ -136,6 +155,7 @@ public final class TVBarrandovEngine implements MediaEngine {
 		
 		URI baseURI = program.uri();
 		Document document = FastWeb.document(baseURI.resolve(baseURI.getPath() + "/video?page=1"));
+		EpisodesObtainStrategy strategy;
 		
 		// Obtain the range of available pages
 		int first = 1, last = 1;
@@ -149,21 +169,20 @@ public final class TVBarrandovEngine implements MediaEngine {
 			if(last  < 0) last  = first;
 		}
 		
-		// Parse the first, already obtained, episodes page
-		if(!parseEpisodesPage(program, episodes, document, proxy, function))
-			return null; // Aborted, do not continue
-		
-		// TODO: Display warning with approximation
-		// TODO: Maybe add a date selector?
-		
-		// This is probably the fastest way to iterate through TV Barrandov's episodes pages,
-		// since more simultaneous connections result in higher times.
-		// As far as I know, there is no API to return all episodes at once.
-		for(int i = first + 1; i <= last; ++i) {
-			Document doc = FastWeb.document(baseURI.resolve(baseURI.getPath() + "/video?page=" + i));
-			if(!parseEpisodesPage(program, episodes, doc, proxy, function))
-				return null; // Aborted, do not continue
+		final int maxNumOfPagesToGetAll = 5;
+		if(last - first >= maxNumOfPagesToGetAll) {
+			final int minPage = first, maxPage = last;
+			strategy = FXUtils.fxTaskValue(() -> (new EpisodesObtainStrategyDialog(program, minPage, maxPage, document))
+			                                         .showAndWait())
+					          .orElse(null);
+		} else {
+			strategy = new PageRangeEpisodesObtainStrategy(program, first + 1, last, document);
 		}
+		
+		// If the strategy chooser dialog was closed, do not continue
+		if(strategy == null) return null;
+		// Run the strategy and obtain all episodes based on the user's selection
+		strategy.obtain(episodes, proxy, function);
 		
 		return episodes;
 	}
@@ -516,6 +535,229 @@ public final class TVBarrandovEngine implements MediaEngine {
 	@Override
 	public String toString() {
 		return TITLE;
+	}
+	
+	private static abstract class EpisodesObtainStrategy {
+		
+		protected final Program program;
+		
+		protected EpisodesObtainStrategy(Program program) {
+			this.program = Objects.requireNonNull(program);
+		}
+		
+		public abstract void obtain(List<Episode> episodes, WorkerProxy proxy,
+			CheckedBiFunction<WorkerProxy, Episode, Boolean> function) throws Exception;
+	}
+	
+	private static final class DateRangeEpisodesObtainStrategy extends EpisodesObtainStrategy {
+		
+		private final LocalDate from;
+		private final LocalDate to;
+		
+		public DateRangeEpisodesObtainStrategy(Program program, LocalDate from, LocalDate to) {
+			super(program);
+			this.from = Objects.requireNonNull(from);
+			this.to = Objects.requireNonNull(to);
+		}
+		
+		@Override
+		public void obtain(List<Episode> episodes, WorkerProxy proxy,
+				CheckedBiFunction<WorkerProxy, Episode, Boolean> function) throws Exception {
+			URI baseURI = program.uri();
+			
+			for(LocalDateTime i = from.atStartOfDay(), t = to.atStartOfDay();
+					i.compareTo(t) <= 0;
+					i = i.plusDays(1L)) {
+				long seconds = i.toEpochSecond(ZoneOffset.UTC);
+				Document doc = FastWeb.document(baseURI.resolve(baseURI.getPath() + "/video?showDay=" + seconds));
+				if(!parseEpisodesPage(program, episodes, doc, proxy, function))
+					return; // Aborted, do not continue
+			}
+		}
+	}
+	
+	private static final class PageRangeEpisodesObtainStrategy extends EpisodesObtainStrategy {
+		
+		private final int from;
+		private final int to;
+		private final Document firstDocument;
+		
+		public PageRangeEpisodesObtainStrategy(Program program, int from, int to, Document firstDocument) {
+			super(program);
+			this.from = checkPage(from);
+			this.to = checkPage(to);
+			this.firstDocument = firstDocument; // Can be null
+		}
+		
+		private static final int checkPage(int value) {
+			if(value <= 0)
+				throw new IllegalArgumentException("Invalid page number, must be >= 1");
+			return value;
+		}
+		
+		@Override
+		public void obtain(List<Episode> episodes, WorkerProxy proxy,
+				CheckedBiFunction<WorkerProxy, Episode, Boolean> function) throws Exception {
+			URI baseURI = program.uri();
+			
+			// Parse the first episodes page, if already obtained
+			if(firstDocument != null
+					&& !parseEpisodesPage(program, episodes, firstDocument, proxy, function))
+				return; // Aborted, do not continue
+			
+			// This is probably the fastest way to iterate through all TV Barrandov's episodes pages,
+			// since more simultaneous connections result in higher times.
+			// As far as I know, there is no API to return all episodes at once.
+			for(int i = from; i <= to; ++i) {
+				Document doc = FastWeb.document(baseURI.resolve(baseURI.getPath() + "/video?page=" + i));
+				if(!parseEpisodesPage(program, episodes, doc, proxy, function))
+					return; // Aborted, do not continue
+			}
+		}
+	}
+	
+	private static final class EpisodesObtainStrategyDialog extends Dialog<EpisodesObtainStrategy> {
+		
+		private static final Translation translation;
+		
+		static {
+			String path = "plugin." + PLUGIN.getContext().getPlugin().instance().name() + ".dialog.obtain_episodes";
+			translation = MediaDownloader.translation().getTranslation(path);
+		}
+		
+		private final Program program;
+		private final int minPage;
+		private final int maxPage;
+		private final Document firstDocument;
+		
+		private final VBox boxOptions;
+		private final ToggleGroup toggleGroup;
+		private final RadioButton optionDateRange;
+		private final RadioButton optionPageRange;
+		private final RadioButton optionAll;
+		
+		private final DatePicker pickerDateFrom;
+		private final DatePicker pickerDateTo;
+		private final IntegerTextField txtPageRangeFrom;
+		private final IntegerTextField txtPageRangeTo;
+		
+		public EpisodesObtainStrategyDialog(Program program, int minPage, int maxPage, Document firstDocument) {
+			this.program = Objects.requireNonNull(program);
+			this.minPage = minPage;
+			this.maxPage = maxPage;
+			this.firstDocument = firstDocument;
+			
+			final DialogPane pane = getDialogPane();
+			boxOptions = new VBox(5.0);
+			toggleGroup = new ToggleGroup();
+			optionDateRange = new RadioButton(translation.getSingle("option.date_range.label"));
+			optionPageRange = new RadioButton(translation.getSingle("option.page_range.label"));
+			optionAll = new RadioButton(translation.getSingle("option.all.label"));
+			
+			LocalDate dateNow = LocalDate.now();
+			LocalDate dateLastWeek = dateNow.plusWeeks(-1L);
+			Label lblDateRangeFrom = new Label(translation.getSingle("option.date_range.from"));
+			Label lblDateRangeTo = new Label(translation.getSingle("option.date_range.to"));
+			pickerDateFrom = new DatePicker(dateLastWeek);
+			pickerDateTo = new DatePicker(dateNow);
+			HBox boxDateRange = new HBox(5.0);
+			boxDateRange.getChildren().addAll(lblDateRangeFrom, pickerDateFrom, lblDateRangeTo, pickerDateTo);
+			boxDateRange.setAlignment(Pos.CENTER_LEFT);
+			pickerDateFrom.getEditor().textProperty().addListener((o, ov, text) -> updateDatePicker(pickerDateFrom, text));
+			pickerDateTo  .getEditor().textProperty().addListener((o, ov, text) -> updateDatePicker(pickerDateTo,   text));
+			
+			Label lblPageRangeFrom = new Label(translation.getSingle("option.page_range.from"));
+			Label lblPageRangeTo = new Label(translation.getSingle("option.page_range.to"));
+			txtPageRangeFrom = new IntegerTextField(minPage);
+			txtPageRangeTo = new IntegerTextField(Math.min(minPage + 5, maxPage));
+			HBox boxPageRange = new HBox(5.0);
+			boxPageRange.getChildren().addAll(lblPageRangeFrom, txtPageRangeFrom, lblPageRangeTo, txtPageRangeTo);
+			boxPageRange.setAlignment(Pos.CENTER_LEFT);
+			
+			optionDateRange.setToggleGroup(toggleGroup);
+			optionPageRange.setToggleGroup(toggleGroup);
+			optionAll.setToggleGroup(toggleGroup);
+			boxOptions.getChildren().addAll(optionDateRange, boxDateRange, optionPageRange, boxPageRange, optionAll);
+			pane.setContent(boxOptions);
+			
+			toggleGroup.selectedToggleProperty().addListener((o, ov, toggle) -> {
+				if(toggle == optionDateRange) {
+					boxDateRange.setDisable(false);
+					boxPageRange.setDisable(true);
+				} else if(toggle == optionPageRange) {
+					boxDateRange.setDisable(true);
+					boxPageRange.setDisable(false);
+				} else if(toggle == optionAll) {
+					boxDateRange.setDisable(true);
+					boxPageRange.setDisable(true);
+				}
+			});
+			
+			setResultConverter((buttonType) -> {
+				if(buttonType == ButtonType.OK) {
+					Toggle toggle = toggleGroup.getSelectedToggle();
+					if(toggle == optionDateRange) return createDateRangeStrategy();
+					if(toggle == optionPageRange) return createPageRangeStrategy();
+					if(toggle == optionAll)       return createAllStrategy();
+				}
+				return null;
+			});
+			
+			setTitle(translation.getSingle("title"));
+			setHeaderText(translation.getSingle("description", "page_count", maxPage));
+			setContentText(null);
+			FXUtils.setDialogIcon(this, MediaDownloader.ICON);
+			pane.setMaxWidth(450.0);
+			pane.getButtonTypes().setAll(ButtonType.OK, ButtonType.CANCEL);
+			
+			// By default select only a date range
+			optionDateRange.setSelected(true);
+			
+			// Normalize the font size of the header text, since it is displayed larger than it should be.
+			// It must be done after setting the header text (setHeaderText(text) call).
+			Label lblHeaderText = (Label) pane.lookup(".header-panel > .label");
+			lblHeaderText.setFont(Font.font(lblHeaderText.getFont().getSize() * 0.96));
+			
+			// Fix issue with overlaying the content with the buttons bar
+			FXUtils.onDialogShow(this, () -> {
+				double buttonsHeight = pane.lookup(".button-bar").prefHeight(-1.0);
+				Insets insets = boxOptions.getInsets();
+				boxOptions.setPadding(new Insets(insets.getTop(), insets.getRight(),
+					insets.getBottom() + buttonsHeight * 0.5, insets.getLeft()));
+				pane.getScene().getWindow().sizeToScene();
+			});
+		}
+		
+		private final void updateDatePicker(DatePicker picker, String text) {
+			LocalDate parsedDate;
+			if((parsedDate = Utils.ignore(() -> picker.getConverter().fromString(text))) != null) {
+				// If successfully parsed, set the date as the picker's value
+				picker.setValue(parsedDate);
+			}
+		}
+		
+		private final EpisodesObtainStrategy createDateRangeStrategy() {
+			LocalDate dateFrom = pickerDateFrom.getValue();
+			LocalDate dateTo = pickerDateTo.getValue();
+			return new DateRangeEpisodesObtainStrategy(program, dateFrom, dateTo);
+		}
+		
+		private final EpisodesObtainStrategy createPageRangeStrategy() {
+			int pageFrom = txtPageRangeFrom.getValue();
+			int pageTo = txtPageRangeTo.getValue();
+			
+			Document document = null;
+			if(pageFrom == 1) {
+				document = firstDocument;
+				++pageFrom;
+			}
+			
+			return new PageRangeEpisodesObtainStrategy(program, pageFrom, pageTo, document);
+		}
+		
+		private final EpisodesObtainStrategy createAllStrategy() {
+			return new PageRangeEpisodesObtainStrategy(program, minPage + 1, maxPage, firstDocument);
+		}
 	}
 	
 	private static final class Authenticator {

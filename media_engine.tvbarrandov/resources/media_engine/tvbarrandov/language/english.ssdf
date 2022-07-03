@@ -11,6 +11,30 @@
 						authData_username: "Username",
 						authData_password: "Password"
 					}
+				},
+				dialog: {
+					obtain_episodes: {
+						title: "Specify the selection of episodes",
+						description: "%{page_count} pages of episodes have been found. Since the web of"
+							+ " TV Barrandov is very slow, the process of getting the episodes can take"
+							+ " a VERY long time. If you want to get just some episodes, you can specify"
+							+ " the selection of episodes using the options below.",
+						option: {
+							date_range: {
+								label: "In range of dates",
+								from:  "From",
+								to:    "To"
+							},
+							page_range: {
+								label: "In range of pages",
+								from:  "From",
+								to:    "To"
+							},
+							all: {
+								label: "All"
+							}
+						}
+					}
 				}
 			}
 		}
