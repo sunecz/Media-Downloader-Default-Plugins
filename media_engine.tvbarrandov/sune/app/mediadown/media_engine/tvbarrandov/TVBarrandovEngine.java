@@ -102,8 +102,49 @@ public final class TVBarrandovEngine implements MediaEngine {
 	private static final String SELECTOR_PROGRAMS = SELECTOR_GRID;
 	private static final String SELECTOR_EPISODES = SELECTOR_GRID + " > .show-box:not(.show-box--date)";
 	
+	private static Pattern REGEX_EPISODE_URL;
+	
 	// Allow to create an instance when registering the engine
 	TVBarrandovEngine() {
+	}
+	
+	private static final String maybeImproveEpisodeTitle(Program program, String url, String title) {
+		if(REGEX_EPISODE_URL == null) {
+			REGEX_EPISODE_URL = Pattern.compile("/video/\\d+((?:-[^-]+)+)-(\\d{1,2})-(\\d{1,2})-(\\d{4})$");
+		}
+		
+		Matcher matcher = REGEX_EPISODE_URL.matcher(url);
+		if(matcher.find()) {
+			// Try to convert the program's title to URL-like text
+			String normalizedName = Utils.normalize(program.title()).replaceAll("\\s+", "-").toLowerCase();
+			String extractedName = matcher.group(1).replaceFirst("^-", "");
+			// Check whether there is any more text for the episode title
+			if(!normalizedName.equals(extractedName)) {
+				// Try to beautify the episode title in the URL
+				extractedName = extractedName.replaceFirst("^" + Pattern.quote(normalizedName), "");
+				extractedName = extractedName.replaceFirst("^-", "");
+				extractedName = extractedName.replaceAll("-", " ");
+				if(!extractedName.isEmpty()) {
+					extractedName = Utils.titlize(extractedName);
+					title = String.format("%s (%s)", extractedName, title);
+				}
+			}
+		}
+		
+		return title;
+	}
+	
+	private static final boolean parseEpisodesPage(Program program, List<Episode> episodes, Document document,
+			WorkerProxy proxy, CheckedBiFunction<WorkerProxy, Episode, Boolean> function) throws Exception {
+		for(Element elEpisode : document.select(SELECTOR_EPISODES)) {
+			String url = elEpisode.selectFirst("a.show-box__container").absUrl("href");
+			String title = maybeImproveEpisodeTitle(program, url, elEpisode.selectFirst(".show-box__timestamp").text());
+			Episode episode = new Episode(program, Utils.uri(url), title);
+			episodes.add(episode);
+			if(!function.apply(proxy, episode))
+				return false; // Do not continue
+		}
+		return true;
 	}
 	
 	// ----- Internal methods
@@ -134,19 +175,6 @@ public final class TVBarrandovEngine implements MediaEngine {
 	
 	private final List<Episode> internal_getEpisodes(Program program) throws Exception {
 		return internal_getEpisodes(program, _dwp, (p, a) -> true);
-	}
-	
-	private static final boolean parseEpisodesPage(Program program, List<Episode> episodes, Document document,
-			WorkerProxy proxy, CheckedBiFunction<WorkerProxy, Episode, Boolean> function) throws Exception {
-		for(Element elEpisode : document.select(SELECTOR_EPISODES)) {
-			String url = elEpisode.selectFirst("a.show-box__container").absUrl("href");
-			String title = elEpisode.selectFirst(".show-box__timestamp").text();
-			Episode episode = new Episode(program, Utils.uri(url), title);
-			episodes.add(episode);
-			if(!function.apply(proxy, episode))
-				return false; // Do not continue
-		}
-		return true;
 	}
 	
 	private final List<Episode> internal_getEpisodes(Program program, WorkerProxy proxy,
@@ -211,7 +239,7 @@ public final class TVBarrandovEngine implements MediaEngine {
 			String queryURL = "https://www.youtube.com/c/TelevizeBarrandovOfficial/search?query=%{query}s";
 			String query = null, programName = null, dateString = null;
 			
-			Pattern regex = Pattern.compile("^/video/\\d+(-[^-]+)+-(\\d{1,2})-(\\d{1,2})-(\\d{4})$");
+			Pattern regex = Pattern.compile("^/video/\\d+((?:-[^-]+)+)-(\\d{1,2})-(\\d{1,2})-(\\d{4})$");
 			Matcher matcher = regex.matcher(uri.getPath());
 			if(matcher.matches()) {
 				programName = Utils.titlize(matcher.group(1).substring(1));
