@@ -16,6 +16,7 @@
 		<antcall target="build_media_engine"><param name="var.name" value="novaplus"      /></antcall>
 		<antcall target="build_media_engine"><param name="var.name" value="iprima"        /></antcall>
 		<antcall target="build_media_engine"><param name="var.name" value="ceskatelevize" /></antcall>
+		<antcall target="build_media_engine"><param name="var.name" value="tvbarrandov"   /></antcall>
 		<!-- Build all downloaders -->
 		<antcall target="build_downloader"><param name="var.name" value="smf" /></antcall>
 		<antcall target="build_downloader"><param name="var.name" value="wms" /></antcall>
