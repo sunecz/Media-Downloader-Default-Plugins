@@ -66,6 +66,8 @@ public class YouTubeServer implements Server {
 	public static final String URL     = PLUGIN.getURL();
 	public static final Image  ICON    = PLUGIN.getIcon();
 	
+	private static Pattern REGEX_EMBED_URL;
+	
 	private final WorkerProxy _dwp = WorkerProxy.defaultProxy();
 	private final Cache cacheMedia = new NoNullCache();
 	
@@ -73,10 +75,20 @@ public class YouTubeServer implements Server {
 	YouTubeServer() {
 	}
 	
+	private static final String maybeTransformEmbedURL(String url) {
+		if(REGEX_EMBED_URL == null) {
+			REGEX_EMBED_URL = Pattern.compile("^https?://(?:www\\.|m\\.)?youtube\\.com/embed/([^?#]+)(?:[?#].*)?$");
+		}
+		Matcher matcher = REGEX_EMBED_URL.matcher(url);
+		return matcher.matches()
+					? "https://www.youtube.com/watch?v=" + matcher.group(1)
+					: url;
+	}
+	
 	private final List<Media> getMedia(URI uri, Map<String, Object> data, WorkerProxy proxy,
 			CheckedBiFunction<WorkerProxy, Media, Boolean> function) throws Exception {
 		List<Media> sources = new ArrayList<>();
-		String url = uri.toString();
+		String url = maybeTransformEmbedURL(uri.toString());
 		StringResponse response = Web.request(new GetRequest(Utils.url(url), Shared.USER_AGENT));
 		Document document = Utils.parseDocument(response.content, url);
 		Signature.Context ctx = Signature.Extractor.extract(document);
