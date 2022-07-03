@@ -427,7 +427,7 @@ public final class SegmentsDownloader implements Download {
 	
 	@Override
 	public final void stop() throws Exception {
-		if(stopped.get() || done.get()) return; // Nothing to do
+		if(stopped.get()) return; // Nothing to do
 		running.set(false);
 		paused .set(false);
 		lockPause.unlock();

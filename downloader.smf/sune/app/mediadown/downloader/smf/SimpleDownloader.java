@@ -236,7 +236,7 @@ public final class SimpleDownloader implements Download {
 			if(mediaHolders.size() == 1) {
 				MediaHolder mh = mediaHolders.get(0);
 				Path tempFile = tempFiles.get(0);
-				if(mh.media().format().is(outFormat)) noConversion(tempFile, dest);
+				if(mh.media().format().is(outFormat)) noConversion(dest, tempFile);
 				else doConversion(dest, tempFile);
 			} else {
 				doConversion(dest, Utils.toArray(tempFiles, Path.class));
@@ -252,7 +252,7 @@ public final class SimpleDownloader implements Download {
 	
 	@Override
 	public final void stop() throws Exception {
-		if(stopped.get() || done.get()) return; // Nothing to do
+		if(stopped.get()) return; // Nothing to do
 		running.set(false);
 		paused .set(false);
 		lockPause.unlock();
