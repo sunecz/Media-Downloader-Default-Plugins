@@ -13,6 +13,7 @@ module sune.app.mediadown.default_plugins {
 	exports sune.app.mediadown.media_engine.novaplus;
 	exports sune.app.mediadown.media_engine.ceskatelevize;
 	exports sune.app.mediadown.media_engine.tvbarrandov;
+	exports sune.app.mediadown.media_engine.tvautosalon;
 	exports sune.app.mediadown.server.html5;
 	exports sune.app.mediadown.server.youtube;
 	exports sune.app.mediadown.drm_engine.ceskatelevize;

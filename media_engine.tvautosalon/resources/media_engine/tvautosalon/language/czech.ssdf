@@ -1,0 +1,9 @@
+{
+	plugin: {
+		media_engine: {
+			tvautosalon: {
+				title: "Autosalon TV"
+			}
+		}
+	}
+}
