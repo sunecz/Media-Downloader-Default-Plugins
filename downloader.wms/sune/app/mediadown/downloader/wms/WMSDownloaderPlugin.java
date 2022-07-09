@@ -1,6 +1,7 @@
 package sune.app.mediadown.downloader.wms;
 
 import sune.app.mediadown.MediaDownloader;
+import sune.app.mediadown.configuration.ApplicationConfigurationAccessor;
 import sune.app.mediadown.configuration.Configuration.ConfigurationProperty;
 import sune.app.mediadown.download.Downloaders;
 import sune.app.mediadown.plugin.Plugin;
@@ -25,9 +26,14 @@ public final class WMSDownloaderPlugin extends PluginBase {
 	private PluginConfiguration.Builder configuration;
 	
 	private final void initConfiguration() {
-		PluginConfiguration.Builder builder = new PluginConfiguration.Builder(getContext().getPlugin().instance().name());
-		builder.addProperty(ConfigurationProperty.ofInteger("maxRetryAttempts").withDefaultValue(DEFAULT_MAX_RETRY_ATTEMPTS));
-		builder.addProperty(ConfigurationProperty.ofBoolean("asyncTotalSize").withDefaultValue(DEFAULT_ASYNC_TOTAL_SIZE));
+		PluginConfiguration.Builder builder
+			= new PluginConfiguration.Builder(getContext().getPlugin().instance().name());
+		builder.addProperty(ConfigurationProperty.ofInteger("maxRetryAttempts")
+			.inGroup(ApplicationConfigurationAccessor.GROUP_DOWNLOAD)
+			.withDefaultValue(DEFAULT_MAX_RETRY_ATTEMPTS));
+		builder.addProperty(ConfigurationProperty.ofBoolean("asyncTotalSize")
+			.inGroup(ApplicationConfigurationAccessor.GROUP_DOWNLOAD)
+			.withDefaultValue(DEFAULT_ASYNC_TOTAL_SIZE));
 		configuration = builder;
 	}
 	

@@ -4,7 +4,7 @@
 			tvbarrandov: {
 				title: "TV Barrandov",
 				configuration: {
-					titles: {
+					group: {
 						general: "TV Barrandov"
 					},
 					fields: {

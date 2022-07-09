@@ -7,9 +7,6 @@
 					compute_total_size: "Computing total size..."
 				},
 				configuration: {
-					titles: {
-						general: "Downloading"
-					},
 					fields: {
 						maxRetryAttempts: "Maximum number of retry attempts",
 						asyncTotalSize:   "Compute data stream size asynchronously"

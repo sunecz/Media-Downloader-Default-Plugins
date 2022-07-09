@@ -7,9 +7,6 @@
 					compute_total_size: "Vypočítávání celkové velikosti..."
 				},
 				configuration: {
-					titles: {
-						general: "Stahování"
-					},
 					fields: {
 						maxRetryAttempts: "Maximální počet pokusů o opakování",
 						asyncTotalSize:   "Vypočítat velikost datového proudu asynchronně"

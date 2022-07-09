@@ -25,11 +25,17 @@ public final class IPrimaEnginePlugin extends PluginBase {
 	private PluginConfiguration.Builder configuration;
 	
 	private final void initConfiguration() {
-		PluginConfiguration.Builder builder = new PluginConfiguration.Builder(getContext().getPlugin().instance().name());
-		builder.addProperty(ConfigurationProperty.ofBoolean("useDefaultAuthData").withDefaultValue(true));
-		builder.addProperty(ConfigurationProperty.ofString("authData_email"));
+		PluginConfiguration.Builder builder
+			= new PluginConfiguration.Builder(getContext().getPlugin().instance().name());
+		String group = builder.name() + ".general";
+		builder.addProperty(ConfigurationProperty.ofBoolean("useDefaultAuthData")
+			.inGroup(group)
+			.withDefaultValue(true));
+		builder.addProperty(ConfigurationProperty.ofString("authData_email")
+			.inGroup(group));
 		builder.addProperty(ConfigurationProperty.ofType("authData_password", Password.class)
-		                        .withTransformer(Password::value, Password::new));
+			.inGroup(group)
+			.withTransformer(Password::value, Password::new));
 		configuration = builder;
 	}
 	

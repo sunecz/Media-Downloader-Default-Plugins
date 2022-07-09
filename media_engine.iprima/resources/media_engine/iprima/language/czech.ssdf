@@ -4,7 +4,7 @@
 			iprima: {
 				title: "iPrima",
 				configuration: {
-					titles: {
+					group: {
 						general: "iPrima"
 					},
 					fields: {
