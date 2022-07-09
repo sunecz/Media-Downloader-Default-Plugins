@@ -39,11 +39,9 @@ import sune.app.mediadown.media.VideoMediaContainer;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.server.Server;
-import sune.app.mediadown.util.Cache;
 import sune.app.mediadown.util.CheckedBiFunction;
 import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.JavaScript;
-import sune.app.mediadown.util.NoNullCache;
 import sune.app.mediadown.util.Pair;
 import sune.app.mediadown.util.Tuple;
 import sune.app.mediadown.util.UserAgent;
@@ -69,7 +67,6 @@ public class YouTubeServer implements Server {
 	private static Pattern REGEX_EMBED_URL;
 	
 	private final WorkerProxy _dwp = WorkerProxy.defaultProxy();
-	private final Cache cacheMedia = new NoNullCache();
 	
 	// Allow to create an instance when registering the server
 	YouTubeServer() {
@@ -218,11 +215,7 @@ public class YouTubeServer implements Server {
 	public WorkerUpdatableTask<CheckedBiFunction<WorkerProxy, Media, Boolean>, Void> getMedia
 			(URI uri, Map<String, Object> data,
 			 CheckedBiFunction<WorkerProxy, Media, Boolean> function) {
-		return cacheMedia.has(uri)
-					? WorkerUpdatableTask.listVoidTaskChecked(function, ()     -> cacheMedia.getChecked(uri))
-					: WorkerUpdatableTask.    voidTaskChecked(function, (p, c) -> {
-						cacheMedia.setChecked(uri, () -> getMedia(uri, data, p, c));
-					});
+		return WorkerUpdatableTask.voidTaskChecked(function, (p, c) -> getMedia(uri, data, p, c));
 	}
 	
 	@Override

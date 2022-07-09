@@ -21,9 +21,7 @@ import sune.app.mediadown.media.VideoMedia;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.server.Server;
-import sune.app.mediadown.util.Cache;
 import sune.app.mediadown.util.CheckedBiFunction;
-import sune.app.mediadown.util.NoNullCache;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Web;
 import sune.app.mediadown.util.Web.GetRequest;
@@ -42,7 +40,6 @@ public class HTML5Server implements Server {
 	public static final Image  ICON    = PLUGIN.getIcon();
 	
 	private final WorkerProxy _dwp = WorkerProxy.defaultProxy();
-	private final Cache cacheMedia = new NoNullCache();
 	
 	// Allow to create an instance when registering the server
 	HTML5Server() {
@@ -99,11 +96,7 @@ public class HTML5Server implements Server {
 	public WorkerUpdatableTask<CheckedBiFunction<WorkerProxy, Media, Boolean>, Void> getMedia
 			(URI uri, Map<String, Object> data,
 			 CheckedBiFunction<WorkerProxy, Media, Boolean> function) {
-		return cacheMedia.has(uri)
-					? WorkerUpdatableTask.listVoidTaskChecked(function, ()     -> cacheMedia.getChecked(uri))
-					: WorkerUpdatableTask.    voidTaskChecked(function, (p, c) -> {
-						cacheMedia.setChecked(uri, () -> getMedia(uri, data, p, c));
-					});
+		return WorkerUpdatableTask.voidTaskChecked(function, (p, c) -> getMedia(uri, data, p, c));
 	}
 	
 	@Override

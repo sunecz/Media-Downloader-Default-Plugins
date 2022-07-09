@@ -33,9 +33,7 @@ import sune.app.mediadown.media_engine.iprima.IPrimaHelper.SnippetEpisodeObtaine
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper.StaticProgramObtainer;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
-import sune.app.mediadown.util.Cache;
 import sune.app.mediadown.util.CheckedBiFunction;
-import sune.app.mediadown.util.NoNullCache;
 import sune.app.mediadown.util.Reflection;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.WorkerProxy;
@@ -169,55 +167,39 @@ public final class IPrimaEngine implements MediaEngine {
 	
 	// ----- Public methods
 	
-	private final Cache cachePrograms = new NoNullCache();
-	private final Cache cacheEpisodes = new NoNullCache();
-	private final Cache cacheVideos   = new NoNullCache();
-	
 	@Override
 	public List<Program> getPrograms() throws Exception {
-		return cachePrograms.getChecked("", () -> internal_getPrograms());
+		return internal_getPrograms();
 	}
 	
 	@Override
 	public List<Episode> getEpisodes(Program program) throws Exception {
-		return cacheEpisodes.getChecked(program, () -> internal_getEpisodes(program));
+		return internal_getEpisodes(program);
 	}
 	
 	@Override
 	public List<Media> getMedia(Episode episode) throws Exception {
-		return cacheVideos.getChecked(episode, () -> internal_getMedia(episode));
+		return internal_getMedia(episode);
 	}
 	
 	@Override
 	public WorkerUpdatableTask<CheckedBiFunction<WorkerProxy, Program, Boolean>, Void> getPrograms
 			(CheckedBiFunction<WorkerProxy, Program, Boolean> function) {
-		return cachePrograms.has("")
-					? WorkerUpdatableTask.listVoidTaskChecked(function, ()     -> cachePrograms.getChecked(""))
-					: WorkerUpdatableTask.    voidTaskChecked(function, (p, c) -> {
-						cachePrograms.setChecked("", () -> internal_getPrograms(p, c));
-					});
+		return WorkerUpdatableTask.voidTaskChecked(function, (p, f) -> internal_getPrograms(p, f));
 	}
 	
 	@Override
 	public WorkerUpdatableTask<CheckedBiFunction<WorkerProxy, Episode, Boolean>, Void> getEpisodes
 			(Program program,
 			 CheckedBiFunction<WorkerProxy, Episode, Boolean> function) {
-		return cacheEpisodes.has(program)
-				? WorkerUpdatableTask.listVoidTaskChecked(function, ()     -> cacheEpisodes.getChecked(program))
-				: WorkerUpdatableTask.    voidTaskChecked(function, (p, c) -> {
-					cacheEpisodes.setChecked(program, () -> internal_getEpisodes(program, p, c));
-				});
+		return WorkerUpdatableTask.voidTaskChecked(function, (p, f) -> internal_getEpisodes(program, p, f));
 	}
 	
 	@Override
 	public WorkerUpdatableTask<CheckedBiFunction<WorkerProxy, Media, Boolean>, Void> getMedia
 			(Episode episode,
 			 CheckedBiFunction<WorkerProxy, Media, Boolean> function) {
-		return cacheVideos.has(episode)
-				? WorkerUpdatableTask.listVoidTaskChecked(function, ()     -> cacheVideos.getChecked(episode))
-				: WorkerUpdatableTask.    voidTaskChecked(function, (p, c) -> {
-					cacheVideos.setChecked(episode, () -> internal_getMedia(episode, p, c));
-				});
+		return WorkerUpdatableTask.voidTaskChecked(function, (p, c) -> internal_getMedia(episode, p, c));
 	}
 	
 	@Override
