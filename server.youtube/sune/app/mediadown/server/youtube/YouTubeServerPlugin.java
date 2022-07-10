@@ -7,7 +7,7 @@ import sune.app.mediadown.server.Servers;
 
 @Plugin(name          = "server.youtube",
 	    title         = "plugin.server.youtube.title",
-	    version       = "0005",
+	    version       = "0006",
 	    author        = "Sune",
 	    updateBaseURL = "https://app.sune.tech/mediadown/dat/plugin/0002/server/youtube/",
 	    updatable     = true,
