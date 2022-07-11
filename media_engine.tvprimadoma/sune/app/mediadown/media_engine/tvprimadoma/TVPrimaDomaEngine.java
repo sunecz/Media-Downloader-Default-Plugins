@@ -276,6 +276,10 @@ public final class TVPrimaDomaEngine implements MediaEngine {
 		Matcher matcher = regexProgramName.matcher(episodeName);
 		if(matcher.find()) episodeName = episodeName.substring(matcher.end(0));
 		
+		// Clean up, if some information is missing
+		if(numSeason.isEmpty()) numSeason = null;
+		if(numEpisode.isEmpty()) numEpisode = null;
+		
 		String title = MediaUtils.mediaTitle(programName, numSeason, numEpisode, episodeName, true, false, false);
 		MediaSource source = MediaSource.of(this);
 		URI sourceURI = Utils.uri(url);
