@@ -18,9 +18,7 @@ import sune.app.mediadownloader.drm.DRMContext;
 import sune.app.mediadownloader.drm.DRMEngine;
 import sune.app.mediadownloader.drm.DRMResolver;
 import sune.app.mediadownloader.drm.resolver.SimpleDRMResolver;
-import sune.app.mediadownloader.drm.util.DRMUtils;
-import sune.app.mediadownloader.drm.util.DRMUtils.JSRequest;
-import sune.app.mediadownloader.drm.util.DRMUtils.Point2D;
+import sune.app.mediadownloader.drm.util.JS;
 import sune.app.mediadownloader.drm.util.MPDQualityModifier;
 import sune.util.ssdf2.SSDCollection;
 import sune.util.ssdf2.SSDF;
@@ -76,21 +74,19 @@ public class CeskaTelevizeDRMEngine implements DRMEngine {
 					".ceskatelevize.cz", "/", false, false, now, now, false, expires);
 				CefCookieManager.getGlobalManager().setCookie(url, cookieConsent);
 			} else if(frame.getURL().startsWith(URL_IFRAME)) {
-				includeMainScript(frame);
+				JS.Record.include(frame);
+				JS.Record.activate(frame, "#video");
 			}
 		}
 		
 		@Override
 		public void onLoadEnd(DRMBrowser browser, CefFrame frame, int httpStatusCode) {
 			if(frame.getURL().startsWith(url)) {
-				String jsCode = "ret(0, document.querySelector('main button').getBoundingClientRect());";
-				browser.addJSRequest(new JSRequest("bbox", jsCode, (result) -> {
-					SSDCollection bbox = (SSDCollection) result;
-					Point2D center = DRMUtils.getCenter(DRMUtils.getBBox(bbox));
-					browser.accessor().click(center.x, center.y);
-				}).send(frame));
+				JS.Helper.include(frame);
+				JS.Helper.click(browser, frame, "main button");
 			} else if(frame.getURL().startsWith(URL_IFRAME)) {
-				includeHelperScripts(frame);
+				JS.Helper.include(frame);
+				JS.Helper.hideVideoElementStyle(frame);
 			}
 		}
 		
