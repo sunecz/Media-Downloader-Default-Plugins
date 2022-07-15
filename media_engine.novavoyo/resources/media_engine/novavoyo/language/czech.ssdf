@@ -1,0 +1,9 @@
+{
+	plugin: {
+		media_engine: {
+			novavoyo: {
+				title: "Voyo (Nova)"
+			}
+		}
+	}
+}
