@@ -1,0 +1,9 @@
+{
+	plugin: {
+		drm_engine: {
+			novavoyo: {
+				title: "Voyo Nova (DRM)"
+			}
+		}
+	}
+}

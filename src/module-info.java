@@ -7,6 +7,7 @@ module sune.app.mediadown.default_plugins {
 	requires ssdf2;
 	requires org.jsoup;
 	requires java.net.http;
+	requires netty.all;
 	exports sune.app.mediadown.downloader.smf;
 	exports sune.app.mediadown.downloader.wms;
 	exports sune.app.mediadown.media_engine.iprima;
@@ -19,4 +20,5 @@ module sune.app.mediadown.default_plugins {
 	exports sune.app.mediadown.server.html5;
 	exports sune.app.mediadown.server.youtube;
 	exports sune.app.mediadown.drm_engine.ceskatelevize;
+	exports sune.app.mediadown.drm_engine.novavoyo;
 }
