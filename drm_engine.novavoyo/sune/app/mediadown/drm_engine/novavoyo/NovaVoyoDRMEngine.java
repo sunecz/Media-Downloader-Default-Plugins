@@ -19,7 +19,7 @@ import org.cef.network.CefCookieManager;
 
 import io.netty.handler.codec.http.FullHttpRequest;
 import sune.app.mediadown.MediaDownloader;
-import sune.app.mediadown.media.MediaQuality;
+import sune.app.mediadown.media.Media;
 import sune.app.mediadown.util.Reflection2;
 import sune.app.mediadown.util.Reflection3;
 import sune.app.mediadown.util.Utils;
@@ -79,8 +79,8 @@ public class NovaVoyoDRMEngine implements DRMEngine {
 	}
 	
 	@Override
-	public DRMResolver createResolver(DRMContext context, String url, Path output, MediaQuality quality) {
-		return new NovaVoyoDRMResolver(context, url, output, quality);
+	public DRMResolver createResolver(DRMContext context, String url, Path output, Media media) {
+		return new NovaVoyoDRMResolver(context, url, output, media);
 	}
 	
 	@Override
@@ -109,8 +109,8 @@ public class NovaVoyoDRMEngine implements DRMEngine {
 			URL_IFRAME = "https://media.cms.nova.cz/embed/";
 		}
 		
-		public NovaVoyoDRMResolver(DRMContext context, String url, Path output, MediaQuality quality) {
-			super(context, url, output, quality);
+		public NovaVoyoDRMResolver(DRMContext context, String url, Path output, Media media) {
+			super(context, url, output, media);
 		}
 		
 		@Override
@@ -173,7 +173,7 @@ public class NovaVoyoDRMEngine implements DRMEngine {
 			if(mimeType.equalsIgnoreCase("application/dash+xml")) {
 				// Select the quality we want
 				MPDQualityModifier modifier = MPDQualityModifier.fromString(content);
-				modifier.modify(quality);
+				modifier.modify(media.quality());
 				content = modifier.xml().html();
 			}
 			return content;

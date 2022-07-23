@@ -11,7 +11,7 @@ import org.cef.browser.CefFrame;
 import org.cef.network.CefCookie;
 import org.cef.network.CefCookieManager;
 
-import sune.app.mediadown.media.MediaQuality;
+import sune.app.mediadown.media.Media;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadownloader.drm.DRMBrowser;
 import sune.app.mediadownloader.drm.DRMContext;
@@ -25,9 +25,13 @@ import sune.util.ssdf2.SSDF;
 
 public class CeskaTelevizeDRMEngine implements DRMEngine {
 	
+	// Allow to create an instance when registering the engine
+	CeskaTelevizeDRMEngine() {
+	}
+	
 	@Override
-	public DRMResolver createResolver(DRMContext context, String url, Path output, MediaQuality quality) {
-		return new CTDRMResolver(context, url, output, quality);
+	public DRMResolver createResolver(DRMContext context, String url, Path output, Media media) {
+		return new CTDRMResolver(context, url, output, media);
 	}
 	
 	@Override
@@ -58,8 +62,8 @@ public class CeskaTelevizeDRMEngine implements DRMEngine {
 			URL_IFRAME = "https://www.ceskatelevize.cz/ivysilani/embed/iFramePlayer.php";
 		}
 		
-		public CTDRMResolver(DRMContext context, String url, Path output, MediaQuality quality) {
-			super(context, url, output, quality);
+		public CTDRMResolver(DRMContext context, String url, Path output, Media media) {
+			super(context, url, output, media);
 		}
 		
 		@Override
@@ -107,7 +111,7 @@ public class CeskaTelevizeDRMEngine implements DRMEngine {
 			} else if(mimeType.equalsIgnoreCase("application/dash+xml")) {
 				// Select the quality we want
 				MPDQualityModifier modifier = MPDQualityModifier.fromString(content);
-				modifier.modify(quality);
+				modifier.modify(media.quality());
 				content = modifier.xml().html();
 			}
 			return content;
