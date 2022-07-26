@@ -1,5 +1,6 @@
 package sune.app.mediadown.media_engine.novaplus;
 
+import java.net.SocketTimeoutException;
 import java.net.URI;
 import java.net.URL;
 import java.util.ArrayList;
@@ -202,8 +203,24 @@ public final class NovaPlusEngine implements MediaEngine {
 				String pageURL = Utils.format(URL_EPISODE_LIST,
 					"page", page, "offset", offset, "content", content,
 					"excluded", excluded);
-				String pageContent = Web.request(new GetRequest(Utils.url(pageURL), Shared.USER_AGENT, headers)).content;
-				if((pageContent == null)) continue;
+				String pageContent = null;
+				Exception timeoutException = null;
+				int ctr = 0;
+				int numOfRetries = 5;
+				
+				// Sometimes a timeout can occur, retry to obtain the content again if it is null
+				do {
+					try {
+						pageContent = Web.request(new GetRequest(Utils.url(pageURL), Shared.USER_AGENT, headers)).content;
+					} catch(SocketTimeoutException ex) {
+						timeoutException = ex;
+					}
+				} while(pageContent == null && ++ctr <= numOfRetries);
+				
+				// If even retried request timed out, just throw the exception
+				if(timeoutException != null) throw timeoutException;
+				
+				if(pageContent == null) continue;
 				Document doc = Utils.parseDocument(pageContent, Utils.baseURL(pageURL));
 				elItems = doc.select(SEL_EPISODES_ITEM);
 				++page;
