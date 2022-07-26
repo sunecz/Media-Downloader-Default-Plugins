@@ -96,7 +96,7 @@ public final class NovaPlusEngine implements MediaEngine {
 		String episodeText = streamInfo.getDirectString("programName", "");
 		int numSeason = streamInfo.getDirectInt("seasonNumber", 0);
 		int numEpisode = -1;
-		String episodeName = null;
+		String episodeName = ""; // Use empty string rather than null
 		Matcher matcher = REGEX_EPISODE.matcher(episodeText);
 		if(matcher.matches()) {
 			numEpisode = Integer.parseInt(matcher.group(1));
