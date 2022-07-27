@@ -102,11 +102,21 @@ public class CeskaTelevizeDRMEngine implements DRMEngine {
 		@Override
 		public String modifyResponse(String uri, String mimeType, Charset charset, String content) {
 			if(uri.contains("ivysilani/client-playlist/")) {
-				// Remove ads from the playlist JSON data, so the recording is not interrupted
 				SSDCollection json = SSDF.readJSON(content);
+				
+				// Remove ads from the playlist JSON data, so the recording is not interrupted
 				json.set("setup.vast.preRoll", SSDCollection.emptyArray());
 				json.set("setup.vast.midRoll", SSDCollection.emptyArray());
 				json.set("setup.vast.postRoll", SSDCollection.emptyArray());
+				
+				// Keep only VODs (the actual videos) in the playlist
+				SSDCollection newPlaylist = SSDCollection.emptyArray();
+				for(SSDCollection item : json.getDirectCollection("playlist").collectionsIterable()) {
+					String type = item.getDirectString("type");
+					if(type.equals("VOD")) newPlaylist.add(item);
+				}
+				json.set("playlist", newPlaylist);
+				
 				content = json.toJSON(true);
 			} else if(mimeType.equalsIgnoreCase("application/dash+xml")) {
 				// Select the quality we want
