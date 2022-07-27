@@ -347,8 +347,11 @@ final class IPrimaHelper {
 				if(elSeasons != null) {
 					for(Element elSeason : elSeasons.children()) {
 						// It is really only a season if there is number of episodes specified
-						// in the description.
-						if(elSeason.selectFirst(SELECTOR_SEASON_DESCRIPTION).text().trim().isEmpty())
+						// in the description. Apart from seasons, also include recently aired
+						// episodes. This will probably result in duplicates but it should not
+						// matter.
+						if(elSeason.selectFirst(SELECTOR_SEASON_DESCRIPTION).text().trim().isEmpty()
+								&& !Utils.urlBasename(elSeason.absUrl("href")).contains("nedavno-odvysilane"))
 							continue;
 						String seasonTitle = elSeason.selectFirst(SELECTOR_SEASON_TITLE).text().trim();
 						String seasonURL = Utils.urlFix(elSeason.attr("href"), true);
