@@ -329,7 +329,9 @@ public final class IPrimaEngine implements MediaEngine {
 		
 		@Override
 		public boolean isCompatibleSubdomain(String subdomain) {
-			return subdomain.equalsIgnoreCase(SUBDOMAIN);
+			// Some movies are on the www subdomain that is effectively the same subdomain as iprima,
+			// so we also have to handle that subdomain.
+			return subdomain.equalsIgnoreCase(SUBDOMAIN) || subdomain.equalsIgnoreCase("www");
 		}
 	}
 	
