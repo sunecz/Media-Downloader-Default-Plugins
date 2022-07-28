@@ -11,7 +11,7 @@ import sune.app.mediadown.util.Password;
 
 @Plugin(name          = "media_engine.iprima",
 	    title         = "plugin.media_engine.iprima.title",
-	    version       = "0016",
+	    version       = "0017",
 	    author        = "Sune",
 	    updateBaseURL = "https://app.sune.tech/mediadown/dat/plugin/0002/media_engine/iprima/",
 	    updatable     = true,
