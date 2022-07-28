@@ -143,9 +143,16 @@ public class NovaVoyoDRMEngine implements DRMEngine {
 		public void onLoadEnd(DRMBrowser browser, CefFrame frame, int httpStatusCode) {
 			if(frame.getURL().startsWith(url)) {
 				JS.Helper.include(frame);
-				// Bring the embedded iframe's content to the top of the stack context,
-				// so that we can work with it later.
-				JS.Helper.includeStyle(frame, ".iframe-wrap>iframe{z-index:2147483600!important;}");
+				// Hide unnecessary elements on the page so that we can safely click on the screen
+				// without worrying of clicking on a link, button etc.
+				StringBuilder style = new StringBuilder();
+				style.append(".modal-content>:not(.c-video-detail){display:none!important;}");
+				style.append(".c-modal-detail::after{content:none!important;}");
+				style.append(".c-video-detail>.content{display:none!important;}");
+				style.append(".c-video-detail>.img::after{content:none!important;}");
+				style.append(".c-video-detail>.img>.c-player-wrap>.heading{display:none!important;}");
+				style.append(".iframe-wrap>iframe{z-index:2147483600!important;}");
+				JS.Helper.includeStyle(frame, style.toString());
 			} else if(frame.getURL().startsWith(URL_IFRAME)) {
 				JS.Helper.include(frame);
 				JS.Helper.hideVideoElementStyle(frame);
