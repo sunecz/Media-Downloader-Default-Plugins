@@ -11,7 +11,7 @@ import sune.app.mediadown.plugin.PluginBase;
 	    author        = "Sune",
 	    updateBaseURL = "https://app.sune.tech/mediadown/dat/plugin/0002/media_engine/novaplus/",
 	    updatable     = true,
-	    url           = "https://novaplus.nova.cz",
+	    url           = "https://tv.nova.cz/",
 	    icon          = "resources/media_engine/novaplus/icon/novaplus.png")
 public final class NovaPlusEnginePlugin extends PluginBase {
 	

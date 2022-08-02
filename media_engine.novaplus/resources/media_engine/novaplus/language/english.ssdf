@@ -2,7 +2,7 @@
 	plugin: {
 		media_engine: {
 			novaplus: {
-				title: "NovaPlus"
+				title: "TV Nova"
 			}
 		}
 	}
