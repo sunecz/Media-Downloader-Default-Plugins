@@ -21,7 +21,6 @@ import java.util.Spliterator;
 import java.util.Spliterators;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -52,6 +51,7 @@ import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.JavaScript;
 import sune.app.mediadown.util.Opt;
 import sune.app.mediadown.util.Reflection;
+import sune.app.mediadown.util.Threads;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Web;
 import sune.app.mediadown.util.Web.GetRequest;
@@ -644,7 +644,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 	
 	private static abstract class ConcurrentLoop<T> {
 		
-		protected final ExecutorService executor = Executors.newWorkStealingPool();
+		protected final ExecutorService executor = Threads.Pools.newWorkStealing();
 		
 		protected abstract void iteration(T value) throws Exception;
 		

@@ -20,7 +20,6 @@ import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -54,6 +53,7 @@ import sune.app.mediadown.util.JavaScript;
 import sune.app.mediadown.util.Opt;
 import sune.app.mediadown.util.Reflection2;
 import sune.app.mediadown.util.Reflection3;
+import sune.app.mediadown.util.Threads;
 import sune.app.mediadown.util.TriFunction;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Web;
@@ -86,7 +86,7 @@ final class IPrimaHelper {
 	private static final HttpClient buildHttpClient() throws Exception {
 		return HttpClient.newBuilder()
 					.connectTimeout(Duration.ofMillis(5000))
-					.executor(Executors.newWorkStealingPool())
+					.executor(Threads.Pools.newWorkStealing())
 					.followRedirects(Redirect.NORMAL)
 					.cookieHandler(cookieManager.value())
 					.version(Version.HTTP_2)
@@ -1012,7 +1012,7 @@ final class IPrimaHelper {
 		private final AtomicReference<Exception> exception = new AtomicReference<>();
 		
 		public ThreadedSpawnableTaskQueue(int maxThreads) {
-			this.executor = Executors.newWorkStealingPool(maxThreads);
+			this.executor = Threads.Pools.newWorkStealing(maxThreads);
 		}
 		
 		private final Callable<R> newTask(P arg) {

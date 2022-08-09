@@ -24,7 +24,6 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -76,6 +75,7 @@ import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.JavaScript;
 import sune.app.mediadown.util.Reflection2;
 import sune.app.mediadown.util.Reflection3;
+import sune.app.mediadown.util.Threads;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Web;
 import sune.app.mediadown.util.WorkerProxy;
@@ -847,7 +847,7 @@ public final class TVBarrandovEngine implements MediaEngine {
 		private static final HttpClient buildHttpClient() throws Exception {
 			return HttpClient.newBuilder()
 						.connectTimeout(Duration.ofMillis(5000))
-						.executor(Executors.newWorkStealingPool())
+						.executor(Threads.Pools.newWorkStealing())
 						.followRedirects(Redirect.NORMAL)
 						.cookieHandler(cookieManager.value())
 						.version(Version.HTTP_2)
