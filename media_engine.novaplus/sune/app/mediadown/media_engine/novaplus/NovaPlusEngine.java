@@ -147,14 +147,11 @@ public final class NovaPlusEngine implements MediaEngine {
 	
 	private final int parseEpisodesPage(Program program, List<Episode> episodes, Document document, WorkerProxy proxy,
 			CheckedBiFunction<WorkerProxy, Episode, Boolean> function) throws Exception {
-		Elements elItems = document.select(SEL_EPISODES);
-		if(elItems != null
-				&& parseEpisodeList(program, episodes, elItems, proxy, function) == 2) {
-			return 1; // Do not continue
-		}
-		
 		Element elLoadMore = document.selectFirst(SEL_EPISODES_LOAD_MORE);
+		
+		// Check whether the load more button exists
 		if(elLoadMore != null) {
+			// If the button exists, load the episodes the dynamic way
 			String href = elLoadMore.absUrl("data-href");
 			Map<String, String> params = Utils.urlParams(href);
 			Map<String, String> excludedMap = params.entrySet().stream()
@@ -163,7 +160,6 @@ public final class NovaPlusEngine implements MediaEngine {
 			// The random variable is here due to caching issue, this should circumvent it
 			String random = "&rand=" + String.valueOf(Math.random() * 1000000.0);
 			String excluded = random + '&' + Utils.joinURLParams(excludedMap);
-			int page = Integer.valueOf(params.get("page"));
 			int offset = Integer.valueOf(params.get("offset"));
 			String content = params.get("content");
 			
@@ -174,12 +170,21 @@ public final class NovaPlusEngine implements MediaEngine {
 				"X-Requested-With", "XMLHttpRequest"
 			);
 			
+			// The offset can be negative, therefore we can use it to obtain the first page
+			// with non-filtered/altered content.
+			final int itemsPerPage = 6;
+			final int offsetShift = -itemsPerPage;
+			final int constPage = 2; // Must be > 1
+			
 			// Load episodes from other pages
-			elItems = null;
+			Elements elItems = null;
 			do {
 				String pageURL = Utils.format(URL_EPISODE_LIST,
-					"page", page, "offset", offset, "content", content,
-					"excluded", excluded);
+					"page",     constPage,
+					"offset",   offset + offsetShift,
+					"content",  content,
+					"excluded", excluded
+				);
 				String pageContent = null;
 				Exception timeoutException = null;
 				int ctr = 0;
@@ -187,6 +192,8 @@ public final class NovaPlusEngine implements MediaEngine {
 				
 				// Sometimes a timeout can occur, retry to obtain the content again if it is null
 				do {
+					timeoutException = null;
+					
 					try {
 						pageContent = Web.request(new GetRequest(Utils.url(pageURL), Shared.USER_AGENT, headers)).content;
 					} catch(SocketTimeoutException ex) {
@@ -201,9 +208,16 @@ public final class NovaPlusEngine implements MediaEngine {
 				Document doc = Utils.parseDocument(pageContent, Utils.baseURL(pageURL));
 				elItems = doc.select(SEL_EPISODES);
 				
-				++page;
-				offset += 5;
-			} while(elItems != null && parseEpisodeList(program, episodes, elItems, proxy, function) == 0);
+				offset += itemsPerPage;
+			} while(elItems != null
+						&& parseEpisodeList(program, episodes, elItems, proxy, function) == 0);
+		} else {
+			// If the butto does NOT exist, load the episodes from the document
+			Elements elItems = document.select(SEL_EPISODES);
+			if(elItems != null
+					&& parseEpisodeList(program, episodes, elItems, proxy, function) == 2) {
+				return 1; // Do not continue
+			}
 		}
 		
 		return 0;
