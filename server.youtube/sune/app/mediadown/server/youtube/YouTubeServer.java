@@ -691,6 +691,54 @@ public class YouTubeServer implements Server {
 				return extractLookupFunctionName(script, lookupName, index);
 			}
 			
+			// Fixed version of the Utils#stringBetween method. This method ignores
+			// chOpen and chClose that are inside quotes (double or single) so that
+			// it returns only correct results.
+			private static final Pair<Integer, Integer> stringBetween(String string, char chOpen, char chClose,
+					int start, int end) {
+				int count = 0;
+				boolean quotes = false;
+				int quotesChar = 0;
+				boolean escaped = false;
+				
+				for(int i = start, c; i < end; ++i) {
+					c = string.codePointAt(i);
+					
+					if(quotes) {
+						if(escaped) {
+							escaped = false;
+						} else if(c == '\\') {
+							escaped = true;
+						} else if(c == quotesChar) {
+							quotes = false;
+							quotesChar = 0;
+						}
+					} else if(c == '"' || c == '\'') {
+						quotes = true;
+						quotesChar = c;
+					} else if(c == chOpen) {
+						if(count == 0) {
+							start = i;
+						}
+						
+						++count;
+					} else if(c == chClose) {
+						--count;
+						
+						if(count == 0) {
+							return new Pair<>(start, i + 1);
+						}
+					}
+				}
+				
+				return new Pair<>(start, end);
+			}
+			
+			private static final String bracketSubstring(String string, char chOpen, char chClose, int start, int end) {
+				Pair<Integer, Integer> range = stringBetween(string, chOpen, chClose, start, end);
+				return string.substring(range.a, range.b);
+			}
+			
 			public static final Context extract(Document document) throws Exception {
 				String script = SignatureUtils.baseJSContent(document);
 				if(script == null) return null;
@@ -701,7 +749,7 @@ public class YouTubeServer implements Server {
 				int i = script.indexOf(functionName + "=function");
 				if(i < 0) return null;
 				int start = i + functionName.length() + 9;
-				String content = Utils.bracketSubstring(script, '{', '}', false, start, script.length());
+				String content = bracketSubstring(script, '{', '}', start, script.length());
 				
 				int fstart = i + functionName.length() + 1;
 				int fend = script.indexOf('{', fstart);
