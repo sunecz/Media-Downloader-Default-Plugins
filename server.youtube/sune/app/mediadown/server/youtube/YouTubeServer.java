@@ -700,9 +700,12 @@ public class YouTubeServer implements Server {
 				boolean quotes = false;
 				int quotesChar = 0;
 				boolean escaped = false;
+				boolean regex = false;
+				boolean regexCharClass = false;
 				
-				for(int i = start, c; i < end; ++i) {
+				for(int i = start, c, n, prev = 0; i < end; i += n, prev = c) {
 					c = string.codePointAt(i);
+					n = Character.charCount(c);
 					
 					if(quotes) {
 						if(escaped) {
@@ -712,6 +715,20 @@ public class YouTubeServer implements Server {
 						} else if(c == quotesChar) {
 							quotes = false;
 							quotesChar = 0;
+						}
+					} else if(regex) { // JS RegExp
+						if(escaped) {
+							escaped = false;
+						} else if(c == '\\') {
+							escaped = true;
+						} else if(regexCharClass) {
+							if(c == ']') {
+								regexCharClass = false;
+							}
+						} else if(c == '[') {
+							regexCharClass = true;
+						} else if(c == '/') {
+							regex = false;
 						}
 					} else if(c == '"' || c == '\'') {
 						quotes = true;
@@ -728,6 +745,9 @@ public class YouTubeServer implements Server {
 						if(count == 0) {
 							return new Pair<>(start, i + 1);
 						}
+					} else if(c == '/') { // JS RegExp
+						// This is a simplification but should suffice in most cases
+						regex = "(,=:[!&|?{};".indexOf(prev) >= 0;
 					}
 				}
 				
