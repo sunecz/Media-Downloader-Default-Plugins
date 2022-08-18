@@ -18,7 +18,7 @@ import sune.app.mediadown.Download;
 import sune.app.mediadown.MediaDownloader;
 import sune.app.mediadown.Shared;
 import sune.app.mediadown.convert.ConversionConfiguration;
-import sune.app.mediadown.download.AcceleratedDownloader;
+import sune.app.mediadown.download.AcceleratedSingleFileDownloader;
 import sune.app.mediadown.download.DownloadConfiguration;
 import sune.app.mediadown.download.IInternalDownloader;
 import sune.app.mediadown.download.IInternalListener;
@@ -91,8 +91,8 @@ public final class SimpleDownloader implements Download {
 		return (configuration.isSingleRequest()
 					? new SingleFileDownloader(manager)
 					: (configuration.isAccelerated()
-							? new AcceleratedDownloader(manager)
-							: new AcceleratedDownloader(manager, 1)
+							? new AcceleratedSingleFileDownloader(manager)
+							: new AcceleratedSingleFileDownloader(manager, 1)
 					  )
 			   );
 	}
