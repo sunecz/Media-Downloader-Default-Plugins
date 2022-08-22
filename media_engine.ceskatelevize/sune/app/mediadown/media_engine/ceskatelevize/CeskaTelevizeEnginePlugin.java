@@ -7,7 +7,7 @@ import sune.app.mediadown.plugin.PluginBase;
 
 @Plugin(name          = "media_engine.ceskatelevize",
 	    title         = "plugin.media_engine.ceskatelevize.title",
-	    version       = "0010",
+	    version       = "0011",
 	    author        = "Sune",
 	    updateBaseURL = "https://app.sune.tech/mediadown/dat/plugin/0002/media_engine/ceskatelevize/",
 	    updatable     = true,

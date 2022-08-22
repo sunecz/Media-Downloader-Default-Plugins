@@ -7,7 +7,7 @@ import sune.app.mediadown.plugin.PluginBase;
 
 @Plugin(name          = "media_engine.novaplus",
 	    title         = "plugin.media_engine.novaplus.title",
-	    version       = "0008",
+	    version       = "0009",
 	    author        = "Sune",
 	    updateBaseURL = "https://app.sune.tech/mediadown/dat/plugin/0002/media_engine/novaplus/",
 	    updatable     = true,
