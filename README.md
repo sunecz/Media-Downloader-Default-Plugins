@@ -12,6 +12,7 @@ Default plugins for Media Downloader.
 - [Autosalon.tv](https://autosalon.tv/)
 - [Primadoma.tv](https://primadoma.tv/)
 - [Voyo (Nova)](https://voyo.nova.cz/)
+- [Stream.cz](https://www.stream.cz/)
 
 ## Legal disclaimer
 These plugins are for educational purposes only. Downloading copyrighted materials from streaming services may violate their Terms of Service. **Use at your own risk.**
