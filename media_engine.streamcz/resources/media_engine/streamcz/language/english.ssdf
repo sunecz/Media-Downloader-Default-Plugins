@@ -1,0 +1,9 @@
+{
+	plugin: {
+		media_engine: {
+			streamcz: {
+				title: "Stream.cz"
+			}
+		}
+	}
+}

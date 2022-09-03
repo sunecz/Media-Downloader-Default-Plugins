@@ -17,6 +17,7 @@ module sune.app.mediadown.default_plugins {
 	exports sune.app.mediadown.media_engine.tvautosalon;
 	exports sune.app.mediadown.media_engine.tvprimadoma;
 	exports sune.app.mediadown.media_engine.novavoyo;
+	exports sune.app.mediadown.media_engine.streamcz;
 	exports sune.app.mediadown.server.html5;
 	exports sune.app.mediadown.server.youtube;
 	exports sune.app.mediadown.drm_engine.ceskatelevize;
