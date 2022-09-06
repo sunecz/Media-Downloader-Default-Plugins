@@ -183,7 +183,7 @@ public class NovaVoyoDRMEngine implements DRMEngine {
 					// Obtain the iframe element and get its URL
 					Element elIframe = document(Utils.uri(url)).selectFirst(".iframe-wrap iframe");
 					if(elIframe != null) {
-						embedUrl = Utils.removeURLData(elIframe.absUrl("src"));
+						embedUrl = elIframe.absUrl("src");
 					}
 				} catch(Exception ex) {
 					throw new IllegalStateException("Unable to obtain the video iframe", ex);
