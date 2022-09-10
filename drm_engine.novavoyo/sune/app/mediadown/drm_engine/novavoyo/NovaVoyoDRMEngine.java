@@ -181,7 +181,7 @@ public class NovaVoyoDRMEngine implements DRMEngine {
 					setCefCookies(url, savedCookies());
 					
 					// Obtain the iframe element and get its URL
-					Element elIframe = document(Utils.uri(url)).selectFirst(".iframe-wrap iframe");
+					Element elIframe = document(Utils.uri(url)).selectFirst(".js-detail-player .iframe-wrap iframe");
 					if(elIframe != null) {
 						embedUrl = elIframe.absUrl("src");
 					}
