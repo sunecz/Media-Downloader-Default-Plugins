@@ -147,7 +147,7 @@ public final class NovaVoyoServer implements Server {
 		
 		// Obtain the main iframe for the video
 		Document document = FastWeb.document(Utils.uri(url));
-		Element elIframe = document.selectFirst(".iframe-wrap iframe");
+		Element elIframe = document.selectFirst(".js-detail-player .iframe-wrap iframe");
 		if(elIframe == null)
 			return null;
 		
