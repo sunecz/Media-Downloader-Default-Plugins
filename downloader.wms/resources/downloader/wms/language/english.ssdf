@@ -9,7 +9,8 @@
 				configuration: {
 					fields: {
 						maxRetryAttempts: "Maximum number of retry attempts",
-						asyncTotalSize:   "Compute data stream size asynchronously"
+						asyncTotalSize:   "Compute data stream size asynchronously",
+						waitOnRetryMs:    "On retry wait for milliseconds"
 					}
 				},
 				prompts: {

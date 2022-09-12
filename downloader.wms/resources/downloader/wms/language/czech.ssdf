@@ -9,7 +9,8 @@
 				configuration: {
 					fields: {
 						maxRetryAttempts: "Maximální počet pokusů o opakování",
-						asyncTotalSize:   "Vypočítat velikost datového proudu asynchronně"
+						asyncTotalSize:   "Vypočítat velikost datového proudu asynchronně",
+						waitOnRetryMs:    "Při opakování počkat milisekund"
 					}
 				},
 				prompts: {
