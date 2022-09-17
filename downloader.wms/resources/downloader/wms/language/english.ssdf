@@ -4,19 +4,15 @@
 			wms: {
 				title: "Web Media Stream Downloader",
 				progress: {
-					compute_total_size: "Computing total size..."
+					compute_total_size: "Computing total size...",
+					retry_attempt:      "Retry attempt: %{attempt}d/%{total_attempts}d",
+					retry_attempt_wait: "Retry attempt: %{attempt}d/%{total_attempts}d. Waiting: %{time}s/%{total_time}s."
 				},
 				configuration: {
 					fields: {
 						maxRetryAttempts: "Maximum number of retry attempts",
 						asyncTotalSize:   "Compute data stream size asynchronously",
 						waitOnRetryMs:    "On retry wait for milliseconds"
-					}
-				},
-				prompts: {
-					retry_segment_download: {
-						title: "Retry download?",
-						text:  "A segment could not be downloaded. Do you want to retry its download?"
 					}
 				}
 			}
