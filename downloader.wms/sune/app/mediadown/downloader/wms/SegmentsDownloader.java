@@ -509,6 +509,13 @@ public final class SegmentsDownloader implements Download {
 							exception = ex;
 						}
 						
+						// Check whether the downloaded size equals the total size, if not
+						// just retry the download again.
+						long size = segment.size();
+						if(size >= 0L && downloadedBytes != size) {
+							error = true;
+						}
+						
 						if(error) {
 							if(downloadedBytes > 0L) {
 								downloadTracker.update(-downloadedBytes);
