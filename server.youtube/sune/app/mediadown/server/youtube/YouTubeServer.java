@@ -703,7 +703,7 @@ public class YouTubeServer implements Server {
 				boolean regex = false;
 				boolean regexCharClass = false;
 				
-				for(int i = start, c, n, prev = 0; i < end; i += n, prev = c) {
+				for(int i = start, c, n, prev = 0; i < end; i += n, prev = Character.isWhitespace(c) ? prev : c) {
 					c = string.codePointAt(i);
 					n = Character.charCount(c);
 					
