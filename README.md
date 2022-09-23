@@ -13,6 +13,7 @@ Default plugins for Media Downloader.
 - [Primadoma.tv](https://primadoma.tv/)
 - [Voyo (Nova)](https://voyo.nova.cz/)
 - [Stream.cz](https://www.stream.cz/)
+- [Archív Markíza](https://videoarchiv.markiza.sk/)
 
 ## Legal disclaimer
 These plugins are for educational purposes only. Downloading copyrighted materials from streaming services may violate their Terms of Service. **Use at your own risk.**
