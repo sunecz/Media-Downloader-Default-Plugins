@@ -8,7 +8,6 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
@@ -18,12 +17,13 @@ import sune.app.mediadown.Download;
 import sune.app.mediadown.MediaDownloader;
 import sune.app.mediadown.Shared;
 import sune.app.mediadown.convert.ConversionConfiguration;
-import sune.app.mediadown.download.AcceleratedSingleFileDownloader;
+import sune.app.mediadown.download.AcceleratedFileDownloader;
 import sune.app.mediadown.download.DownloadConfiguration;
-import sune.app.mediadown.download.IInternalDownloader;
-import sune.app.mediadown.download.IInternalListener;
+import sune.app.mediadown.download.DownloadResult;
+import sune.app.mediadown.download.InternalDownloader;
+import sune.app.mediadown.download.InternalState;
 import sune.app.mediadown.download.MediaDownloadConfiguration;
-import sune.app.mediadown.download.SingleFileDownloader;
+import sune.app.mediadown.download.TaskStates;
 import sune.app.mediadown.event.DownloadEvent;
 import sune.app.mediadown.event.EventRegistry;
 import sune.app.mediadown.event.EventType;
@@ -40,7 +40,6 @@ import sune.app.mediadown.media.MediaType;
 import sune.app.mediadown.media.MediaUtils;
 import sune.app.mediadown.media.SubtitlesMedia;
 import sune.app.mediadown.pipeline.DownloadPipelineResult;
-import sune.app.mediadown.util.EventUtils;
 import sune.app.mediadown.util.NIO;
 import sune.app.mediadown.util.Opt;
 import sune.app.mediadown.util.Pair;
@@ -52,7 +51,7 @@ import sune.app.mediadown.util.Web.GetRequest;
 import sune.app.mediadown.util.Web.HeadRequest;
 import sune.app.mediadown.util.Worker;
 
-public final class SimpleDownloader implements Download {
+public final class SimpleDownloader implements Download, DownloadResult {
 	
 	private static final Map<String, String> HEADERS = Web.headers("Accept=*/*");
 	
@@ -64,17 +63,14 @@ public final class SimpleDownloader implements Download {
 	private final Path dest;
 	private final MediaDownloadConfiguration configuration;
 	
-	private final AtomicBoolean running = new AtomicBoolean();
-	private final AtomicBoolean started = new AtomicBoolean();
-	private final AtomicBoolean done = new AtomicBoolean();
-	private final AtomicBoolean paused = new AtomicBoolean();
-	private final AtomicBoolean stopped = new AtomicBoolean();
+	private final InternalState state = new InternalState();
 	private final SyncObject lockPause = new SyncObject();
 	
 	private Worker worker;
 	private long size = MediaConstants.UNKNOWN_SIZE;
 	private DownloadPipelineResult pipelineResult;
-	private IInternalDownloader downloader;
+	private InternalDownloader downloader;
+	private DownloadTracker downloadTracker;
 	
 	SimpleDownloader(Media media, Path dest, MediaDownloadConfiguration configuration) {
 		this.media         = Objects.requireNonNull(media);
@@ -87,21 +83,15 @@ public final class SimpleDownloader implements Download {
 		int cmp; return (cmp = Integer.compare(b.length(), a.length())) == 0 ? 1 : cmp;
 	}
 	
-	private static final IInternalDownloader createDownloader(TrackerManager manager, DownloadConfiguration configuration) {
-		return (configuration.isSingleRequest()
-					? new SingleFileDownloader(manager)
-					: (configuration.isAccelerated()
-							? new AcceleratedSingleFileDownloader(manager)
-							: new AcceleratedSingleFileDownloader(manager, 1)
-					  )
-			   );
+	private static final InternalDownloader createDownloader(TrackerManager manager) {
+		return new AcceleratedFileDownloader(manager);
 	}
 	
 	private final boolean checkIfCanContinue() {
 		// Check if paused
 		if(isPaused()) lockPause.await();
 		// Check if running
-		return running.get();
+		return state.is(TaskStates.RUNNING);
 	}
 	
 	private final boolean computeTotalSize(List<MediaHolder> mediaHolders, List<MediaHolder> subtitles) {
@@ -168,12 +158,20 @@ public final class SimpleDownloader implements Download {
 	
 	@Override
 	public final void start() throws Exception {
-		if(running.get()) return; // Nothing to do
-		running.set(true);
-		started.set(true);
-		eventRegistry.call(DownloadEvent.BEGIN, this);
-		manager.setUpdateListener(() -> eventRegistry.call(DownloadEvent.UPDATE, new Pair<>(this, manager)));
+		if(state.is(TaskStates.RUNNING))
+			return; // Nothing to do
+		
+		state.set(TaskStates.RUNNING);
+		state.set(TaskStates.STARTED);
+		
+		TrackerManager dummyManager = new TrackerManager();
+		downloader = createDownloader(dummyManager);
+		dummyManager.setUpdateListener(() -> downloader.call(DownloadEvent.UPDATE, new Pair<>(downloader, dummyManager)));
+		
+		eventRegistry.call(DownloadEvent.BEGIN, downloader);
+		manager.setUpdateListener(() -> eventRegistry.call(DownloadEvent.UPDATE, new Pair<>(downloader, manager)));
 		Utils.ignore(() -> NIO.createFile(dest));
+		
 		List<MediaHolder> mediaHolders = MediaUtils.solids(media).stream()
 				.filter((m) -> m.type().is(MediaType.VIDEO) || m.type().is(MediaType.AUDIO))
 				.map(MediaHolder::new)
@@ -181,10 +179,15 @@ public final class SimpleDownloader implements Download {
 		List<MediaHolder> subtitles = configuration.selectedMedia(MediaType.SUBTITLES).stream()
 				.map(MediaHolder::new)
 				.collect(Collectors.toList());
+		
+		DownloadTracker localTracker = new DownloadTracker(-1L, false);
+		downloader.setTracker(localTracker);
+		
 		boolean sizeComputed = computeTotalSize(mediaHolders, subtitles);
 		if(!checkIfCanContinue()) return;
-		DownloadTracker tracker = new DownloadTracker(size, sizeComputed);
-		manager.setTracker(tracker);
+		
+		downloadTracker = new DownloadTracker(size, sizeComputed);
+		manager.setTracker(downloadTracker);
 		List<Path> tempFiles = new ArrayList<>(mediaHolders.size());
 		try {
 			String fileNameNoType = Utils.fileNameNoType(dest.getFileName().toString());
@@ -193,19 +196,18 @@ public final class SimpleDownloader implements Download {
 				Utils.ignore(() -> NIO.deleteFile(tempFile));
 				tempFiles.add(tempFile);
 			}
-			TrackerManager dummyManager = new TrackerManager();
-			downloader = createDownloader(dummyManager, DownloadConfiguration.getDefault());
-			downloader.setTracker(new DownloadTracker(-1L, false));
-			SD_IInternalListener internalListener = new SD_IInternalListener(tracker);
-			EventUtils.mapListeners(DownloadEvent.class, downloader, internalListener.toEventMapper());
-			dummyManager.setUpdateListener(() -> downloader.call(DownloadEvent.UPDATE, new Pair<>(this, dummyManager)));
+			
+			DownloadEventHandler handler = new DownloadEventHandler(downloadTracker);
+			downloader.addEventListener(DownloadEvent.BEGIN, handler::onBegin);
+			downloader.addEventListener(DownloadEvent.UPDATE, handler::onUpdate);
+			downloader.addEventListener(DownloadEvent.ERROR, handler::onError);
+			
 			Iterator<Path> tempFileIt = tempFiles.iterator();
 			for(MediaHolder mh : mediaHolders) {
-				if(!checkIfCanContinue())
-					break;
+				if(!checkIfCanContinue()) break;
 				Path tempFile = tempFileIt.next();
 				GetRequest request = new GetRequest(Utils.url(mh.media().uri()), Shared.USER_AGENT, HEADERS);
-				downloader.start(request, tempFile, this, mh.size());
+				downloader.start(request, tempFile, new DownloadConfiguration(mh.size()));
 			}
 			
 			if(!checkIfCanContinue()) return;
@@ -227,7 +229,7 @@ public final class SimpleDownloader implements Download {
 							+ (!subtitleType.isEmpty() ? '.' + subtitleType : "");
 					Path subDest = subtitlesDir.resolve(subtitleFileName);
 					GetRequest request = new GetRequest(Utils.url(sm.uri()), Shared.USER_AGENT, HEADERS);
-					downloader.start(request, subDest, this, subtitle.size());
+					downloader.start(request, subDest, new DownloadConfiguration(subtitle.size()));
 				}
 			}
 			
@@ -241,9 +243,10 @@ public final class SimpleDownloader implements Download {
 			} else {
 				doConversion(dest, Utils.toArray(tempFiles, Path.class));
 			}
-			done.set(true);
+			
+			state.set(TaskStates.DONE);
 		} catch(Exception ex) {
-			eventRegistry.call(DownloadEvent.ERROR, new Pair<>(this, ex));
+			eventRegistry.call(DownloadEvent.ERROR, new Pair<>(downloader, ex));
 			throw ex; // Forward the exception
 		} finally {
 			stop();
@@ -252,72 +255,104 @@ public final class SimpleDownloader implements Download {
 	
 	@Override
 	public final void stop() throws Exception {
-		if(stopped.get()) return; // Nothing to do
-		running.set(false);
-		paused .set(false);
+		if(state.is(TaskStates.STOPPED))
+			return; // Nothing to do
+		
+		state.unset(TaskStates.RUNNING);
+		state.unset(TaskStates.PAUSED);
 		lockPause.unlock();
-		if(downloader != null)
+		
+		if(downloader != null) {
 			downloader.stop();
-		if(worker != null)
+		}
+		
+		if(worker != null) {
 			worker.interrupt();
-		if(!done.get())
-			stopped.set(true);
-		eventRegistry.call(DownloadEvent.END, this);
+		}
+		
+		if(!state.is(TaskStates.DONE)) {
+			state.set(TaskStates.STOPPED);
+		}
+		
+		eventRegistry.call(DownloadEvent.END, downloader);
 	}
 	
 	@Override
 	public final void pause() throws Exception {
-		if(paused.get()) return; // Nothing to do
-		if(downloader != null)
+		if(state.is(TaskStates.PAUSED))
+			return; // Nothing to do
+		
+		if(downloader != null) {
 			downloader.pause();
-		if(worker != null)
+		}
+		
+		if(worker != null) {
 			worker.pause();
-		running.set(false);
-		paused .set(true);
-		eventRegistry.call(DownloadEvent.PAUSE, this);
+		}
+		
+		state.unset(TaskStates.RUNNING);
+		state.set(TaskStates.PAUSED);
+		
+		eventRegistry.call(DownloadEvent.PAUSE, downloader);
 	}
 	
 	@Override
 	public final void resume() throws Exception {
-		if(!paused.get()) return; // Nothing to do
-		if(downloader != null)
+		if(!state.is(TaskStates.PAUSED))
+			return; // Nothing to do
+		
+		if(downloader != null) {
 			downloader.resume();
-		if(worker != null)
+		}
+		
+		if(worker != null) {
 			worker.resume();
-		paused .set(false);
-		running.set(true);
+		}
+		
+		state.unset(TaskStates.PAUSED);
+		state.set(TaskStates.RUNNING);
 		lockPause.unlock();
-		eventRegistry.call(DownloadEvent.RESUME, this);
+		eventRegistry.call(DownloadEvent.RESUME, downloader);
 	}
 	
 	@Override
-	public DownloadPipelineResult getResult() {
+	public Download download() {
+		return this;
+	}
+	
+	@Override
+	public DownloadPipelineResult pipelineResult() {
 		return pipelineResult;
 	}
 	
 	@Override
 	public final boolean isRunning() {
-		return running.get();
+		return state.is(TaskStates.RUNNING);
 	}
 	
 	@Override
 	public final boolean isStarted() {
-		return started.get();
+		return state.is(TaskStates.STARTED);
 	}
 	
 	@Override
 	public final boolean isDone() {
-		return done.get();
+		return state.is(TaskStates.DONE);
 	}
 	
 	@Override
 	public final boolean isPaused() {
-		return paused.get();
+		return state.is(TaskStates.PAUSED);
 	}
 	
 	@Override
 	public final boolean isStopped() {
-		return stopped.get();
+		return state.is(TaskStates.STOPPED);
+	}
+	
+	@Override
+	public boolean isError() {
+		return state.is(TaskStates.ERROR);
 	}
 	
 	@Override
@@ -330,47 +365,30 @@ public final class SimpleDownloader implements Download {
 		eventRegistry.remove(type, listener);
 	}
 	
-	private final class SD_IInternalListener implements IInternalListener {
+	private final class DownloadEventHandler {
 		
 		private final DownloadTracker tracker;
 		private long lastSize;
 		
-		public SD_IInternalListener(DownloadTracker tracker) {
-			this.tracker = tracker;
+		public DownloadEventHandler(DownloadTracker tracker) {
+			this.tracker = Objects.requireNonNull(tracker);
 		}
 		
-		@Override
-		public <E> Listener<E> beginListener() {
-			return ((o) -> {
-				lastSize = 0L;
-			});
+		public void onBegin(InternalDownloader downloader) {
+			lastSize = 0L;
 		}
 		
-		@Override
-		public <E> Listener<E> updateListener() {
-			return ((o) -> {
-				@SuppressWarnings("unchecked")
-				Pair<Download, TrackerManager> pair = (Pair<Download, TrackerManager>) o;
-				DownloadTracker downloadTracker = (DownloadTracker) pair.b.getTracker();
-				long current = downloadTracker.getCurrent();
-				long delta   = current - lastSize;
-				lastSize     = current;
-				tracker.update(delta);
-			});
+		public void onUpdate(Pair<InternalDownloader, TrackerManager> pair) {
+			DownloadTracker downloadTracker = (DownloadTracker) pair.b.getTracker();
+			long current = downloadTracker.getCurrent();
+			long delta = current - lastSize;
+			
+			tracker.update(delta);
+			lastSize = current;
 		}
 		
-		@Override
-		public <E> Listener<E> endListener() {
-			return ((o) -> {});
-		}
-		
-		@Override
-		public <E> Listener<E> errorListener() {
-			return ((o) -> {
-				@SuppressWarnings("unchecked")
-				Pair<Download, Exception> pair = (Pair<Download, Exception>) o;
-				eventRegistry.call(DownloadEvent.ERROR, pair);
-			});
+		public void onError(Pair<InternalDownloader, Exception> pair) {
+			eventRegistry.call(DownloadEvent.ERROR, pair);
 		}
 	}
 	
