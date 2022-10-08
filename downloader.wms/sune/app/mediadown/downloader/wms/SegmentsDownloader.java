@@ -34,11 +34,13 @@ import sune.app.mediadown.Download;
 import sune.app.mediadown.MediaDownloader;
 import sune.app.mediadown.Shared;
 import sune.app.mediadown.convert.ConversionConfiguration;
-import sune.app.mediadown.download.IInternalDownloader;
-import sune.app.mediadown.download.IInternalListener;
+import sune.app.mediadown.download.DownloadConfiguration;
+import sune.app.mediadown.download.DownloadResult;
+import sune.app.mediadown.download.FileDownloader;
+import sune.app.mediadown.download.InternalDownloader;
+import sune.app.mediadown.download.InternalState;
 import sune.app.mediadown.download.MediaDownloadConfiguration;
-import sune.app.mediadown.download.SingleFileDownloader;
-import sune.app.mediadown.download.SingleFileDownloaderConfiguration;
+import sune.app.mediadown.download.TaskStates;
 import sune.app.mediadown.download.segment.FileSegment;
 import sune.app.mediadown.download.segment.FileSegmentsHolder;
 import sune.app.mediadown.event.DownloadEvent;
@@ -62,7 +64,6 @@ import sune.app.mediadown.media.SubtitlesMedia;
 import sune.app.mediadown.media.VideoMediaBase;
 import sune.app.mediadown.pipeline.DownloadPipelineResult;
 import sune.app.mediadown.util.CheckedSupplier;
-import sune.app.mediadown.util.EventUtils;
 import sune.app.mediadown.util.FXUtils;
 import sune.app.mediadown.util.NIO;
 import sune.app.mediadown.util.Opt;
@@ -77,7 +78,7 @@ import sune.app.mediadown.util.Web;
 import sune.app.mediadown.util.Web.GetRequest;
 import sune.app.mediadown.util.Worker;
 
-public final class SegmentsDownloader implements Download {
+public final class SegmentsDownloader implements Download, DownloadResult {
 	
 	private static final Map<String, String> HEADERS = Web.headers("Accept=*/*");
 	
@@ -91,18 +92,14 @@ public final class SegmentsDownloader implements Download {
 	private final int maxRetryAttempts;
 	private final boolean asyncTotalSize;
 	
-	private final AtomicBoolean running = new AtomicBoolean();
-	private final AtomicBoolean started = new AtomicBoolean();
-	private final AtomicBoolean done = new AtomicBoolean();
-	private final AtomicBoolean paused = new AtomicBoolean();
-	private final AtomicBoolean stopped = new AtomicBoolean();
+	private final InternalState state = new InternalState();
 	private final SyncObject lockPause = new SyncObject();
 	
 	private TotalSizeComputer totalSizeComputer;
 	private boolean updateRemoteFileSizes;
 	private final AtomicLong size = new AtomicLong(MediaConstants.UNKNOWN_SIZE);
 	private DownloadPipelineResult pipelineResult;
-	private IInternalDownloader downloader;
+	private InternalDownloader downloader;
 	private DownloadTracker downloadTracker;
 	
 	private static final ConcurrentVarLazyLoader<CookieManager> cookieManager
@@ -240,7 +237,7 @@ public final class SegmentsDownloader implements Download {
 		if(isPaused())
 			lockPause.await();
 		// If already not running, do not continue
-		return running.get();
+		return state.is(TaskStates.RUNNING);
 	}
 	
 	private final void doConversion(Path dest, double duration, Path... inputs) {
@@ -255,8 +252,8 @@ public final class SegmentsDownloader implements Download {
 		pipelineResult = DownloadPipelineResult.doConversion(configuration, formatIn, formatOut, output, inputs);
 	}
 	
-	private final IInternalDownloader createDownloader(TrackerManager manager) {
-		return new SingleFileDownloader(manager, new SingleFileDownloaderConfiguration(true, true));
+	private final InternalDownloader createDownloader(TrackerManager manager) {
+		return new FileDownloader(manager);
 	}
 	
 	private final boolean showRetrySegmentDownloadPromptDialog() {
@@ -296,11 +293,18 @@ public final class SegmentsDownloader implements Download {
 	
 	@Override
 	public final void start() throws Exception {
-		if(running.get()) return; // Nothing to do
-		running.set(true);
-		started.set(true);
-		eventRegistry.call(DownloadEvent.BEGIN, this);
-		manager.setUpdateListener(() -> eventRegistry.call(DownloadEvent.UPDATE, new Pair<>(this, manager)));
+		if(state.is(TaskStates.RUNNING))
+			return; // Nothing to do
+		
+		state.set(TaskStates.RUNNING);
+		state.set(TaskStates.STARTED);
+		
+		TrackerManager dummyManager = new TrackerManager();
+		downloader = createDownloader(dummyManager);
+		dummyManager.setUpdateListener(() -> downloader.call(DownloadEvent.UPDATE, new Pair<>(downloader, dummyManager)));
+		
+		eventRegistry.call(DownloadEvent.BEGIN, downloader);
+		manager.setUpdateListener(() -> eventRegistry.call(DownloadEvent.UPDATE, new Pair<>(downloader, manager)));
 		Utils.ignore(() -> NIO.createFile(dest));
 		
 		// Prepare the segments that should be downloaded
@@ -329,6 +333,8 @@ public final class SegmentsDownloader implements Download {
 				.collect(Collectors.toMap(RemoteFile::value, Function.identity()));
 		
 		TotalUpdateNotifyDownloadTracker notifyTracker = new TotalUpdateNotifyDownloadTracker();
+		downloader.setTracker(notifyTracker);
+		
 		boolean sizeComputed = computeTotalSize(segments, subtitles);
 		if(!checkIfCanContinue()) return;
 		
@@ -343,17 +349,17 @@ public final class SegmentsDownloader implements Download {
 				tempFiles.add(tempFile);
 			}
 			
-			SD_IInternalListener internalListener = new SD_IInternalListener(downloadTracker);
-			TrackerManager dummyManager = new TrackerManager();
-			downloader = createDownloader(dummyManager);
-			downloader.setTracker(notifyTracker);
-			EventUtils.mapListeners(DownloadEvent.class, downloader, internalListener.toEventMapper());
-			dummyManager.setUpdateListener(() -> downloader.call(DownloadEvent.UPDATE, new Pair<>(this, dummyManager)));
+			DownloadEventHandler handler = new DownloadEventHandler(downloadTracker);
+			downloader.addEventListener(DownloadEvent.UPDATE, handler::onUpdate);
+			downloader.addEventListener(DownloadEvent.ERROR, handler::onError);
+			
+			DownloadConfiguration downloadConfiguration = DownloadConfiguration.ofDefault();
 			Iterator<Path> tempFileIt = tempFiles.iterator();
 			
 			// Download the segments
 			for(FileSegmentsHolder<?> segmentsHolder : segmentsHolders) {
 				if(!checkIfCanContinue()) break;
+				
 				Path tempFile = tempFileIt.next();
 				long bytes = 0L;
 				for(FileSegment segment : segmentsHolder.segments()) {
@@ -367,10 +373,11 @@ public final class SegmentsDownloader implements Download {
 					do {
 						for(int i = 0; downloadedBytes <= 0L && i <= maxRetryAttempts; ++i) {
 							lastAttempt = i == maxRetryAttempts;
-							internalListener.setPropagateError(lastAttempt);
-							downloadedBytes = downloader.start(request, tempFile, this, segment.size(),
-								new Range<>(0L, -1L), new Range<>(bytes, -1L));
+							handler.setPropagateError(lastAttempt);
+							downloadedBytes = downloader.start(request, tempFile,
+								new DownloadConfiguration(new Range<>(bytes, -1L), new Range<>(0L, -1L), segment.size()));
 						}
+						
 						// If even the last attempt failed, ask the user whether the download should be retried again.
 						if(lastAttempt && downloadedBytes <= 0L) {
 							shouldRetry = FXUtils.fxTaskValue(this::showRetrySegmentDownloadPromptDialog);
@@ -381,8 +388,9 @@ public final class SegmentsDownloader implements Download {
 						bytes += downloadedBytes;
 					}
 				}
+				
 				// Allow error propagating since there will be no more retry attempts
-				internalListener.setPropagateError(true);
+				handler.setPropagateError(true);
 			}
 			
 			if(!checkIfCanContinue()) return;
@@ -405,7 +413,7 @@ public final class SegmentsDownloader implements Download {
 							+ (!subtitleType.isEmpty() ? '.' + subtitleType : "");
 					Path subDest = subtitlesDir.resolve(subtitleFileName);
 					GetRequest request = new GetRequest(Utils.url(sm.uri()), Shared.USER_AGENT, HEADERS);
-					downloader.start(request, subDest, this);
+					downloader.start(request, subDest, downloadConfiguration);
 				}
 			}
 			
@@ -416,9 +424,9 @@ public final class SegmentsDownloader implements Download {
 					.max().orElse(Double.NaN);
 			// Convert the segments files into the final file
 			doConversion(dest, duration, Utils.toArray(tempFiles, Path.class));
-			done.set(true);
+			state.set(TaskStates.DONE);
 		} catch(Exception ex) {
-			eventRegistry.call(DownloadEvent.ERROR, new Pair<>(this, ex));
+			eventRegistry.call(DownloadEvent.ERROR, new Pair<>(downloader, ex));
 			throw ex; // Forward the exception
 		} finally {
 			stop();
@@ -427,72 +435,103 @@ public final class SegmentsDownloader implements Download {
 	
 	@Override
 	public final void stop() throws Exception {
-		if(stopped.get()) return; // Nothing to do
-		running.set(false);
-		paused .set(false);
+		if(state.is(TaskStates.STOPPED))
+			return; // Nothing to do
+		
+		state.unset(TaskStates.RUNNING);
+		state.unset(TaskStates.PAUSED);
 		lockPause.unlock();
-		if(downloader != null)
+		
+		if(downloader != null) {
 			downloader.stop();
-		if(totalSizeComputer != null)
+		}
+		
+		if(totalSizeComputer != null) {
 			totalSizeComputer.stop();
-		if(!done.get())
-			stopped.set(true);
-		eventRegistry.call(DownloadEvent.END, this);
+		}
+		
+		if(!state.is(TaskStates.DONE)) {
+			state.set(TaskStates.STOPPED);
+		}
+		
+		eventRegistry.call(DownloadEvent.END, downloader);
 	}
 	
 	@Override
 	public final void pause() throws Exception {
-		if(paused.get()) return; // Nothing to do
-		if(downloader != null)
+		if(state.is(TaskStates.PAUSED))
+			return; // Nothing to do
+		
+		if(downloader != null) {
 			downloader.pause();
-		if(totalSizeComputer != null)
+		}
+		
+		if(totalSizeComputer != null) {
 			totalSizeComputer.pause();
-		running.set(false);
-		paused .set(true);
-		eventRegistry.call(DownloadEvent.PAUSE, this);
+		}
+		
+		state.unset(TaskStates.RUNNING);
+		state.set(TaskStates.PAUSED);
+		eventRegistry.call(DownloadEvent.PAUSE, downloader);
 	}
 	
 	@Override
 	public final void resume() throws Exception {
-		if(!paused.get()) return; // Nothing to do
-		if(downloader != null)
+		if(!state.is(TaskStates.PAUSED))
+			return; // Nothing to do
+		
+		if(downloader != null) {
 			downloader.resume();
-		if(totalSizeComputer != null)
+		}
+		
+		if(totalSizeComputer != null) {
 			totalSizeComputer.resume();
-		paused .set(false);
-		running.set(true);
+		}
+		
+		state.unset(TaskStates.PAUSED);
+		state.set(TaskStates.RUNNING);
 		lockPause.unlock();
-		eventRegistry.call(DownloadEvent.RESUME, this);
+		eventRegistry.call(DownloadEvent.RESUME, downloader);
 	}
 	
 	@Override
-	public DownloadPipelineResult getResult() {
+	public Download download() {
+		return this;
+	}
+	
+	@Override
+	public DownloadPipelineResult pipelineResult() {
 		return pipelineResult;
 	}
 	
 	@Override
 	public final boolean isRunning() {
-		return running.get();
+		return state.is(TaskStates.RUNNING);
 	}
 	
 	@Override
 	public final boolean isStarted() {
-		return started.get();
+		return state.is(TaskStates.STARTED);
 	}
 	
 	@Override
 	public final boolean isDone() {
-		return done.get();
+		return state.is(TaskStates.DONE);
 	}
 	
 	@Override
 	public final boolean isPaused() {
-		return paused.get();
+		return state.is(TaskStates.PAUSED);
 	}
 	
 	@Override
 	public final boolean isStopped() {
-		return stopped.get();
+		return state.is(TaskStates.STOPPED);
+	}
+	
+	@Override
+	public boolean isError() {
+		return state.is(TaskStates.ERROR);
 	}
 	
 	@Override
@@ -505,50 +544,33 @@ public final class SegmentsDownloader implements Download {
 		eventRegistry.remove(type, listener);
 	}
 	
-	private final class SD_IInternalListener implements IInternalListener {
+	private final class DownloadEventHandler {
 		
 		private final DownloadTracker tracker;
 		private final AtomicLong lastSize = new AtomicLong();
 		private boolean propagateError = true;
 		
-		public SD_IInternalListener(DownloadTracker tracker) {
-			this.tracker = tracker;
+		public DownloadEventHandler(DownloadTracker tracker) {
+			this.tracker = Objects.requireNonNull(tracker);
 		}
 		
-		@Override
-		public <E> Listener<E> beginListener() {
-			return ((o) -> {});
+		public void onUpdate(Pair<InternalDownloader, TrackerManager> pair) {
+			DownloadTracker downloadTracker = (DownloadTracker) pair.b.getTracker();
+			long current = downloadTracker.getCurrent();
+			long delta = current - lastSize.get();
+			
+			tracker.update(delta);
+			lastSize.set(current);
 		}
 		
-		@Override
-		public <E> Listener<E> updateListener() {
-			return ((o) -> {
-				@SuppressWarnings("unchecked")
-				Pair<Download, TrackerManager> pair = (Pair<Download, TrackerManager>) o;
-				DownloadTracker downloadTracker = (DownloadTracker) pair.b.getTracker();
-				long current = downloadTracker.getCurrent();
-				long delta   = current - lastSize.get();
-				tracker.update(delta);
-				lastSize.set(current);
-			});
+		public void onError(Pair<InternalDownloader, Exception> pair) {
+			if(!propagateError)
+				return; // Ignore the error, if needed (used for retries)
+			
+			eventRegistry.call(DownloadEvent.ERROR, pair);
 		}
 		
-		@Override
-		public <E> Listener<E> endListener() {
-			return ((o) -> {});
-		}
-		
-		@Override
-		public <E> Listener<E> errorListener() {
-			return ((o) -> {
-				if(!propagateError) return; // Ignore the error, if needed (used for retries)
-				@SuppressWarnings("unchecked")
-				Pair<Download, Exception> pair = (Pair<Download, Exception>) o;
-				eventRegistry.call(DownloadEvent.ERROR, pair);
-			});
-		}
-		
-		public final void setPropagateError(boolean value) {
+		public void setPropagateError(boolean value) {
 			propagateError = value;
 		}
 	}

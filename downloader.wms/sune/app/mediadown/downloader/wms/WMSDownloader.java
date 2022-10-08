@@ -2,7 +2,7 @@ package sune.app.mediadown.downloader.wms;
 
 import java.nio.file.Path;
 
-import sune.app.mediadown.Download;
+import sune.app.mediadown.download.DownloadResult;
 import sune.app.mediadown.download.Downloader;
 import sune.app.mediadown.download.MediaDownloadConfiguration;
 import sune.app.mediadown.media.Media;
@@ -24,7 +24,7 @@ public final class WMSDownloader implements Downloader {
 	}
 	
 	@Override
-	public Download download(Media media, Path destination, MediaDownloadConfiguration configuration)
+	public DownloadResult download(Media media, Path destination, MediaDownloadConfiguration configuration)
 			throws Exception {
 		PluginConfiguration pluginConfiguration = PLUGIN.getContext().getConfiguration();
 		return new SegmentsDownloader(media, destination, configuration,
