@@ -14,16 +14,16 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import sune.app.mediadown.Download;
+import sune.app.mediadown.InternalState;
 import sune.app.mediadown.MediaDownloader;
 import sune.app.mediadown.Shared;
+import sune.app.mediadown.TaskStates;
 import sune.app.mediadown.convert.ConversionConfiguration;
 import sune.app.mediadown.download.AcceleratedFileDownloader;
 import sune.app.mediadown.download.DownloadConfiguration;
 import sune.app.mediadown.download.DownloadResult;
 import sune.app.mediadown.download.InternalDownloader;
-import sune.app.mediadown.download.InternalState;
 import sune.app.mediadown.download.MediaDownloadConfiguration;
-import sune.app.mediadown.download.TaskStates;
 import sune.app.mediadown.event.DownloadEvent;
 import sune.app.mediadown.event.EventRegistry;
 import sune.app.mediadown.event.EventType;

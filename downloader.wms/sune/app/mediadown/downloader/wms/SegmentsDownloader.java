@@ -31,16 +31,16 @@ import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
 import sune.app.mediadown.Download;
+import sune.app.mediadown.InternalState;
 import sune.app.mediadown.MediaDownloader;
 import sune.app.mediadown.Shared;
+import sune.app.mediadown.TaskStates;
 import sune.app.mediadown.convert.ConversionConfiguration;
 import sune.app.mediadown.download.DownloadConfiguration;
 import sune.app.mediadown.download.DownloadResult;
 import sune.app.mediadown.download.FileDownloader;
 import sune.app.mediadown.download.InternalDownloader;
-import sune.app.mediadown.download.InternalState;
 import sune.app.mediadown.download.MediaDownloadConfiguration;
-import sune.app.mediadown.download.TaskStates;
 import sune.app.mediadown.download.segment.FileSegment;
 import sune.app.mediadown.download.segment.FileSegmentsHolder;
 import sune.app.mediadown.event.DownloadEvent;
