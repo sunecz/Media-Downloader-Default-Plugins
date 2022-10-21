@@ -274,26 +274,53 @@ final class IPrimaHelper {
 			return season;
 		}
 		
+		private final Episode parseEpisodeElement(Element elEpisode, Program program, String seasonTitle) {
+			// Only add free episodes (those with no price tag)
+			if(elEpisode.selectFirst(SELECTOR_PRICE_WRAPPER) != null)
+				return null;
+			
+			Element elEpisodeLink = elEpisode.selectFirst(SELECTOR_EPISODE_LINK);
+			// Sometimes an episode is not playable due to e.g. licensing, just skip it
+			if(elEpisodeLink == null) return null;
+			
+			String episodeURL = Utils.urlFix(elEpisodeLink.attr("href"), true);
+			String episodeTitle = elEpisodeLink.attr("title");
+			String episodeSeasonTitle = seasonTitle == null ? getEpisodeSeasonTitle(elEpisode) : seasonTitle;
+			
+			if(episodeSeasonTitle != null) {
+				episodeTitle = Utils.format(FORMAT_EPISODE_TITLE, "season", episodeSeasonTitle, "episode",
+				                            elEpisodeLink.attr("title"));
+			}
+			
+			return new Episode(program, Utils.uri(episodeURL), episodeTitle);
+		}
+		
+		private final Episode parseEpisodeArticleElement(Element elEpisode, Program program) {
+			Element elEpisodeLink = elEpisode.selectFirst(SELECTOR_EPISODE_LINK);
+			// Sometimes an episode is not playable due to e.g. licensing, just skip it
+			if(elEpisodeLink == null) return null;
+			
+			String episodeURL = Utils.urlFix(elEpisodeLink.attr("href"), true);
+			String episodeTitle = elEpisode.selectFirst("h4").text();
+			String episodeSeasonTitle = getEpisodeSeasonTitle(elEpisode);
+			
+			if(episodeSeasonTitle != null) {
+				episodeTitle = Utils.format(FORMAT_EPISODE_TITLE, "season", episodeSeasonTitle, "episode",
+				                            elEpisodeLink.attr("title"));
+			}
+			
+			return new Episode(program, Utils.uri(episodeURL), episodeTitle);
+		}
+		
 		private final boolean getEpisodesFromDocument(Program program, Document document, String seasonTitle,
 		        CheckedFunction<Episode, Boolean> functionAddToList) throws Exception {
 			for(Element elEpisode : document.select(SELECTOR_EPISODE)) {
-				// Only add free episodes (those with no price tag)
-				if(elEpisode.selectFirst(SELECTOR_PRICE_WRAPPER) != null)
-					continue;
-				Element elEpisodeLink = elEpisode.selectFirst(SELECTOR_EPISODE_LINK);
-				// Sometimes an episode is not playable due to e.g. licensing, just skip it
-				if(elEpisodeLink == null) continue;
-				String episodeTitle = elEpisodeLink.attr("title");
-				String episodeSeasonTitle = seasonTitle == null ? getEpisodeSeasonTitle(elEpisode) : seasonTitle;
-				if(episodeSeasonTitle != null) {
-					episodeTitle = Utils.format(FORMAT_EPISODE_TITLE, "season", episodeSeasonTitle, "episode",
-					                            elEpisodeLink.attr("title"));
-				}
-				String episodeURL = Utils.urlFix(elEpisodeLink.attr("href"), true);
-				Episode episode = new Episode(program, Utils.uri(episodeURL), episodeTitle);
-				if(!functionAddToList.apply(episode))
+				Episode episode = parseEpisodeElement(elEpisode, program, seasonTitle);
+				
+				if(episode != null && !functionAddToList.apply(episode))
 					return false; // Do not continue
 			}
+			
 			return true;
 		}
 		
@@ -326,14 +353,17 @@ final class IPrimaHelper {
 			if(id == null || id.isEmpty())
 				// Cannot do anything without an ID
 				return null;
+			
 			List<Episode> episodes = new ArrayList<>();
 			CheckedFunction<Episode, Boolean> listAdder = ((episode) -> {
 				return internal_listAdder(proxy, function, episodes, episode);
 			});
+			
 			// Check for movies, they do not have any episodes
 			if(program.get("type").equals("VideoNode")) {
 				// Nothing to do, just set the program information
 				Episode episode = new Episode(program, program.uri(), program.title());
+				
 				if(!listAdder.apply(episode))
 					return null;
 			} else {
@@ -344,6 +374,7 @@ final class IPrimaHelper {
 				Document document = Utils.document(program.uri());
 				// First check if there are any seasons present
 				Element elSeasons = document.selectFirst(SELECTOR_SEASONS);
+				
 				if(elSeasons != null) {
 					for(Element elSeason : elSeasons.children()) {
 						// It is really only a season if there is number of episodes specified
@@ -353,9 +384,11 @@ final class IPrimaHelper {
 						if(elSeason.selectFirst(SELECTOR_SEASON_DESCRIPTION).text().trim().isEmpty()
 								&& !Utils.urlBasename(elSeason.absUrl("href")).contains("nedavno-odvysilane"))
 							continue;
+						
 						String seasonTitle = elSeason.selectFirst(SELECTOR_SEASON_TITLE).text().trim();
 						String seasonURL = Utils.urlFix(elSeason.attr("href"), true);
 						Document seasonDocument = Utils.document(seasonURL);
+						
 						// Extract all the episodes from the season document
 						if(!getEpisodesFromDocument(program, seasonDocument, seasonTitle, listAdder))
 							return null;
@@ -363,14 +396,29 @@ final class IPrimaHelper {
 				} else {
 					IPrima iprima = program.get("source");
 					Set<Wrapper<Episode>> accumulator = new ConcurrentSkipListSet<>();
+					
 					// If there are no seasons, we can get all the episodes traditionally,
 					// i.e. the request loop way.
 					internal_loopOffsetThreaded(iprima, program, 0, 16, Utils.toMap("id", id, "type", TYPE_EPISODES),
 						this::urlBuilderIPrimaAPI, this::callback, EpisodeWrapper::new, accumulator);
+					
 					// Add all obtained episodes from the accumulator manually
 					for(Wrapper<Episode> ep : accumulator) listAdder.apply(ep.value());
+					
+					// If there are still no episodes present, try to extract them from
+					// the document of the program.
+					if(accumulator.isEmpty()) {
+						for(Element elEpisode : document.select("#episodes-movie-holder > article")) {
+							Episode episode = parseEpisodeArticleElement(elEpisode, program);
+							
+							if(episode != null) {
+								listAdder.apply(episode);
+							}
+						}
+					}
 				}
 			}
+			
 			return episodes;
 		}
 	}
