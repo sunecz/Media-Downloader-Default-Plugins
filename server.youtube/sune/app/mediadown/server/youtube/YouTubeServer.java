@@ -505,6 +505,8 @@ public class YouTubeServer implements Server {
 					}
 					
 					urlArgs.put("n", deciphered);
+					urlArgs.put("ratebypass", "yes");
+					
 					String urlBase = videoURL.substring(0, videoURL.indexOf('?'));
 					videoURL = urlBase + '?' + Utils.joinURLParams(urlArgs);
 				}
