@@ -273,6 +273,7 @@ public class YouTubeServer implements Server {
 		
 		// Why this number? See: https://tyrrrz.me/blog/reverse-engineering-youtube
 		private static final long SEGMENT_SIZE = 10L * 1024L * 1024L; // 10 MiB
+		private static final double MS_TO_SECONDS = 1e-3;
 		
 		private static final Pattern REGEX_OTF_SEGMENTS = Pattern.compile(
 			"Segment-Count: (\\d+)\\s+Segment-Durations-Ms: ((?:\\d+(?:\\(r=\\d+\\))?,)+)"
@@ -293,7 +294,7 @@ public class YouTubeServer implements Server {
 			String strRepeat = matcher.group(2);
 			int repeat = strRepeat == null ? 1 : Integer.valueOf(strRepeat) + 1;
 			
-			return duration * repeat;
+			return (duration * repeat) * MS_TO_SECONDS;
 		}
 		
 		public static final FileSegmentsHolder<? extends FileSegment> buildSegments(String url) throws Exception {
