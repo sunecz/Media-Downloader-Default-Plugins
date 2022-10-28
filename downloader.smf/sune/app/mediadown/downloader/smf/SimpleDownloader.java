@@ -25,8 +25,8 @@ import sune.app.mediadown.download.DownloadResult;
 import sune.app.mediadown.download.InternalDownloader;
 import sune.app.mediadown.download.MediaDownloadConfiguration;
 import sune.app.mediadown.event.DownloadEvent;
+import sune.app.mediadown.event.Event;
 import sune.app.mediadown.event.EventRegistry;
-import sune.app.mediadown.event.EventType;
 import sune.app.mediadown.event.Listener;
 import sune.app.mediadown.event.tracker.DownloadTracker;
 import sune.app.mediadown.event.tracker.PlainTextTracker;
@@ -356,13 +356,13 @@ public final class SimpleDownloader implements Download, DownloadResult {
 	}
 	
 	@Override
-	public final <E> void addEventListener(EventType<DownloadEvent, E> type, Listener<E> listener) {
-		eventRegistry.add(type, listener);
+	public <V> void addEventListener(Event<? extends DownloadEvent, V> event, Listener<V> listener) {
+		eventRegistry.add(event, listener);
 	}
 	
 	@Override
-	public final <E> void removeEventListener(EventType<DownloadEvent, E> type, Listener<E> listener) {
-		eventRegistry.remove(type, listener);
+	public <V> void removeEventListener(Event<? extends DownloadEvent, V> event, Listener<V> listener) {
+		eventRegistry.remove(event, listener);
 	}
 	
 	private final class DownloadEventHandler {
