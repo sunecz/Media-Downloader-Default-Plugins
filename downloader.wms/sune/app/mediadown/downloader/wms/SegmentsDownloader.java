@@ -49,6 +49,7 @@ import sune.app.mediadown.event.EventRegistry;
 import sune.app.mediadown.event.Listener;
 import sune.app.mediadown.event.tracker.DownloadTracker;
 import sune.app.mediadown.event.tracker.PlainTextTracker;
+import sune.app.mediadown.event.tracker.TrackerEvent;
 import sune.app.mediadown.event.tracker.TrackerManager;
 import sune.app.mediadown.event.tracker.WaitTracker;
 import sune.app.mediadown.gui.Dialog;
@@ -116,7 +117,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		this.configuration    = Objects.requireNonNull(configuration);
 		this.maxRetryAttempts = checkMaxRetryAttempts(maxRetryAttempts);
 		this.asyncTotalSize   = asyncTotalSize;
-		manager.setTracker(new WaitTracker());
+		manager.tracker(new WaitTracker());
 	}
 	
 	private static final int checkMaxRetryAttempts(int maxRetryAttempts) {
@@ -301,10 +302,10 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		
 		TrackerManager dummyManager = new TrackerManager();
 		downloader = createDownloader(dummyManager);
-		dummyManager.setUpdateListener(() -> downloader.call(DownloadEvent.UPDATE, new Pair<>(downloader, dummyManager)));
+		dummyManager.addEventListener(TrackerEvent.UPDATE, (t) -> downloader.call(DownloadEvent.UPDATE, new Pair<>(downloader, dummyManager)));
 		
 		eventRegistry.call(DownloadEvent.BEGIN, downloader);
-		manager.setUpdateListener(() -> eventRegistry.call(DownloadEvent.UPDATE, new Pair<>(downloader, manager)));
+		manager.addEventListener(TrackerEvent.UPDATE, (t) -> eventRegistry.call(DownloadEvent.UPDATE, new Pair<>(downloader, manager)));
 		Utils.ignore(() -> NIO.createFile(dest));
 		
 		// Prepare the segments that should be downloaded
@@ -335,11 +336,11 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		TotalUpdateNotifyDownloadTracker notifyTracker = new TotalUpdateNotifyDownloadTracker();
 		downloader.setTracker(notifyTracker);
 		
-		boolean sizeComputed = computeTotalSize(segments, subtitles);
+		computeTotalSize(segments, subtitles);
 		if(!checkIfCanContinue()) return;
 		
-		downloadTracker = new DownloadTracker(size.get(), sizeComputed);
-		manager.setTracker(downloadTracker);
+		downloadTracker = new DownloadTracker(size.get());
+		manager.tracker(downloadTracker);
 		List<Path> tempFiles = new ArrayList<>(segmentsHolders.size());
 		try {
 			String fileNameNoType = Utils.fileNameNoType(dest.getFileName().toString());
@@ -555,8 +556,8 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		}
 		
 		public void onUpdate(Pair<InternalDownloader, TrackerManager> pair) {
-			DownloadTracker downloadTracker = (DownloadTracker) pair.b.getTracker();
-			long current = downloadTracker.getCurrent();
+			DownloadTracker downloadTracker = (DownloadTracker) pair.b.tracker();
+			long current = downloadTracker.current();
 			long delta = current - lastSize.get();
 			
 			tracker.update(delta);
@@ -580,7 +581,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		private RemoteFile file;
 		
 		public TotalUpdateNotifyDownloadTracker() {
-			super(MediaConstants.UNKNOWN_SIZE, false);
+			super();
 		}
 		
 		public void updateFile(RemoteFile file) {
@@ -612,9 +613,9 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 			
 			String text = translation.getSingle("progress.compute_total_size");
 			PlainTextTracker tracker = new PlainTextTracker();
-			manager.setTracker(tracker);
-			tracker.setText(text);
-			tracker.setProgress(0.0);
+			manager.tracker(tracker);
+			tracker.text(text);
+			tracker.progress(0.0);
 			
 			double count = segments.size() + subtitles.size();
 			AtomicInteger counter = new AtomicInteger();
@@ -631,7 +632,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 					long segmentSize = file.size();
 					if(segmentSize > 0L) {
 						sizeAdd(segmentSize - file.estimatedSize());
-						tracker.setProgress(counter.incrementAndGet() / count);
+						tracker.progress(counter.incrementAndGet() / count);
 					} else {
 						worker.submit(() -> {
 							long fileSize = MediaConstants.UNKNOWN_SIZE;
@@ -645,7 +646,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 								sizeAdd(fileSize - file.estimatedSize());
 							}
 							
-							tracker.setProgress(counter.incrementAndGet() / count);
+							tracker.progress(counter.incrementAndGet() / count);
 						});
 					}
 				}

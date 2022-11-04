@@ -30,6 +30,7 @@ import sune.app.mediadown.event.EventRegistry;
 import sune.app.mediadown.event.Listener;
 import sune.app.mediadown.event.tracker.DownloadTracker;
 import sune.app.mediadown.event.tracker.PlainTextTracker;
+import sune.app.mediadown.event.tracker.TrackerEvent;
 import sune.app.mediadown.event.tracker.TrackerManager;
 import sune.app.mediadown.event.tracker.WaitTracker;
 import sune.app.mediadown.language.Translation;
@@ -76,7 +77,7 @@ public final class SimpleDownloader implements Download, DownloadResult {
 		this.media         = Objects.requireNonNull(media);
 		this.dest          = Objects.requireNonNull(dest);
 		this.configuration = Objects.requireNonNull(configuration);
-		manager.setTracker(new WaitTracker());
+		manager.tracker(new WaitTracker());
 	}
 	
 	private static final int compareFirstLongestString(String a, String b) {
@@ -99,9 +100,9 @@ public final class SimpleDownloader implements Download, DownloadResult {
 			return false;
 		String text = translation.getSingle("progress.compute_total_size");
 		PlainTextTracker tracker = new PlainTextTracker();
-		manager.setTracker(tracker);
-		tracker.setText(text);
-		tracker.setProgress(0.0);
+		manager.tracker(tracker);
+		tracker.text(text);
+		tracker.progress(0.0);
 		worker = Worker.createThreadedWorker();
 		size = 0L; // Reset the size
 		double count = mediaHolders.size() + subtitles.size();
@@ -118,14 +119,14 @@ public final class SimpleDownloader implements Download, DownloadResult {
 				long mediaSize = mh.size();
 				if(mediaSize > 0L) {
 					theSize.getAndAdd(mediaSize);
-					tracker.setProgress(counter.incrementAndGet() / count);
+					tracker.progress(counter.incrementAndGet() / count);
 				} else {
 					worker.submit(() -> {
 						HeadRequest request = new HeadRequest(Utils.url(mh.media().uri()), Shared.USER_AGENT, HEADERS);
 						long size = Utils.ignore(() -> Web.size(request), MediaConstants.UNKNOWN_SIZE);
 						mh.size(size);
 						if(size > 0L) theSize.getAndAdd(size);
-						tracker.setProgress(counter.incrementAndGet() / count);
+						tracker.progress(counter.incrementAndGet() / count);
 					});
 				}
 			}
@@ -166,10 +167,10 @@ public final class SimpleDownloader implements Download, DownloadResult {
 		
 		TrackerManager dummyManager = new TrackerManager();
 		downloader = createDownloader(dummyManager);
-		dummyManager.setUpdateListener(() -> downloader.call(DownloadEvent.UPDATE, new Pair<>(downloader, dummyManager)));
+		dummyManager.addEventListener(TrackerEvent.UPDATE, (t) -> downloader.call(DownloadEvent.UPDATE, new Pair<>(downloader, dummyManager)));
 		
 		eventRegistry.call(DownloadEvent.BEGIN, downloader);
-		manager.setUpdateListener(() -> eventRegistry.call(DownloadEvent.UPDATE, new Pair<>(downloader, manager)));
+		manager.addEventListener(TrackerEvent.UPDATE, (t) -> eventRegistry.call(DownloadEvent.UPDATE, new Pair<>(downloader, manager)));
 		Utils.ignore(() -> NIO.createFile(dest));
 		
 		List<MediaHolder> mediaHolders = MediaUtils.solids(media).stream()
@@ -180,14 +181,14 @@ public final class SimpleDownloader implements Download, DownloadResult {
 				.map(MediaHolder::new)
 				.collect(Collectors.toList());
 		
-		DownloadTracker localTracker = new DownloadTracker(-1L, false);
+		DownloadTracker localTracker = new DownloadTracker();
 		downloader.setTracker(localTracker);
 		
-		boolean sizeComputed = computeTotalSize(mediaHolders, subtitles);
+		computeTotalSize(mediaHolders, subtitles);
 		if(!checkIfCanContinue()) return;
 		
-		downloadTracker = new DownloadTracker(size, sizeComputed);
-		manager.setTracker(downloadTracker);
+		downloadTracker = new DownloadTracker(size);
+		manager.tracker(downloadTracker);
 		List<Path> tempFiles = new ArrayList<>(mediaHolders.size());
 		try {
 			String fileNameNoType = Utils.fileNameNoType(dest.getFileName().toString());
@@ -379,8 +380,8 @@ public final class SimpleDownloader implements Download, DownloadResult {
 		}
 		
 		public void onUpdate(Pair<InternalDownloader, TrackerManager> pair) {
-			DownloadTracker downloadTracker = (DownloadTracker) pair.b.getTracker();
-			long current = downloadTracker.getCurrent();
+			DownloadTracker downloadTracker = (DownloadTracker) pair.b.tracker();
+			long current = downloadTracker.current();
 			long delta = current - lastSize;
 			
 			tracker.update(delta);
