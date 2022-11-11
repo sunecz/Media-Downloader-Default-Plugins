@@ -7,7 +7,7 @@ import sune.app.mediadown.server.Servers;
 
 @Plugin(name          = "server.html5",
 	    title         = "plugin.server.html5.title",
-	    version       = "0004",
+	    version       = "00.02.08-0001",
 	    author        = "Sune",
 	    updateBaseURL = "https://app.sune.tech/mediadown/dat/plugin/0002/server/html5/",
 	    updatable     = true,
