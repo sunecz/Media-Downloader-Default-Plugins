@@ -10,7 +10,7 @@ import sune.app.mediadown.plugin.PluginConfiguration;
 
 @Plugin(name          = "downloader.wms",
 	    title         = "plugin.downloader.wms.title",
-	    version       = "0009",
+	    version       = "0013",
 	    author        = "Sune",
 	    updateBaseURL = "https://app.sune.tech/mediadown/dat/plugin/0002/downloader/wms/",
 	    updatable     = true)
@@ -21,6 +21,7 @@ public final class WMSDownloaderPlugin extends PluginBase {
 	// Default values of configuration properties
 	private static final int     DEFAULT_MAX_RETRY_ATTEMPTS = 1000;
 	private static final boolean DEFAULT_ASYNC_TOTAL_SIZE   = true;
+	private static final int     DEFAULT_WAIT_ON_RETRY_MS   = 250;
 	
 	private String translatedTitle;
 	private PluginConfiguration.Builder configuration;
@@ -28,12 +29,17 @@ public final class WMSDownloaderPlugin extends PluginBase {
 	private final void initConfiguration() {
 		PluginConfiguration.Builder builder
 			= new PluginConfiguration.Builder(getContext().getPlugin().instance().name());
+		
 		builder.addProperty(ConfigurationProperty.ofInteger("maxRetryAttempts")
 			.inGroup(ApplicationConfigurationAccessor.GROUP_DOWNLOAD)
 			.withDefaultValue(DEFAULT_MAX_RETRY_ATTEMPTS));
 		builder.addProperty(ConfigurationProperty.ofBoolean("asyncTotalSize")
 			.inGroup(ApplicationConfigurationAccessor.GROUP_DOWNLOAD)
 			.withDefaultValue(DEFAULT_ASYNC_TOTAL_SIZE));
+		builder.addProperty(ConfigurationProperty.ofInteger("waitOnRetryMs")
+			.inGroup(ApplicationConfigurationAccessor.GROUP_DOWNLOAD)
+			.withDefaultValue(DEFAULT_WAIT_ON_RETRY_MS));
+		
 		configuration = builder;
 	}
 	

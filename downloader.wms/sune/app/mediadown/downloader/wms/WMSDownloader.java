@@ -28,7 +28,9 @@ public final class WMSDownloader implements Downloader {
 			throws Exception {
 		PluginConfiguration pluginConfiguration = PLUGIN.getContext().getConfiguration();
 		return new SegmentsDownloader(media, destination, configuration,
-			pluginConfiguration.intValue("maxRetryAttempts"), pluginConfiguration.booleanValue("asyncTotalSize"));
+			pluginConfiguration.intValue("maxRetryAttempts"),
+			pluginConfiguration.booleanValue("asyncTotalSize"),
+			pluginConfiguration.intValue("waitOnRetryMs"));
 	}
 	
 	@Override

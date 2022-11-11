@@ -18,6 +18,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Spliterator;
 import java.util.Spliterators;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -49,10 +50,11 @@ import sune.app.mediadown.event.EventRegistry;
 import sune.app.mediadown.event.Listener;
 import sune.app.mediadown.event.tracker.DownloadTracker;
 import sune.app.mediadown.event.tracker.PlainTextTracker;
+import sune.app.mediadown.event.tracker.SimpleTracker;
+import sune.app.mediadown.event.tracker.Tracker;
 import sune.app.mediadown.event.tracker.TrackerEvent;
 import sune.app.mediadown.event.tracker.TrackerManager;
 import sune.app.mediadown.event.tracker.WaitTracker;
-import sune.app.mediadown.gui.Dialog;
 import sune.app.mediadown.language.Translation;
 import sune.app.mediadown.media.AudioMediaBase;
 import sune.app.mediadown.media.Media;
@@ -65,7 +67,6 @@ import sune.app.mediadown.media.SubtitlesMedia;
 import sune.app.mediadown.media.VideoMediaBase;
 import sune.app.mediadown.pipeline.DownloadPipelineResult;
 import sune.app.mediadown.util.CheckedSupplier;
-import sune.app.mediadown.util.FXUtils;
 import sune.app.mediadown.util.NIO;
 import sune.app.mediadown.util.Opt;
 import sune.app.mediadown.util.Opt.OptMapper;
@@ -81,7 +82,8 @@ import sune.app.mediadown.util.Worker;
 
 public final class SegmentsDownloader implements Download, DownloadResult {
 	
-	private static final Map<String, String> HEADERS = Web.headers("Accept=*/*");
+	private static final Map<String, String> HEADERS = Map.of("Accept", "*/*");
+	private static final long TIME_UPDATE_RESOLUTION_MS = 50L;
 	
 	private final Translation translation = MediaDownloader.translation().getTranslation("plugin.downloader.wms");
 	private final TrackerManager manager = new TrackerManager();
@@ -92,6 +94,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 	private final MediaDownloadConfiguration configuration;
 	private final int maxRetryAttempts;
 	private final boolean asyncTotalSize;
+	private final int waitOnRetryMs;
 	
 	private final InternalState state = new InternalState();
 	private final SyncObject lockPause = new SyncObject();
@@ -111,19 +114,30 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		= ConcurrentVarLazyLoader.of(SegmentsDownloader::buildHttpRequestBuilder);
 	
 	SegmentsDownloader(Media media, Path dest, MediaDownloadConfiguration configuration, int maxRetryAttempts,
-			boolean asyncTotalSize) {
+			boolean asyncTotalSize, int waitOnRetryMs) {
 		this.media            = Objects.requireNonNull(media);
 		this.dest             = Objects.requireNonNull(dest);
 		this.configuration    = Objects.requireNonNull(configuration);
 		this.maxRetryAttempts = checkMaxRetryAttempts(maxRetryAttempts);
 		this.asyncTotalSize   = asyncTotalSize;
+		this.waitOnRetryMs    = checkMilliseconds(waitOnRetryMs);
 		manager.tracker(new WaitTracker());
 	}
 	
 	private static final int checkMaxRetryAttempts(int maxRetryAttempts) {
-		if(maxRetryAttempts < 0)
+		if(maxRetryAttempts < 0) {
 			throw new IllegalArgumentException();
+		}
+		
 		return maxRetryAttempts;
+	}
+	
+	private static final int checkMilliseconds(int ms) {
+		if(ms < 0) {
+			throw new IllegalArgumentException();
+		}
+		
+		return ms;
 	}
 	
 	private static final int compareFirstLongestString(String a, String b) {
@@ -137,17 +151,17 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 	
 	private static final HttpClient buildHttpClient() throws Exception {
 		return HttpClient.newBuilder()
-					.connectTimeout(Duration.ofMillis(5000))
-					.followRedirects(Redirect.NORMAL)
-					.cookieHandler(cookieManager.value())
-					.version(Version.HTTP_2)
-					.build();
+				         .connectTimeout(Duration.ofMillis(5000))
+				         .followRedirects(Redirect.NORMAL)
+				         .cookieHandler(cookieManager.value())
+				         .version(Version.HTTP_2)
+				         .build();
 	}
 	
 	private static final HttpRequest.Builder buildHttpRequestBuilder() throws Exception {
 		return HttpRequest.newBuilder()
-					.method("HEAD", BodyPublishers.noBody())
-					.setHeader("User-Agent", Shared.USER_AGENT);
+				          .method("HEAD", BodyPublishers.noBody())
+				          .setHeader("User-Agent", Shared.USER_AGENT);
 	}
 	
 	private static final long sizeOf(URI uri, Map<String, String> headers) throws Exception {
@@ -183,6 +197,10 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 				  .<Media>or((opt) -> opt.ifTrue(Media::isContainer)
 				                         .map(OptMapper.of(Media::mapToContainer)
 				                                       .join(MediaContainer::media)
+				                                       .join(List::stream)
+				                                       .join((s) -> s.map(SegmentsDownloader::mediaSegmentedSingles)
+				                                                     .flatMap(List::stream)
+				                                                     .collect(Collectors.toList()))
 				                                       .build()))
 				  .orElseGet(List::of).stream()
 				  .filter(Media::isSegmented)
@@ -211,8 +229,8 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 				            & ~(Spliterator.DISTINCT | Spliterator.SORTED);
 		
 		long zipSize = ((characteristics & Spliterator.SIZED) != 0)
-				? Math.min(aSpliterator.getExactSizeIfKnown(), bSpliterator.getExactSizeIfKnown())
-				: -1L;
+			? Math.min(aSpliterator.getExactSizeIfKnown(), bSpliterator.getExactSizeIfKnown())
+			: -1L;
 		
 		Iterator<A> aIterator = Spliterators.iterator(aSpliterator);
 		Iterator<B> bIterator = Spliterators.iterator(bSpliterator);
@@ -233,10 +251,93 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		return StreamSupport.stream(split, a.isParallel() || b.isParallel());
 	}
 	
+	private static final InternalDownloader createDownloader(TrackerManager manager) {
+		return new FileDownloader(manager);
+	}
+	
+	private static final String formatTime(long time, TimeUnit unit, boolean alwaysShowMs) {
+		StringBuilder builder = new StringBuilder();
+		boolean written = false;
+		
+		long hours = unit.toHours(time);
+		if(hours > 0L) {
+			builder.append(hours).append('h');
+			time = time - unit.convert(hours, TimeUnit.HOURS);
+			written = true;
+		}
+		
+		long minutes = unit.toMinutes(time);
+		if(minutes > 0L) {
+			if(written) {
+				builder.append(' ');
+			}
+			
+			builder.append(minutes).append('m');
+			time = time - unit.convert(minutes, TimeUnit.MINUTES);
+			written = true;
+		}
+		
+		if(written) {
+			builder.append(' ');
+		}
+		
+		long seconds = unit.toSeconds(time);
+		builder.append(seconds);
+		time = time - unit.convert(seconds, TimeUnit.SECONDS);
+		
+		long millis = unit.toMillis(time);
+		if(millis > 0L || alwaysShowMs) {
+			builder.append('.').append(String.format("%03d", millis));
+		}
+		
+		builder.append('s');
+		
+		return builder.toString();
+	}
+	
+	private final void waitMs(long ms, TimeUpdateTrackerBase tracker) {
+		if(ms <= 0L) {
+			return;
+		}
+		
+		// Optimization for low wait values
+		if(ms <= TIME_UPDATE_RESOLUTION_MS) {
+			try {
+				Thread.sleep(ms);
+			} catch(InterruptedException ex) {
+				// Ignore
+			}
+			
+			return; // No need to continue
+		}
+		
+		// Update the tracker, so it is visible to the user
+		tracker.totalTimeMs(ms);
+		
+		for(long first  = System.nanoTime(),
+				 target = ms * 1000000L,
+				 time;
+				(time = System.nanoTime() - first) < target;) {
+			// Make the loop pausable and stoppable
+			if(!checkState()) break;
+			
+			// Update the tracker, so it is visible to the user
+			tracker.timeMs(time / 1000000L);
+			
+			try {
+				Thread.sleep(TIME_UPDATE_RESOLUTION_MS);
+			} catch(InterruptedException ex) {
+				break;
+			}
+		}
+	}
+	
 	private final boolean checkState() {
 		// Wait for resume, if paused
-		if(isPaused())
+		if(isPaused()) {
 			lockPause.await();
+		}
+		
 		// If already not running, do not continue
 		return state.is(TaskStates.RUNNING);
 	}
@@ -251,16 +352,6 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		MediaFormat formatIn = media.format();
 		MediaFormat formatOut = MediaFormat.fromPath(output);
 		pipelineResult = DownloadPipelineResult.doConversion(configuration, formatIn, formatOut, output, inputs);
-	}
-	
-	private final InternalDownloader createDownloader(TrackerManager manager) {
-		return new FileDownloader(manager);
-	}
-	
-	private final boolean showRetrySegmentDownloadPromptDialog() {
-		String title = translation.getSingle("prompts.retry_segment_download.title");
-		String text  = translation.getSingle("prompts.retry_segment_download.text");
-		return Dialog.showPrompt(title, text);
 	}
 	
 	private final boolean computeTotalSize(List<RemoteFile> segments, List<RemoteFile> subtitles)
@@ -282,14 +373,18 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 	
 	private final void sizeSet(long value) {
 		size.set(value);
-		if(downloadTracker != null)
+		
+		if(downloadTracker != null) {
 			downloadTracker.updateTotal(value);
+		}
 	}
 	
 	private final void sizeAdd(long value) {
 		long current = size.addAndGet(value);
-		if(downloadTracker != null)
+		
+		if(downloadTracker != null) {
 			downloadTracker.updateTotal(current);
+		}
 	}
 	
 	@Override
@@ -313,25 +408,23 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		List<Media> mediaSingles = mediaSegmentedSingles(media);
 		@SuppressWarnings("unchecked")
 		List<RemoteFile> segments = zip(segmentsHolders.stream(), mediaSingles.stream(), Pair::new)
-				.flatMap((p) -> {
-					double estimatedSize = TotalSizeEstimator.estimate(p.b);
-					List<FileSegment> fileSegments = (List<FileSegment>) p.a.segments();
-					long est = (long) Math.ceil(estimatedSize / fileSegments.size());
-					return fileSegments.stream()
-								.map(RemoteFileSegment::new)
-								.peek((s) -> s.estimatedSize(est));
-				})
-				.collect(Collectors.toList());
+			.flatMap((p) -> {
+				double estimatedSize = TotalSizeEstimator.estimate(p.b);
+				List<FileSegment> fileSegments = (List<FileSegment>) p.a.segments();
+				long est = (long) Math.ceil(estimatedSize / fileSegments.size());
+				return fileSegments.stream().map(RemoteFileSegment::new).peek((s) -> s.estimatedSize(est));
+			})
+			.collect(Collectors.toList());
 		
 		// Prepare the subtitles that should be downloaded, may be none
 		List<RemoteFile> subtitles = configuration.selectedMedia(MediaType.SUBTITLES).stream()
-				.map(RemoteMedia::new)
-				.collect(Collectors.toList());
+			.map(RemoteMedia::new)
+			.collect(Collectors.toList());
 		
 		// Preapare mapping of segments, so that it can be used to map FileSegment to RemoteFile
 		// in the download loop.
 		Map<Object, RemoteFile> segmentsMapping = segments.stream()
-				.collect(Collectors.toMap(RemoteFile::value, Function.identity()));
+			.collect(Collectors.toMap(RemoteFile::value, Function.identity()));
 		
 		TotalUpdateNotifyDownloadTracker notifyTracker = new TotalUpdateNotifyDownloadTracker();
 		downloader.setTracker(notifyTracker);
@@ -341,9 +434,10 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		
 		downloadTracker = new DownloadTracker(size.get());
 		manager.tracker(downloadTracker);
-		List<Path> tempFiles = new ArrayList<>(segmentsHolders.size());
 		try {
+			List<Path> tempFiles = new ArrayList<>(segmentsHolders.size());
 			String fileNameNoType = Utils.fileNameNoType(dest.getFileName().toString());
+			
 			for(int i = 0, l = segmentsHolders.size(); i < l; ++i) {
 				Path tempFile = dest.getParent().resolve(fileNameNoType + "." + i + ".part");
 				Utils.ignore(() -> NIO.deleteFile(tempFile));
@@ -356,36 +450,100 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 			
 			DownloadConfiguration downloadConfiguration = DownloadConfiguration.ofDefault();
 			Iterator<Path> tempFileIt = tempFiles.iterator();
+			Range<Long> rangeRequest = new Range<>(0L, -1L);
+			Tracker previousTracker = null;
+			RetryDownloadSimpleTracker retryTracker = null;
 			
 			// Download the segments
+			downloadLoop:
 			for(FileSegmentsHolder<?> segmentsHolder : segmentsHolders) {
-				if(!checkState()) break;
+				if(!checkState()) break downloadLoop;
 				
 				Path tempFile = tempFileIt.next();
 				long bytes = 0L;
 				for(FileSegment segment : segmentsHolder.segments()) {
-					if(!checkState()) break;
+					if(!checkState()) break downloadLoop;
 					notifyTracker.updateFile(segmentsMapping.get(segment));
-					GetRequest request = new GetRequest(Utils.url(segment.uri()), Shared.USER_AGENT, HEADERS);
-					Range<Long> rangeOutput = new Range<>(0L, -1L);
 					
-					boolean shouldRetry = false;
+					GetRequest request = null;
 					boolean lastAttempt = false;
+					boolean error = false;
+					Exception exception = null;
 					long downloadedBytes = 0L;
-					do {
-						for(int i = 0; downloadedBytes <= 0L && i <= maxRetryAttempts; ++i) {
-							if(!checkState()) break;
-							lastAttempt = i == maxRetryAttempts;
-							handler.setPropagateError(lastAttempt);
-							downloadedBytes = downloader.start(request, tempFile,
-								new DownloadConfiguration(new Range<>(bytes, -1L), rangeOutput, segment.size()));
+					
+					for(int i = 0; (error || downloadedBytes <= 0L) && i <= maxRetryAttempts; ++i) {
+						if(!checkState()) break downloadLoop;
+						
+						// May seem wasteful to create the request object everytime, however this
+						// will update the underlying URLStreamHandler and other properties, that
+						// allow to actually retry the download with "fresh" values.
+						request = new GetRequest(Utils.url(segment.uri()), Shared.USER_AGENT, HEADERS);
+						lastAttempt = i == maxRetryAttempts;
+						handler.setPropagateError(lastAttempt);
+						exception = null;
+						error = false;
+						
+						// Only display the text, if we're actually retrying
+						if(i > 0) {
+							if(retryTracker == null) {
+								retryTracker = new RetryDownloadSimpleTracker();
+							}
+							
+							if(previousTracker == null) {
+								previousTracker = manager.tracker();
+								manager.tracker(retryTracker);
+							}
+							
+							retryTracker.attempt(i);
+							int waitMs = (int) (waitOnRetryMs * Math.pow(i, 4.0 / 3.0));
+							waitMs(waitMs, retryTracker);
+							retryTracker.timeMs(-1L);
+							
+							if(!checkState()) break downloadLoop;
 						}
 						
-						// If even the last attempt failed, ask the user whether the download should be retried again.
-						if(lastAttempt && downloadedBytes <= 0L) {
-							shouldRetry = FXUtils.fxTaskValue(this::showRetrySegmentDownloadPromptDialog);
+						try {
+							DownloadConfiguration config
+								= new DownloadConfiguration(new Range<>(bytes, -1L), rangeRequest, segment.size());
+							downloadedBytes = downloader.start(request, tempFile, config);
+							error = downloader.isError() || downloadedBytes <= 0L;
+						} catch(InterruptedException ex) {
+							// When stopped, immediately break from the loop
+							break downloadLoop;
+						} catch(Exception ex) {
+							error = true;
+							exception = ex;
 						}
-					} while(shouldRetry);
+						
+						// Check whether the downloaded size equals the total size, if not
+						// just retry the download again.
+						long size = segment.size();
+						if(size >= 0L && downloadedBytes != size) {
+							error = true;
+						}
+						
+						if(error) {
+							if(downloadedBytes > 0L) {
+								downloadTracker.update(-downloadedBytes);
+							}
+							
+							downloadedBytes = -1L;
+						}
+					}
+					
+					if(previousTracker != null) {
+						manager.tracker(previousTracker);
+						previousTracker = null;
+					}
+					
+					// If even the last attempt failed, throw an exception since there is nothing we can do.
+					if(lastAttempt && downloadedBytes <= 0L) {
+						throw new IllegalStateException("The last attempt failed");
+					}
+					
+					if(exception != null) {
+						throw exception; // Forward the exception
+					}
 					
 					if(downloadedBytes > 0L) {
 						bytes += downloadedBytes;
@@ -401,19 +559,21 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 			if(!subtitles.isEmpty()) {
 				Path subtitlesDir = dest.getParent();
 				String subtitlesFileName = Utils.fileNameNoType(dest.getFileName().toString());
+				
 				for(RemoteFile subtitle : subtitles) {
 					if(!checkState()) break;
+					
 					notifyTracker.updateFile(subtitle);
 					SubtitlesMedia sm = (SubtitlesMedia) ((RemoteMedia) subtitle).media;
 					String subtitleType = Opt.of(sm.format().fileExtensions())
-							.ifFalse(List::isEmpty).map((l) -> l.get(0))
-							.orElseGet(() -> Utils.fileType(sm.uri().toString()));
+						.ifFalse(List::isEmpty).map((l) -> l.get(0))
+						.orElseGet(() -> Utils.fileType(sm.uri().toString()));
 					String subtitleLanguage = sm.language().codes().stream()
-							.sorted(SegmentsDownloader::compareFirstLongestString)
-							.findFirst().orElse(null);
+						.sorted(SegmentsDownloader::compareFirstLongestString)
+						.findFirst().orElse(null);
 					String subtitleFileName = subtitlesFileName
-							+ (subtitleLanguage != null ? '.' + subtitleLanguage : "")
-							+ (!subtitleType.isEmpty() ? '.' + subtitleType : "");
+						+ (subtitleLanguage != null ? '.' + subtitleLanguage : "")
+						+ (!subtitleType.isEmpty() ? '.' + subtitleType : "");
 					Path subDest = subtitlesDir.resolve(subtitleFileName);
 					GetRequest request = new GetRequest(Utils.url(sm.uri()), Shared.USER_AGENT, HEADERS);
 					downloader.start(request, subDest, downloadConfiguration);
@@ -423,8 +583,8 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 			if(!checkState()) return;
 			// Compute the duration of all segments files and select the maximum
 			double duration = segmentsHolders.stream()
-					.mapToDouble(FileSegmentsHolder::duration)
-					.max().orElse(Double.NaN);
+				.mapToDouble(FileSegmentsHolder::duration)
+				.max().orElse(Double.NaN);
 			// Convert the segments files into the final file
 			doConversion(dest, duration, Utils.toArray(tempFiles, Path.class));
 			state.set(TaskStates.DONE);
@@ -600,6 +760,58 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		}
 	}
 	
+	private final class RetryDownloadSimpleTracker extends SimpleTracker implements TimeUpdateTrackerBase {
+		
+		private String progressText;
+		private int attempt;
+		private long timeMs = -1L;
+		private long totalTimeMs;
+		
+		private final void updateText() {
+			String progressText;
+			
+			if(timeMs >= 0L) {
+				String format = translation.getSingle("progress.retry_attempt_wait");
+				progressText = Utils.format(format, "attempt", attempt, "total_attempts", maxRetryAttempts,
+					"time", formatTime(timeMs, TimeUnit.MILLISECONDS, true),
+					"total_time", formatTime(totalTimeMs, TimeUnit.MILLISECONDS, true));
+			} else {
+				String format = translation.getSingle("progress.retry_attempt");
+				progressText = Utils.format(format, "attempt", attempt, "total_attempts", maxRetryAttempts);
+			}
+			
+			this.progressText = progressText;
+			update();
+		}
+		
+		public void attempt(int attempt) {
+			this.attempt = attempt;
+			updateText();
+		}
+		
+		@Override
+		public void timeMs(long timeMs) {
+			this.timeMs = timeMs;
+			updateText();
+		}
+		
+		@Override
+		public void totalTimeMs(long totalTimeMs) {
+			this.totalTimeMs = totalTimeMs;
+			updateText();
+		}
+		
+		@Override
+		public double progress() {
+			return Double.NaN;
+		}
+		
+		@Override
+		public String textProgress() {
+			return progressText;
+		}
+	}
+	
 	private final class SynchronousTotalSizeComputer implements TotalSizeComputer {
 		
 		private Worker worker;
@@ -663,20 +875,23 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		
 		@Override
 		public void stop() throws Exception {
-			if(worker != null)
+			if(worker != null) {
 				worker.interrupt();
+			}
 		}
 		
 		@Override
 		public void pause() throws Exception {
-			if(worker != null)
+			if(worker != null) {
 				worker.pause();
+			}
 		}
 		
 		@Override
 		public void resume() throws Exception {
-			if(worker != null)
+			if(worker != null) {
 				worker.resume();
+			}
 		}
 	}
 	
@@ -697,6 +912,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 			workerOuter = Worker.createWorker();
 			workerOuter.submit(() -> {
 				workerInner = Worker.createWorker(numberOfAsyncTotalSizeComputeWorkers());
+				
 				try {
 					for(RemoteFile file : Utils.iterable(Stream.concat(reversedStream(segments),
 					                                                   reversedStream(subtitles))
@@ -720,6 +936,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 									for(int i = 0; fileSize < 0L && i <= maxRetryAttempts; ++i) {
 										fileSize = Utils.ignore(() -> sizeOf(file.uri(), HEADERS), MediaConstants.UNKNOWN_SIZE);
 									}
+									
 									sync(file, RemoteFile::size, fileSize);
 								}
 								
@@ -738,32 +955,48 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 					workerOuter = null;
 				}
 			});
+			
 			return false;
 		}
 		
 		@Override
 		public void stop() throws Exception {
-			if(workerInner != null)
+			if(workerInner != null) {
 				workerInner.interrupt();
-			if(workerOuter != null)
+			}
+			
+			if(workerOuter != null) {
 				workerOuter.interrupt();
+			}
 		}
 		
 		@Override
 		public void pause() throws Exception {
-			if(workerInner != null)
+			if(workerInner != null) {
 				workerInner.pause();
-			if(workerOuter != null)
+			}
+			
+			if(workerOuter != null) {
 				workerOuter.pause();
+			}
 		}
 		
 		@Override
 		public void resume() throws Exception {
-			if(workerInner != null)
+			if(workerInner != null) {
 				workerInner.resume();
-			if(workerOuter != null)
+			}
+			
+			if(workerOuter != null) {
 				workerOuter.resume();
+			}
 		}
+	}
+	
+	private static interface TimeUpdateTrackerBase {
+		
+		void timeMs(long timeMs);
+		void totalTimeMs(long totalTimeMs);
 	}
 	
 	private static interface RemoteFile {

@@ -16,9 +16,10 @@ import java.util.stream.Collectors;
 import org.cef.browser.CefFrame;
 import org.cef.network.CefCookie;
 import org.cef.network.CefCookieManager;
+import org.jsoup.nodes.Document;
+import org.jsoup.nodes.Element;
 
 import io.netty.handler.codec.http.FullHttpRequest;
-import sune.app.mediadown.MediaDownloader;
 import sune.app.mediadown.media.Media;
 import sune.app.mediadown.util.Reflection2;
 import sune.app.mediadown.util.Reflection3;
@@ -41,6 +42,11 @@ public class NovaVoyoDRMEngine implements DRMEngine {
 	private static final boolean doVoyoLogin() throws Exception {
 		Class<?> clazz = Class.forName("sune.app.mediadown.media_engine.novavoyo.NovaVoyoServer$VoyoAccount");
 		return (boolean) Reflection3.invokeStatic(clazz, "login");
+	}
+	
+	private static final Document document(URI uri) throws Exception {
+		Class<?> clazz = Class.forName("sune.app.mediadown.media_engine.novavoyo.NovaVoyoServer$FastWeb");
+		return (Document) Reflection3.invokeStatic(clazz, "document", new Class[] { URI.class }, uri);
 	}
 	
 	private static final CookieManager ensureCookieManager() throws Exception {
@@ -71,6 +77,7 @@ public class NovaVoyoDRMEngine implements DRMEngine {
 		Date now = Date.from(instant);
 		Date expires = Date.from(instant.plus(7, ChronoUnit.DAYS));
 		CefCookieManager cookieManager = CefCookieManager.getGlobalManager();
+		
 		for(HttpCookie cookie : cookies) {
 			CefCookie cefCookie = new CefCookie(cookie.getName(), cookie.getValue(), cookie.getDomain(),
 				cookie.getPath(), cookie.getSecure(), cookie.isHttpOnly(), now, now, false, expires);
@@ -103,11 +110,7 @@ public class NovaVoyoDRMEngine implements DRMEngine {
 	
 	private static final class NovaVoyoDRMResolver extends SimpleDRMResolver {
 		
-		private static final String URL_IFRAME;
-		
-		static {
-			URL_IFRAME = "https://media.cms.nova.cz/embed/";
-		}
+		private String embedUrl;
 		
 		public NovaVoyoDRMResolver(DRMContext context, String url, Path output, Media media) {
 			super(context, url, output, media);
@@ -115,13 +118,7 @@ public class NovaVoyoDRMEngine implements DRMEngine {
 		
 		@Override
 		public void onLoadStart(DRMBrowser browser, CefFrame frame) {
-			if(frame.getURL().startsWith(url)) {
-				// Obtain all required login cookies and do "headless" login.
-				Utils.ignoreWithCheck(() -> {
-					doVoyoLogin();
-					setCefCookies(url, savedCookies());
-				}, MediaDownloader::error);
-				
+			if(frame.getURL().startsWith(embedUrl)) {
 				// Set consent cookie to not show the cookie consent popup.
 				Instant instant = Instant.now();
 				Date now = Date.from(instant);
@@ -133,7 +130,7 @@ public class NovaVoyoDRMEngine implements DRMEngine {
 				CefCookie cookieConsent = new CefCookie("euconsent-v2", value,
 					".nova.cz", "/", false, false, now, now, false, expires);
 				CefCookieManager.getGlobalManager().setCookie(url, cookieConsent);
-			} else if(frame.getURL().startsWith(URL_IFRAME)) {
+				
 				JS.Record.include(frame);
 				JS.Record.activate(frame, ".video-js[id^=\"player-\"] > video");
 			}
@@ -141,19 +138,7 @@ public class NovaVoyoDRMEngine implements DRMEngine {
 		
 		@Override
 		public void onLoadEnd(DRMBrowser browser, CefFrame frame, int httpStatusCode) {
-			if(frame.getURL().startsWith(url)) {
-				JS.Helper.include(frame);
-				// Hide unnecessary elements on the page so that we can safely click on the screen
-				// without worrying of clicking on a link, button etc.
-				StringBuilder style = new StringBuilder();
-				style.append(".modal-content>:not(.c-video-detail){display:none!important;}");
-				style.append(".c-modal-detail::after{content:none!important;}");
-				style.append(".c-video-detail>.content{display:none!important;}");
-				style.append(".c-video-detail>.img::after{content:none!important;}");
-				style.append(".c-video-detail>.img>.c-player-wrap>.heading{display:none!important;}");
-				style.append(".iframe-wrap>iframe{z-index:2147483600!important;}");
-				JS.Helper.includeStyle(frame, style.toString());
-			} else if(frame.getURL().startsWith(URL_IFRAME)) {
+			if(frame.getURL().startsWith(embedUrl)) {
 				JS.Helper.include(frame);
 				JS.Helper.hideVideoElementStyle(frame);
 			}
@@ -183,12 +168,29 @@ public class NovaVoyoDRMEngine implements DRMEngine {
 				modifier.modify(media.quality());
 				content = modifier.xml().html();
 			}
+			
 			return content;
 		}
 		
 		@Override
 		public String url() {
-			return url;
+			if(embedUrl == null) {
+				try {
+					// Do "headless" login so we can access the page with all the valid data.
+					doVoyoLogin();
+					setCefCookies(url, savedCookies());
+					
+					// Obtain the iframe element and get its URL
+					Element elIframe = document(Utils.uri(url)).selectFirst(".js-detail-player .iframe-wrap iframe");
+					if(elIframe != null) {
+						embedUrl = elIframe.absUrl("src");
+					}
+				} catch(Exception ex) {
+					throw new IllegalStateException("Unable to obtain the video iframe", ex);
+				}
+			}
+			
+			return embedUrl;
 		}
 	}
 }

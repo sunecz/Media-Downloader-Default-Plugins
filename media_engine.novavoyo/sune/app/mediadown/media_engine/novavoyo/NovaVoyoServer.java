@@ -98,18 +98,35 @@ public final class NovaVoyoServer implements Server {
 		return VoyoError.ofFailure(null);
 	}
 	
-	private static final String mediaTitle(SSDCollection streamInfo) {
-		// NovaPlus has weird naming, this is actually correct
+	private static final String mediaTitle(SSDCollection streamInfo, Document document) {
+		// Nova Voyo has weird naming, this is actually correct
 		String programName = streamInfo.getDirectString("episode", "");
-		String episodeText = streamInfo.getDirectString("programName", "");
-		int numSeason = streamInfo.getDirectInt("seasonNumber", 0);
+		int numSeason = -1;
 		int numEpisode = -1;
 		String episodeName = null;
-		Matcher matcher = REGEX_EPISODE.matcher(episodeText);
-		if(matcher.matches()) {
-			numEpisode = Integer.parseInt(matcher.group(1));
-			episodeName = Optional.ofNullable(matcher.group(2)).orElse("");
+		
+		if(programName.isEmpty()) {
+			// No useful information can be extracted from streamInfo, use LinkingData
+			LinkingData linkingData = LinkingData.from(document).stream()
+				.filter((ld) -> Utils.contains(Set.of("Movie", "TVEpisode"), ld.type()))
+				.findFirst().orElseGet(LinkingData::empty);
+			
+			if(!linkingData.isEmpty()) {
+				programName = linkingData.data().getDirectString("name", "");
+			}
+		} else {
+			String episodeText = streamInfo.getDirectString("programName", "");
+			numSeason = streamInfo.getDirectInt("seasonNumber", 0);
+			
+			Matcher matcher = REGEX_EPISODE.matcher(episodeText);
+			if(matcher.matches()) {
+				numEpisode = Integer.parseInt(matcher.group(1));
+				episodeName = Optional.ofNullable(matcher.group(2)).orElse("");
+			} else {
+				episodeName = episodeText;
+			}
 		}
+		
 		return MediaUtils.mediaTitle(programName, numSeason, numEpisode, episodeName);
 	}
 	
@@ -130,20 +147,20 @@ public final class NovaVoyoServer implements Server {
 		
 		// Obtain the main iframe for the video
 		Document document = FastWeb.document(Utils.uri(url));
-		Element elIframe = document.selectFirst(".iframe-wrap iframe");
+		Element elIframe = document.selectFirst(".js-detail-player .iframe-wrap iframe");
 		if(elIframe == null)
 			return null;
 		
 		// Obtain the embedded iframe document to extract the player settings
 		String embedURL = elIframe.absUrl("src");
-		document = FastWeb.document(Utils.uri(embedURL));
+		Document embedDoc = FastWeb.document(Utils.uri(embedURL));
 		
 		VoyoError error;
-		if(!(error = checkForError(document)).isSuccess())
+		if(!(error = checkForError(embedDoc)).isSuccess())
 			throw new IllegalStateException("Error " + error.event() + ": " + error.type());
 		
 		SSDCollection settings = null;
-		for(Element elScript : document.select("script:not([src])")) {
+		for(Element elScript : embedDoc.select("script:not([src])")) {
 			String content = elScript.html();
 			int index;
 			if((index = content.indexOf("Player.init")) >= 0) {
@@ -159,7 +176,8 @@ public final class NovaVoyoServer implements Server {
 		SSDCollection tracks = settings.getDirectCollection("tracks");
 		URI sourceURI = Utils.uri(url);
 		MediaSource source = MediaSource.of(this);
-		String title = mediaTitle(settings.getCollection("plugins.measuring.streamInfo"));
+		
+		String title = mediaTitle(settings.getCollection("plugins.measuring.streamInfo"), document);
 		for(SSDCollection node : tracks.collectionsIterable()) {
 			MediaFormat format = MediaFormat.fromName(node.getName());
 			for(SSDCollection coll : ((SSDCollection) node).collectionsIterable()) {
@@ -617,6 +635,55 @@ public final class NovaVoyoServer implements Server {
 		}
 		
 		public String type() {
+			return type;
+		}
+	}
+	
+	private static final class LinkingData {
+		
+		private static LinkingData EMPTY;
+		
+		private final Document document;
+		private final SSDCollection data;
+		private final String type;
+		
+		private LinkingData() {
+			this.document = null;
+			this.data = null;
+			this.type = "none";
+		}
+		
+		private LinkingData(Document document, SSDCollection data) {
+			this.document = Objects.requireNonNull(document);
+			this.data = Objects.requireNonNull(data);
+			this.type = data.getDirectString("@type");
+		}
+		
+		public static final LinkingData empty() {
+			return EMPTY == null ? (EMPTY = new LinkingData()) : EMPTY;
+		}
+		
+		public static final List<LinkingData> from(Document document) {
+			return document.select("script[type='application/ld+json']")
+						.stream()
+						.map((s) -> new LinkingData(document, JSON.read(s.html())))
+						.collect(Collectors.toList());
+		}
+		
+		public final boolean isEmpty() {
+			return data == null;
+		}
+		
+		@SuppressWarnings("unused")
+		public final Document document() {
+			return document;
+		}
+		
+		public final SSDCollection data() {
+			return data;
+		}
+		
+		public final String type() {
 			return type;
 		}
 	}
