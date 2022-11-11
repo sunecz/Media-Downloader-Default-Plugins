@@ -233,7 +233,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		return StreamSupport.stream(split, a.isParallel() || b.isParallel());
 	}
 	
-	private final boolean checkIfCanContinue() {
+	private final boolean checkState() {
 		// Wait for resume, if paused
 		if(isPaused())
 			lockPause.await();
@@ -337,7 +337,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		downloader.setTracker(notifyTracker);
 		
 		computeTotalSize(segments, subtitles);
-		if(!checkIfCanContinue()) return;
+		if(!checkState()) return;
 		
 		downloadTracker = new DownloadTracker(size.get());
 		manager.tracker(downloadTracker);
@@ -359,24 +359,26 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 			
 			// Download the segments
 			for(FileSegmentsHolder<?> segmentsHolder : segmentsHolders) {
-				if(!checkIfCanContinue()) break;
+				if(!checkState()) break;
 				
 				Path tempFile = tempFileIt.next();
 				long bytes = 0L;
 				for(FileSegment segment : segmentsHolder.segments()) {
-					if(!checkIfCanContinue()) break;
+					if(!checkState()) break;
 					notifyTracker.updateFile(segmentsMapping.get(segment));
 					GetRequest request = new GetRequest(Utils.url(segment.uri()), Shared.USER_AGENT, HEADERS);
+					Range<Long> rangeOutput = new Range<>(0L, -1L);
 					
 					boolean shouldRetry = false;
 					boolean lastAttempt = false;
 					long downloadedBytes = 0L;
 					do {
 						for(int i = 0; downloadedBytes <= 0L && i <= maxRetryAttempts; ++i) {
+							if(!checkState()) break;
 							lastAttempt = i == maxRetryAttempts;
 							handler.setPropagateError(lastAttempt);
 							downloadedBytes = downloader.start(request, tempFile,
-								new DownloadConfiguration(new Range<>(bytes, -1L), new Range<>(0L, -1L), segment.size()));
+								new DownloadConfiguration(new Range<>(bytes, -1L), rangeOutput, segment.size()));
 						}
 						
 						// If even the last attempt failed, ask the user whether the download should be retried again.
@@ -394,13 +396,13 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 				handler.setPropagateError(true);
 			}
 			
-			if(!checkIfCanContinue()) return;
+			if(!checkState()) return;
 			// Download subtitles, if any
 			if(!subtitles.isEmpty()) {
 				Path subtitlesDir = dest.getParent();
 				String subtitlesFileName = Utils.fileNameNoType(dest.getFileName().toString());
 				for(RemoteFile subtitle : subtitles) {
-					if(!checkIfCanContinue()) break;
+					if(!checkState()) break;
 					notifyTracker.updateFile(subtitle);
 					SubtitlesMedia sm = (SubtitlesMedia) ((RemoteMedia) subtitle).media;
 					String subtitleType = Opt.of(sm.format().fileExtensions())
@@ -418,7 +420,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 				}
 			}
 			
-			if(!checkIfCanContinue()) return;
+			if(!checkState()) return;
 			// Compute the duration of all segments files and select the maximum
 			double duration = segmentsHolders.stream()
 					.mapToDouble(FileSegmentsHolder::duration)
@@ -622,7 +624,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 			worker = Worker.createThreadedWorker();
 			try {
 				for(RemoteFile file : Utils.iterable(Stream.concat(segments.stream(), subtitles.stream()).iterator())) {
-					if(!checkIfCanContinue()) {
+					if(!checkState()) {
 						// Important to interrupt before break
 						worker.interrupt();
 						// Exit the loop
@@ -699,7 +701,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 					for(RemoteFile file : Utils.iterable(Stream.concat(reversedStream(segments),
 					                                                   reversedStream(subtitles))
 					                                           .iterator())) {
-						if(!checkIfCanContinue()) {
+						if(!checkState()) {
 							// Important to interrupt before break
 							workerInner.interrupt();
 							workerOuter.interrupt();
