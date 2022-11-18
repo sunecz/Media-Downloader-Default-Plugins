@@ -36,7 +36,7 @@ import sune.app.mediadown.InternalState;
 import sune.app.mediadown.MediaDownloader;
 import sune.app.mediadown.Shared;
 import sune.app.mediadown.TaskStates;
-import sune.app.mediadown.convert.ConversionConfiguration;
+import sune.app.mediadown.convert.ConversionMedia;
 import sune.app.mediadown.download.DownloadConfiguration;
 import sune.app.mediadown.download.DownloadResult;
 import sune.app.mediadown.download.FileDownloader;
@@ -60,13 +60,13 @@ import sune.app.mediadown.media.AudioMediaBase;
 import sune.app.mediadown.media.Media;
 import sune.app.mediadown.media.MediaConstants;
 import sune.app.mediadown.media.MediaContainer;
-import sune.app.mediadown.media.MediaFormat;
 import sune.app.mediadown.media.MediaType;
 import sune.app.mediadown.media.MediaUtils;
 import sune.app.mediadown.media.SubtitlesMedia;
 import sune.app.mediadown.media.VideoMediaBase;
 import sune.app.mediadown.pipeline.DownloadPipelineResult;
 import sune.app.mediadown.util.CheckedSupplier;
+import sune.app.mediadown.util.Metadata;
 import sune.app.mediadown.util.NIO;
 import sune.app.mediadown.util.Opt;
 import sune.app.mediadown.util.Opt.OptMapper;
@@ -342,16 +342,8 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		return state.is(TaskStates.RUNNING);
 	}
 	
-	private final void doConversion(Path dest, double duration, Path... inputs) {
-		ConversionConfiguration configuration = new ConversionConfiguration(dest, duration);
-		String fileName = dest.getFileName().toString();
-		String fileNameNoType = Utils.fileNameNoType(fileName);
-		String fileType = Utils.fileType(fileName);
-		String outputName = fileNameNoType + ".convert." + fileType;
-		Path output = dest.getParent().resolve(outputName);
-		MediaFormat formatIn = media.format();
-		MediaFormat formatOut = MediaFormat.fromPath(output);
-		pipelineResult = DownloadPipelineResult.doConversion(configuration, formatIn, formatOut, output, inputs);
+	private final void doConversion(ConversionMedia output, double duration, List<ConversionMedia> inputs) {
+		pipelineResult = DownloadPipelineResult.doConversion(output, inputs, Metadata.of("duration", duration));
 	}
 	
 	private final boolean computeTotalSize(List<RemoteFile> segments, List<RemoteFile> subtitles)
@@ -586,7 +578,12 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 				.mapToDouble(FileSegmentsHolder::duration)
 				.max().orElse(Double.NaN);
 			// Convert the segments files into the final file
-			doConversion(dest, duration, Utils.toArray(tempFiles, Path.class));
+			ConversionMedia output = new ConversionMedia(media, dest, duration);
+			List<ConversionMedia> inputs = zip(mediaSingles.stream(), tempFiles.stream(), Pair::new)
+				.map((p) -> new ConversionMedia(p.a, p.b, Double.NaN))
+				.collect(Collectors.toList());
+			doConversion(output, duration, inputs);
+			
 			state.set(TaskStates.DONE);
 		} catch(Exception ex) {
 			eventRegistry.call(DownloadEvent.ERROR, new Pair<>(downloader, ex));

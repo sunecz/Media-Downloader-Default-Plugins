@@ -18,7 +18,7 @@ import sune.app.mediadown.InternalState;
 import sune.app.mediadown.MediaDownloader;
 import sune.app.mediadown.Shared;
 import sune.app.mediadown.TaskStates;
-import sune.app.mediadown.convert.ConversionConfiguration;
+import sune.app.mediadown.convert.ConversionMedia;
 import sune.app.mediadown.download.AcceleratedFileDownloader;
 import sune.app.mediadown.download.DownloadConfiguration;
 import sune.app.mediadown.download.DownloadResult;
@@ -41,6 +41,7 @@ import sune.app.mediadown.media.MediaType;
 import sune.app.mediadown.media.MediaUtils;
 import sune.app.mediadown.media.SubtitlesMedia;
 import sune.app.mediadown.pipeline.DownloadPipelineResult;
+import sune.app.mediadown.util.Metadata;
 import sune.app.mediadown.util.NIO;
 import sune.app.mediadown.util.Opt;
 import sune.app.mediadown.util.Pair;
@@ -139,22 +140,13 @@ public final class SimpleDownloader implements Download, DownloadResult {
 		}
 	}
 	
-	private final void noConversion(Path dest, Path input) throws IOException {
-		NIO.move_force(input, dest);
+	private final void noConversion(ConversionMedia output, ConversionMedia input) throws IOException {
+		NIO.move_force(input.path(), output.path());
 		pipelineResult = DownloadPipelineResult.noConversion();
 	}
 	
-	private final void doConversion(Path dest, Path... inputs) {
-		double duration = List.of(inputs).stream().map(VideoUtils::duration).max(Comparator.naturalOrder()).orElse(-1.0);
-		ConversionConfiguration configuration = new ConversionConfiguration(dest, duration);
-		String fileName = dest.getFileName().toString();
-		String fileNameNoType = Utils.fileNameNoType(fileName);
-		String fileType = Utils.fileType(fileName);
-		String outputName = fileNameNoType + ".convert." + fileType;
-		Path output = dest.getParent().resolve(outputName);
-		MediaFormat formatIn = media.format();
-		MediaFormat formatOut = MediaFormat.fromPath(output);
-		pipelineResult = DownloadPipelineResult.doConversion(configuration, formatIn, formatOut, output, inputs);
+	private final void doConversion(ConversionMedia output, double duration, List<ConversionMedia> inputs) {
+		pipelineResult = DownloadPipelineResult.doConversion(output, inputs, Metadata.of("duration", duration));
 	}
 	
 	@Override
@@ -236,13 +228,22 @@ public final class SimpleDownloader implements Download, DownloadResult {
 			
 			if(!checkIfCanContinue()) return;
 			MediaFormat outFormat = MediaFormat.fromPath(dest);
-			if(mediaHolders.size() == 1) {
-				MediaHolder mh = mediaHolders.get(0);
-				Path tempFile = tempFiles.get(0);
-				if(mh.media().format().is(outFormat)) noConversion(dest, tempFile);
-				else doConversion(dest, tempFile);
+			ConversionMedia output = new ConversionMedia(media, dest, Double.NaN);
+			List<ConversionMedia> inputs = Utils.zip(mediaHolders.stream(), tempFiles.stream(), Pair::new)
+				.map((p) -> new ConversionMedia(p.a.media(), p.b, Double.NaN))
+				.collect(Collectors.toList());
+			
+			if(mediaHolders.size() == 1
+					&& mediaHolders.get(0).media().format().is(outFormat)) {
+				noConversion(output, inputs.get(0));
 			} else {
-				doConversion(dest, Utils.toArray(tempFiles, Path.class));
+				double duration = inputs.stream()
+					.map(ConversionMedia::path)
+					.map(VideoUtils::duration)
+					.max(Comparator.naturalOrder())
+					.orElse(-1.0);
+				
+				doConversion(output, duration, inputs);
 			}
 			
 			state.set(TaskStates.DONE);
