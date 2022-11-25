@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -167,6 +168,7 @@ public final class SimpleDownloader implements Download, DownloadResult {
 		
 		List<MediaHolder> mediaHolders = MediaUtils.solids(media).stream()
 				.filter((m) -> m.type().is(MediaType.VIDEO) || m.type().is(MediaType.AUDIO))
+				.collect(Collectors.toMap(Media::uri, Function.identity(), (a, b) -> a)).values().stream()
 				.map(MediaHolder::new)
 				.collect(Collectors.toList());
 		List<MediaHolder> subtitles = configuration.selectedMedia(MediaType.SUBTITLES).stream()
