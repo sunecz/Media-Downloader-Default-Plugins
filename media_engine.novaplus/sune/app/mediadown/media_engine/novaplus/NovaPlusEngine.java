@@ -122,12 +122,18 @@ public final class NovaPlusEngine implements MediaEngine {
 	}
 	
 	private final int parseEpisodeList(Program program, List<Episode> episodes, Elements elItems,
-			WorkerProxy proxy, CheckedBiFunction<WorkerProxy, Episode, Boolean> function) throws Exception {
+			boolean onlyFullEpisodes, WorkerProxy proxy,
+			CheckedBiFunction<WorkerProxy, Episode, Boolean> function) throws Exception {
 		int counter = 0;
 		
 		for(Element elItem : elItems) {
 			if(elItem.selectFirst(SEL_LABEL_VOYO) != null) {
 				++counter; continue;
+			}
+			
+			if(onlyFullEpisodes
+					&& elItem.selectFirst(".c-article[data-tracking-tile-asset=\"episode\"]") == null) {
+				continue;
 			}
 			
 			Element elLink = elItem.selectFirst(".title > a");
@@ -145,7 +151,8 @@ public final class NovaPlusEngine implements MediaEngine {
 		return counter == elItems.size() ? 1 : 0;
 	}
 	
-	private final int parseEpisodesPage(Program program, List<Episode> episodes, Document document, WorkerProxy proxy,
+	private final int parseEpisodesPage(Program program, List<Episode> episodes, Document document,
+			boolean onlyFullEpisodes, WorkerProxy proxy,
 			CheckedBiFunction<WorkerProxy, Episode, Boolean> function) throws Exception {
 		Element elLoadMore = document.selectFirst(SEL_EPISODES_LOAD_MORE);
 		
@@ -172,7 +179,7 @@ public final class NovaPlusEngine implements MediaEngine {
 			
 			// The offset can be negative, therefore we can use it to obtain the first page
 			// with non-filtered/altered content.
-			final int itemsPerPage = 6;
+			final int itemsPerPage = document.select(SEL_EPISODES).size();
 			final int offsetShift = -itemsPerPage;
 			final int constPage = 2; // Must be > 1
 			
@@ -210,12 +217,12 @@ public final class NovaPlusEngine implements MediaEngine {
 				
 				offset += itemsPerPage;
 			} while(elItems != null
-						&& parseEpisodeList(program, episodes, elItems, proxy, function) == 0);
+						&& parseEpisodeList(program, episodes, elItems, onlyFullEpisodes, proxy, function) == 0);
 		} else {
-			// If the butto does NOT exist, load the episodes from the document
+			// If the button does NOT exist, load the episodes from the document
 			Elements elItems = document.select(SEL_EPISODES);
 			if(elItems != null
-					&& parseEpisodeList(program, episodes, elItems, proxy, function) == 2) {
+					&& parseEpisodeList(program, episodes, elItems, onlyFullEpisodes, proxy, function) == 2) {
 				return 1; // Do not continue
 			}
 		}
@@ -238,8 +245,21 @@ public final class NovaPlusEngine implements MediaEngine {
 			if(response.code != 200) continue; // Probably does not exist, ignore
 			
 			Document document = Utils.parseDocument(response.content, uri);
-			if(parseEpisodesPage(program, episodes, document, proxy, function) != 0)
+			if(parseEpisodesPage(program, episodes, document, false, proxy, function) != 0)
 				return null;
+		}
+		
+		// If no episodes were found, try to obtain them from the All videos page.
+		if(episodes.isEmpty()) {
+			URI uri = Utils.uri(Utils.urlConcat(program.uri().toString(), "videa"));
+			StringResponse response = Web.request(new GetRequest(Utils.url(uri), Shared.USER_AGENT));
+			
+			if(response.code == 200) {
+				Document document = Utils.parseDocument(response.content, uri);
+				
+				if(parseEpisodesPage(program, episodes, document, true, proxy, function) != 0)
+					return null;
+			}
 		}
 		
 		return episodes;
