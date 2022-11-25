@@ -49,12 +49,15 @@ import sune.app.mediadown.event.Event;
 import sune.app.mediadown.event.EventRegistry;
 import sune.app.mediadown.event.Listener;
 import sune.app.mediadown.event.tracker.DownloadTracker;
+import sune.app.mediadown.event.tracker.PipelineProgress;
+import sune.app.mediadown.event.tracker.PipelineStates;
 import sune.app.mediadown.event.tracker.PlainTextTracker;
 import sune.app.mediadown.event.tracker.SimpleTracker;
 import sune.app.mediadown.event.tracker.Tracker;
 import sune.app.mediadown.event.tracker.TrackerEvent;
 import sune.app.mediadown.event.tracker.TrackerManager;
 import sune.app.mediadown.event.tracker.WaitTracker;
+import sune.app.mediadown.gui.table.ResolvedMedia;
 import sune.app.mediadown.language.Translation;
 import sune.app.mediadown.media.AudioMediaBase;
 import sune.app.mediadown.media.Media;
@@ -342,7 +345,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		return state.is(TaskStates.RUNNING);
 	}
 	
-	private final void doConversion(ConversionMedia output, double duration, List<ConversionMedia> inputs) {
+	private final void doConversion(ResolvedMedia output, double duration, List<ConversionMedia> inputs) {
 		pipelineResult = DownloadPipelineResult.doConversion(output, inputs, Metadata.of("duration", duration));
 	}
 	
@@ -559,7 +562,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 					SubtitlesMedia sm = (SubtitlesMedia) ((RemoteMedia) subtitle).media;
 					String subtitleType = Opt.of(sm.format().fileExtensions())
 						.ifFalse(List::isEmpty).map((l) -> l.get(0))
-						.orElseGet(() -> Utils.fileType(sm.uri().toString()));
+						.orElseGet(() -> Utils.OfPath.info(sm.uri().toString()).extension());
 					String subtitleLanguage = sm.language().codes().stream()
 						.sorted(SegmentsDownloader::compareFirstLongestString)
 						.findFirst().orElse(null);
@@ -578,7 +581,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 				.mapToDouble(FileSegmentsHolder::duration)
 				.max().orElse(Double.NaN);
 			// Convert the segments files into the final file
-			ConversionMedia output = new ConversionMedia(media, dest, duration);
+			ResolvedMedia output = new ResolvedMedia(media, dest, configuration);
 			List<ConversionMedia> inputs = zip(mediaSingles.stream(), tempFiles.stream(), Pair::new)
 				.map((p) -> new ConversionMedia(p.a, p.b, Double.NaN))
 				.collect(Collectors.toList());
@@ -799,8 +802,13 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		}
 		
 		@Override
+		public String state() {
+			return PipelineStates.RETRY;
+		}
+		
+		@Override
 		public double progress() {
-			return Double.NaN;
+			return PipelineProgress.PROCESSING;
 		}
 		
 		@Override
@@ -835,7 +843,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 				for(RemoteFile file : Utils.iterable(Stream.concat(segments.stream(), subtitles.stream()).iterator())) {
 					if(!checkState()) {
 						// Important to interrupt before break
-						worker.interrupt();
+						worker.stop();
 						// Exit the loop
 						break;
 					}
@@ -865,7 +873,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 				worker.waitTillDone();
 				return true;
 			} finally {
-				worker.interrupt();
+				worker.stop();
 				worker = null;
 			}
 		}
@@ -873,7 +881,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		@Override
 		public void stop() throws Exception {
 			if(worker != null) {
-				worker.interrupt();
+				worker.stop();
 			}
 		}
 		
@@ -916,8 +924,8 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 					                                           .iterator())) {
 						if(!checkState()) {
 							// Important to interrupt before break
-							workerInner.interrupt();
-							workerOuter.interrupt();
+							workerInner.stop();
+							workerOuter.stop();
 							// Exit the loop
 							break;
 						}
@@ -946,8 +954,8 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 					
 					workerInner.waitTillDone();
 				} finally {
-					workerInner.interrupt();
-					workerOuter.interrupt();
+					workerInner.stop();
+					workerOuter.stop();
 					workerInner = null;
 					workerOuter = null;
 				}
@@ -959,11 +967,11 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		@Override
 		public void stop() throws Exception {
 			if(workerInner != null) {
-				workerInner.interrupt();
+				workerInner.stop();
 			}
 			
 			if(workerOuter != null) {
-				workerOuter.interrupt();
+				workerOuter.stop();
 			}
 		}
 		

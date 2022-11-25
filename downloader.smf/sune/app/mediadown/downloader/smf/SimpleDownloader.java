@@ -33,10 +33,10 @@ import sune.app.mediadown.event.tracker.PlainTextTracker;
 import sune.app.mediadown.event.tracker.TrackerEvent;
 import sune.app.mediadown.event.tracker.TrackerManager;
 import sune.app.mediadown.event.tracker.WaitTracker;
+import sune.app.mediadown.gui.table.ResolvedMedia;
 import sune.app.mediadown.language.Translation;
 import sune.app.mediadown.media.Media;
 import sune.app.mediadown.media.MediaConstants;
-import sune.app.mediadown.media.MediaFormat;
 import sune.app.mediadown.media.MediaType;
 import sune.app.mediadown.media.MediaUtils;
 import sune.app.mediadown.media.SubtitlesMedia;
@@ -113,7 +113,7 @@ public final class SimpleDownloader implements Download, DownloadResult {
 			for(MediaHolder mh : Utils.iterable(Stream.concat(mediaHolders.stream(), subtitles.stream()).iterator())) {
 				if(!checkIfCanContinue()) {
 					// Important to interrupt before break
-					worker.interrupt();
+					worker.stop();
 					// Exit the loop
 					break;
 				}
@@ -135,17 +135,17 @@ public final class SimpleDownloader implements Download, DownloadResult {
 			size = theSize.get();
 			return true;
 		} finally {
-			worker.interrupt();
+			worker.stop();
 			worker = null;
 		}
 	}
 	
-	private final void noConversion(ConversionMedia output, ConversionMedia input) throws IOException {
+	private final void noConversion(ResolvedMedia output, ConversionMedia input) throws IOException {
 		NIO.move_force(input.path(), output.path());
 		pipelineResult = DownloadPipelineResult.noConversion();
 	}
 	
-	private final void doConversion(ConversionMedia output, double duration, List<ConversionMedia> inputs) {
+	private final void doConversion(ResolvedMedia output, double duration, List<ConversionMedia> inputs) {
 		pipelineResult = DownloadPipelineResult.doConversion(output, inputs, Metadata.of("duration", duration));
 	}
 	
@@ -213,7 +213,7 @@ public final class SimpleDownloader implements Download, DownloadResult {
 					SubtitlesMedia sm = (SubtitlesMedia) subtitle.media();
 					String subtitleType = Opt.of(sm.format().fileExtensions())
 							.ifFalse(List::isEmpty).map((l) -> l.get(0))
-							.orElseGet(() -> Utils.fileType(sm.uri().toString()));
+							.orElseGet(() -> Utils.OfPath.info(sm.uri().toString()).extension());
 					String subtitleLanguage = sm.language().codes().stream()
 							.sorted(SimpleDownloader::compareFirstLongestString)
 							.findFirst().orElse(null);
@@ -227,14 +227,13 @@ public final class SimpleDownloader implements Download, DownloadResult {
 			}
 			
 			if(!checkIfCanContinue()) return;
-			MediaFormat outFormat = MediaFormat.fromPath(dest);
-			ConversionMedia output = new ConversionMedia(media, dest, Double.NaN);
+			ResolvedMedia output = new ResolvedMedia(media, dest, configuration);
 			List<ConversionMedia> inputs = Utils.zip(mediaHolders.stream(), tempFiles.stream(), Pair::new)
 				.map((p) -> new ConversionMedia(p.a.media(), p.b, Double.NaN))
 				.collect(Collectors.toList());
 			
 			if(mediaHolders.size() == 1
-					&& mediaHolders.get(0).media().format().is(outFormat)) {
+					&& mediaHolders.get(0).media().format().is(configuration.outputFormat())) {
 				noConversion(output, inputs.get(0));
 			} else {
 				double duration = inputs.stream()
@@ -269,7 +268,7 @@ public final class SimpleDownloader implements Download, DownloadResult {
 		}
 		
 		if(worker != null) {
-			worker.interrupt();
+			worker.stop();
 		}
 		
 		if(!state.is(TaskStates.DONE)) {
