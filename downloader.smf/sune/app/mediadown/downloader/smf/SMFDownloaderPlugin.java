@@ -7,7 +7,7 @@ import sune.app.mediadown.plugin.PluginBase;
 
 @Plugin(name          = "downloader.smf",
 	    title         = "plugin.downloader.smf.title",
-	    version       = "00.02.08-0001",
+	    version       = "00.02.08-0002",
 	    author        = "Sune",
 	    updateBaseURL = "https://app.sune.tech/mediadown/dat/plugin/0002/downloader/smf/",
 	    updatable     = true)
