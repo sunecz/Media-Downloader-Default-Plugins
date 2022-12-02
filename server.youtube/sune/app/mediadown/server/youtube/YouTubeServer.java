@@ -1,5 +1,6 @@
 package sune.app.mediadown.server.youtube;
 
+import java.net.SocketTimeoutException;
 import java.net.URI;
 import java.net.URL;
 import java.util.ArrayList;
@@ -279,8 +280,11 @@ public class YouTubeServer implements Server {
 			"Segment-Count: (\\d+)\\s+Segment-Durations-Ms: ((?:\\d+(?:\\(r=\\d+\\))?,)+)"
 		);
 		private static final Pattern REGEX_OTF_SEGMENT_DURATION = Pattern.compile(
-  			"(\\d+)(?:\\(r=(\\d+)\\))?"
-  		);
+			"(\\d+)(?:\\(r=(\\d+)\\))?"
+		);
+		private static final Pattern REGEX_LIVE_SEGMENTS = Pattern.compile(
+			"Sequence-Number: (\\d+)\\s+(?:[^:]+: [^\\s]+\\s+)+"
+		);
 		
 		private static final double otfSegmentDuration(String string) {
 			Matcher matcher = REGEX_OTF_SEGMENT_DURATION.matcher(string);
@@ -300,66 +304,146 @@ public class YouTubeServer implements Server {
 		public static final FileSegmentsHolder<? extends FileSegment> buildSegments(String url) throws Exception {
 			Map<String, String> args = Utils.urlParams(url);
 			
-			if(args.get("source").equals("yt_otf")) {
-				// When YouTube uses OTF as the source the file is split into segments that are
-				// indexed from 0 to N. The information about the total number of segments (N) is
-				// included in the very first segment. Durations of the segments are also present
-				// there as a list of values, separated by comma, the format of each value is either
-				// "V(r=K)" or "V", where in the case of "V" the "(r=0)" is implicit, and if "(r=K)"
-				// is specified, it means that the duration is repeated additionally K times,
-				// i.e. if K=1, then the duration is counted 2 times, if K=4, then 5 times, etc.
-				// This way we can also calculate the total duration of the video without actually
-				// looking at any additional metadata in the source document.
-				
-				// (1) Obtain the content of the first segment
-				String segUrl = url + "&sq=0";
-				
-				// (2) Read the first segment's content and extract information about segments
-				String content = Web.request(new GetRequest(Utils.url(segUrl))).content;
-				Matcher matcher = REGEX_OTF_SEGMENTS.matcher(content);
-				
-				if(!matcher.find()) {
-					throw new IllegalStateException("Unable to find information about segments");
+			switch(args.get("source")) {
+				case "yt_otf": {
+					// When YouTube uses OTF as the source the file is split into segments that are
+					// indexed from 0 to N. The information about the total number of segments (N) is
+					// included in the very first segment. Durations of the segments are also present
+					// there as a list of values, separated by comma, the format of each value is either
+					// "V(r=K)" or "V", where in the case of "V" the "(r=0)" is implicit, and if "(r=K)"
+					// is specified, it means that the duration is repeated additionally K times,
+					// i.e. if K=1, then the duration is counted 2 times, if K=4, then 5 times, etc.
+					// This way we can also calculate the total duration of the video without actually
+					// looking at any additional metadata in the source document.
+					
+					// (1) Obtain the content of the first segment
+					String segUrl = url + "&sq=0";
+					
+					// (2) Read the first segment's content and extract information about segments
+					String content = Web.request(new GetRequest(Utils.url(segUrl))).content;
+					Matcher matcher = REGEX_OTF_SEGMENTS.matcher(content);
+					
+					if(!matcher.find()) {
+						throw new IllegalStateException("Unable to find information about segments");
+					}
+					
+					// (3) Parse the information about segments
+					int count = Integer.valueOf(matcher.group(1));
+					List<String> durations = List.of(matcher.group(2).split(","));
+					
+					// (4) Prepare the segments themselves
+					List<RemoteFileSegment> segments = new ArrayList<>();
+					for(int i = 0; i <= count; ++i) {
+						URI uri = Utils.uri(url + "&sq=" + i);
+						segments.add(new RemoteFileSegment(uri, MediaConstants.UNKNOWN_SIZE));
+					}
+					
+					// (5) Calculate the total duration
+					double duration = durations.stream()
+						.mapToDouble(Segmenter::otfSegmentDuration)
+						.sum();
+					
+					return new RemoteFileSegmentsHolder(segments, duration);
 				}
-				
-				// (3) Parse the information about segments
-				int count = Integer.valueOf(matcher.group(1));
-				List<String> durations = List.of(matcher.group(2).split(","));
-				
-				// (4) Prepare the segments themselves
-				List<RemoteFileSegment> segments = new ArrayList<>();
-				for(int i = 0; i <= count; ++i) {
-					URI uri = Utils.uri(url + "&sq=" + i);
-					segments.add(new RemoteFileSegment(uri, MediaConstants.UNKNOWN_SIZE));
+				case "yt_live_broadcast": {
+					// (1) Read the first segment's content and extract information about segments
+					final int numOfRetries = 5;
+					String content = null;
+					for(int i = 0; i <= numOfRetries; ++i) {
+						if(i > 0 && content == null) {
+							try {
+								Thread.sleep(1000);
+							} catch(InterruptedException ex) {
+								break;
+							}
+						}
+						
+						try {
+							content = Web.request(new GetRequest(Utils.url(url))).content;
+							
+							if(content != null) {
+								break;
+							}
+						} catch(SocketTimeoutException ex) {
+							continue;
+						}
+					}
+					
+					if(content == null) {
+						throw new IllegalStateException("Content is null");
+					}
+					
+					Matcher matcher = REGEX_LIVE_SEGMENTS.matcher(content);
+					
+					if(!matcher.find()) {
+						throw new IllegalStateException("Unable to find information about segments");
+					}
+					
+					Map<String, String> metadata = Stream.of(matcher.group().trim().split("\\r\\n"))
+						.map((l) -> l.split(": ", 2))
+						.collect(Collectors.toMap((a) -> a[0], (a) -> a[1]));
+					
+					long totalDuration = Long.valueOf(metadata.getOrDefault("Stream-Duration-Us", "0"));
+					long segmentDuration = Long.valueOf(metadata.getOrDefault("Target-Duration-Us", "0"));
+					
+					if(totalDuration <= 0L || segmentDuration <= 0L) {
+						throw new IllegalStateException("Invalid durations");
+					}
+					
+					long sequenceNumber = Long.valueOf(metadata.getOrDefault("Sequence-Number", "0"));
+					
+					if(sequenceNumber <= 0L) {
+						throw new IllegalStateException("Invalid sequence number");
+					}
+					
+					// (2) Calculate the offsets
+					
+					long averageSegmentDuration = Math.floorDiv(totalDuration, sequenceNumber);
+					
+					 // TODO: Make configurable
+					long startRelative = -1 * ((7 * 24 - 9) * 60) * 60 * 1000000L;
+					long endRelative = startRelative + 2 * 60 * 60 * 1000000L;
+					
+					long startSequenceNumber = Math.floorDiv(totalDuration + startRelative, averageSegmentDuration);
+					long endSequenceNumber = Math.floorDiv(totalDuration + endRelative, averageSegmentDuration);
+					
+					// Must decode the URL, otherwise the URL returns non-200 HTTP code
+					url = Utils.decodeURL(url);
+					
+					// (3) Prepare the segments themselves
+					List<RemoteFileSegment> segments = new ArrayList<>();
+					for(long i = startSequenceNumber; i < endSequenceNumber; ++i) {
+						URI uri = Utils.uri(url + "&sq=" + i);
+						segments.add(new RemoteFileSegment(uri, MediaConstants.UNKNOWN_SIZE));
+					}
+					
+					// (4) Calculate the total duration
+					double duration = (endSequenceNumber - startSequenceNumber) * averageSegmentDuration;
+					
+					return new RemoteFileSegmentsHolder(segments, duration);
 				}
-				
-				// (5) Calculate the total duration
-				double duration = durations.stream()
-					.mapToDouble(Segmenter::otfSegmentDuration)
-					.sum();
-				
-				return new RemoteFileSegmentsHolder(segments, duration);
-			} else {
-				long clen = Optional.ofNullable(args.get("clen"))
-					.map(Long::valueOf)
-					.orElse(MediaConstants.UNKNOWN_SIZE);
-				
-				if(clen == MediaConstants.UNKNOWN_SIZE) {
-					clen = Web.size(new HeadRequest(Utils.url(url), UserAgent.CHROME));
+				default: {
+					long clen = Optional.ofNullable(args.get("clen"))
+						.map(Long::valueOf)
+						.orElse(MediaConstants.UNKNOWN_SIZE);
+					
+					if(clen == MediaConstants.UNKNOWN_SIZE) {
+						clen = Web.size(new HeadRequest(Utils.url(url), UserAgent.CHROME));
+					}
+					
+					List<RemoteFileSegment> segments = new ArrayList<>();
+					for(long start = 0L, end; start < clen; start += SEGMENT_SIZE) {
+						end = Math.min(start + SEGMENT_SIZE, clen) - 1L; // end is inclusive, therefore N - 1
+						URI uri = Utils.uri(url + "&range=" + start + "-" + end);
+						segments.add(new RemoteFileSegment(uri, end - start + 1L));
+					}
+					
+					double duration = Optional.ofNullable(args.get("dur"))
+						.map(Double::valueOf)
+						.orElse(MediaConstants.UNKNOWN_DURATION);
+					
+					return new RemoteFileSegmentsHolder(segments, duration);
 				}
-				
-				List<RemoteFileSegment> segments = new ArrayList<>();
-				for(long start = 0L, end; start < clen; start += SEGMENT_SIZE) {
-					end = Math.min(start + SEGMENT_SIZE, clen) - 1L; // end is inclusive, therefore N - 1
-					URI uri = Utils.uri(url + "&range=" + start + "-" + end);
-					segments.add(new RemoteFileSegment(uri, end - start + 1L));
-				}
-				
-				double duration = Optional.ofNullable(args.get("dur"))
-					.map(Double::valueOf)
-					.orElse(MediaConstants.UNKNOWN_DURATION);
-				
-				return new RemoteFileSegmentsHolder(segments, duration);
 			}
 		}
 	}
