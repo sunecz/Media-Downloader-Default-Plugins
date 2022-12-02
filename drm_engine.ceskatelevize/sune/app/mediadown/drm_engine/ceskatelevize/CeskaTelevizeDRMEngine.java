@@ -11,6 +11,7 @@ import org.cef.browser.CefFrame;
 import org.cef.network.CefCookie;
 import org.cef.network.CefCookieManager;
 
+import io.netty.handler.codec.http.FullHttpRequest;
 import sune.app.mediadown.media.Media;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadownloader.drm.DRMBrowser;
@@ -95,12 +96,13 @@ public class CeskaTelevizeDRMEngine implements DRMEngine {
 		}
 		
 		@Override
-		public boolean shouldModifyResponse(String uri, String mimeType, Charset charset) {
+		public boolean shouldModifyResponse(String uri, String mimeType, Charset charset, FullHttpRequest request) {
 			return uri.contains("ivysilani/client-playlist/") || mimeType.equalsIgnoreCase("application/dash+xml");
 		}
 		
 		@Override
-		public String modifyResponse(String uri, String mimeType, Charset charset, String content) {
+		public String modifyResponse(String uri, String mimeType, Charset charset, String content,
+				FullHttpRequest request) {
 			if(uri.contains("ivysilani/client-playlist/")) {
 				SSDCollection json = SSDF.readJSON(content);
 				
