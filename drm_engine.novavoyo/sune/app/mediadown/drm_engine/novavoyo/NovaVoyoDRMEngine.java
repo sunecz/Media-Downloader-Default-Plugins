@@ -156,12 +156,13 @@ public class NovaVoyoDRMEngine implements DRMEngine {
 		}
 		
 		@Override
-		public boolean shouldModifyResponse(String uri, String mimeType, Charset charset) {
+		public boolean shouldModifyResponse(String uri, String mimeType, Charset charset, FullHttpRequest request) {
 			return mimeType.equalsIgnoreCase("application/dash+xml");
 		}
 		
 		@Override
-		public String modifyResponse(String uri, String mimeType, Charset charset, String content) {
+		public String modifyResponse(String uri, String mimeType, Charset charset, String content,
+				FullHttpRequest request) {
 			if(mimeType.equalsIgnoreCase("application/dash+xml")) {
 				// Select the quality we want
 				MPDQualityModifier modifier = MPDQualityModifier.fromString(content);
