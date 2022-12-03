@@ -35,6 +35,7 @@
 		<!-- Build all drm engines -->
 		<antcall target="build_drm_engine"><param name="var.name" value="ceskatelevize" /></antcall>
 		<antcall target="build_drm_engine"><param name="var.name" value="novavoyo"      /></antcall>
+		<antcall target="build_drm_engine"><param name="var.name" value="iprima"        /></antcall>
 	</target>
 	<!-- Builds a media engine -->
 	<target name="build_media_engine">
