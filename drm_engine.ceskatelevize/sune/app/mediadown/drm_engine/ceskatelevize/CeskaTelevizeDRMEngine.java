@@ -60,7 +60,7 @@ public class CeskaTelevizeDRMEngine implements DRMEngine {
 		private static final String URL_IFRAME;
 		
 		static {
-			URL_IFRAME = "https://www.ceskatelevize.cz/ivysilani/embed/iFramePlayer.php";
+			URL_IFRAME = "https://player.ceskatelevize.cz/";
 		}
 		
 		public CTDRMResolver(DRMContext context, String url, Path output, Media media) {
@@ -80,7 +80,7 @@ public class CeskaTelevizeDRMEngine implements DRMEngine {
 				CefCookieManager.getGlobalManager().setCookie(url, cookieConsent);
 			} else if(frame.getURL().startsWith(URL_IFRAME)) {
 				JS.Record.include(frame);
-				JS.Record.activate(frame, "#video");
+				JS.Record.activate(frame, "video[class^='video-']");
 			}
 		}
 		
@@ -88,6 +88,7 @@ public class CeskaTelevizeDRMEngine implements DRMEngine {
 		public void onLoadEnd(DRMBrowser browser, CefFrame frame, int httpStatusCode) {
 			if(frame.getURL().startsWith(url)) {
 				JS.Helper.include(frame);
+				JS.Helper.enableInterframeCommunication(frame);
 				JS.Helper.click(browser, frame, "main button");
 			} else if(frame.getURL().startsWith(URL_IFRAME)) {
 				JS.Helper.include(frame);
