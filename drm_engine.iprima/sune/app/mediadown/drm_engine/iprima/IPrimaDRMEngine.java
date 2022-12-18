@@ -183,8 +183,8 @@ public class IPrimaDRMEngine implements DRMEngine {
 		
 		@Override
 		public boolean shouldModifyResponse(String uri, String mimeType, Charset charset, FullHttpRequest request) {
-			return mimeType.equalsIgnoreCase("application/dash+xml")
-						|| (request.getMethod() == HttpMethod.GET && isAPIPlayURL(uri));
+			return request.getMethod() == HttpMethod.GET
+						&& (mimeType.equalsIgnoreCase("application/dash+xml") || isAPIPlayURL(uri));
 		}
 		
 		@Override
@@ -195,7 +195,7 @@ public class IPrimaDRMEngine implements DRMEngine {
 				MPDQualityModifier modifier = MPDQualityModifier.fromString(content);
 				modifier.modify(media.quality());
 				content = modifier.xml().html();
-			} else if(request.getMethod() == HttpMethod.GET && isAPIPlayURL(uri)) {
+			} else if(isAPIPlayURL(uri)) {
 				SSDCollection json = JSON.read(content);
 				
 				// Remove ads before, after and throughout the video playback
