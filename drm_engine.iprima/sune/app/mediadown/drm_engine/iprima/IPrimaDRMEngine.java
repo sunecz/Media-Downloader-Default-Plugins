@@ -113,10 +113,12 @@ public class IPrimaDRMEngine implements DRMEngine {
 		   !protocol.equals("https"))
 			return false;
 		// Check the host
-		String host = urlObj.getHost();
-		if((host.startsWith("www."))) // www prefix
-			host = host.substring(4);
-		if(!host.equals("iprima.cz"))
+		String[] hostParts = urlObj.getHost().split("\\.", 2);
+		if(hostParts.length < 2
+				// Check only the second and top level domain names,
+				// since there are many subdomains, and there may be
+				// possibly even more in the future.
+				|| !hostParts[1].equalsIgnoreCase("iprima.cz"))
 			return false;
 		// Otherwise, it is probably compatible URL
 		return true;
