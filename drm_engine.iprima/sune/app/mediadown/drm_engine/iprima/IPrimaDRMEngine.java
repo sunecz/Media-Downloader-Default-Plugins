@@ -155,8 +155,9 @@ public class IPrimaDRMEngine implements DRMEngine {
 				}
 				
 				JS.Helper.include(frame);
+				JS.Helper.hideVideoElementStyle(frame);
 				JS.Record.include(frame);
-				JS.Record.activate(frame, ".video-js[id^=\"video-player-\"] > video");
+				JS.Record.activate(frame, ".video-js[id^='video-player-'] > video");
 			} else if(frame.getURL().startsWith("https://auth.iprima.cz")) {
 				// For the system to think we are logged in, we must also put some information
 				// to the localStorage, otherwise we would be logged out.
@@ -166,9 +167,7 @@ public class IPrimaDRMEngine implements DRMEngine {
 		
 		@Override
 		public void onLoadEnd(DRMBrowser browser, CefFrame frame, int httpStatusCode) {
-			if(frame.getURL().startsWith(url)) {
-				JS.Helper.hideVideoElementStyle(frame);
-			}
+			// Nothing to do
 		}
 		
 		@Override
