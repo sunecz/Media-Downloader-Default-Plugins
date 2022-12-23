@@ -275,6 +275,7 @@ public class YouTubeServer implements Server {
 		// Why this number? See: https://tyrrrz.me/blog/reverse-engineering-youtube
 		private static final long SEGMENT_SIZE = 10L * 1024L * 1024L; // 10 MiB
 		private static final double MS_TO_SECONDS = 1e-3;
+		private static final long SECONDS_TO_MICROSECONDS = 1000000L;
 		
 		private static final Pattern REGEX_OTF_SEGMENTS = Pattern.compile(
 			"Segment-Count: (\\d+)\\s+Segment-Durations-Ms: ((?:\\d+(?:\\(r=\\d+\\))?,)+)"
@@ -396,14 +397,14 @@ public class YouTubeServer implements Server {
 						throw new IllegalStateException("Invalid sequence number");
 					}
 					
+					// TODO: Make configurable, internally probably as (start, duration)
+					long startSeconds = -6 * 60 * 60;
+					long durationSeconds = 2 * 60 * 60;
+					
 					// (2) Calculate the offsets
-					
+					long startRelative = startSeconds * SECONDS_TO_MICROSECONDS;
+					long endRelative = startRelative + durationSeconds * SECONDS_TO_MICROSECONDS;
 					long averageSegmentDuration = Math.floorDiv(totalDuration, sequenceNumber);
-					
-					 // TODO: Make configurable
-					long startRelative = -1 * ((7 * 24 - 9) * 60) * 60 * 1000000L;
-					long endRelative = startRelative + 2 * 60 * 60 * 1000000L;
-					
 					long startSequenceNumber = Math.floorDiv(totalDuration + startRelative, averageSegmentDuration);
 					long endSequenceNumber = Math.floorDiv(totalDuration + endRelative, averageSegmentDuration);
 					
