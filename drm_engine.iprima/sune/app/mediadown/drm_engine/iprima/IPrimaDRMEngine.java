@@ -169,7 +169,15 @@ public class IPrimaDRMEngine implements DRMEngine {
 		
 		@Override
 		public void onLoadEnd(DRMBrowser browser, CefFrame frame, int httpStatusCode) {
-			// Nothing to do
+			if(frame.getURL().startsWith(url)) {
+				// "Disable" the autoplay next feature. This will actually just move
+				// the threshold when the autoplay is triggered way out of the range
+				// of the actual video duration, hopefully.
+				JS.execute(frame, ""
+					+ "document.querySelector('#popup-autoplay-next')"
+					+ "    .setAttribute('data-current-timeline-treshold', 100 * 24 * 60 * 60)" // 100 days
+				);
+			}
 		}
 		
 		@Override
