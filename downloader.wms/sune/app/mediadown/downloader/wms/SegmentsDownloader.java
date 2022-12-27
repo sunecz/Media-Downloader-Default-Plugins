@@ -5,6 +5,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpClient.Redirect;
 import java.net.http.HttpClient.Version;
+import java.net.http.HttpHeaders;
 import java.net.http.HttpRequest;
 import java.net.http.HttpRequest.BodyPublishers;
 import java.net.http.HttpResponse;
@@ -16,6 +17,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Spliterator;
 import java.util.Spliterators;
 import java.util.concurrent.TimeUnit;
@@ -26,6 +28,8 @@ import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.ToLongFunction;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
@@ -115,6 +119,8 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		= ConcurrentVarLazyLoader.of(SegmentsDownloader::buildHttpClient);
 	private static final ConcurrentVarLazyLoader<HttpRequest.Builder> httpRequestBuilder
 		= ConcurrentVarLazyLoader.of(SegmentsDownloader::buildHttpRequestBuilder);
+	private static final ConcurrentVarLazyLoader<Pattern> regexContentRange
+		= ConcurrentVarLazyLoader.of(SegmentsDownloader::buildRegexContentRange);
 	
 	SegmentsDownloader(Media media, Path dest, MediaDownloadConfiguration configuration, int maxRetryAttempts,
 			boolean asyncTotalSize, int waitOnRetryMs) {
@@ -167,10 +173,51 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 				          .setHeader("User-Agent", Shared.USER_AGENT);
 	}
 	
+	private static final Pattern buildRegexContentRange() {
+		// Source: https://httpwg.org/specs/rfc9110.html#field.content-range
+		return Pattern.compile("^([!#$%&'*+\\-.^_`|~0-9A-Za-z]+) (?:(\\d+)-(\\d+)/(\\d+|\\*)|\\*/(\\d+))$");
+	}
+	
 	private static final long sizeOf(URI uri, Map<String, String> headers) throws Exception {
 		HttpRequest request = httpRequestBuilder.value().copy().uri(uri).build();
 		HttpResponse<Void> response = httpClient.value().send(request, BodyHandlers.discarding());
-		return response.headers().firstValueAsLong("content-length").orElse(MediaConstants.UNKNOWN_SIZE);
+		
+		if(response.statusCode() != 200) {
+			return MediaConstants.UNKNOWN_SIZE;
+		}
+		
+		HttpHeaders responseHeaders = response.headers();
+		
+		// Parse Content-Range header, if present
+		Optional<String> contentRange = responseHeaders.firstValue("content-range");
+		if(contentRange.isPresent()) {
+			Matcher matcher = regexContentRange.value().matcher(contentRange.get());
+			
+			if(matcher.matches()) {
+				String unit = matcher.group(1);
+				
+				switch(unit) {
+					case "bytes": {
+						String strRangeStart = matcher.group(2);
+						
+						if(strRangeStart == null) {
+							return Long.valueOf(matcher.group(5));
+						}
+						
+						long rangeStart = Long.valueOf(strRangeStart);
+						long rangeEnd = Long.valueOf(matcher.group(3));
+						return rangeEnd - rangeStart + 1L;
+					}
+					default: {
+						// Not supported, ignore the header
+						break;
+					}
+				}
+			}
+		}
+		
+		// Parse Content-Length header, if present
+		return responseHeaders.firstValueAsLong("content-length").orElse(MediaConstants.UNKNOWN_SIZE);
 	}
 	
 	private static final Pair<Boolean, Long> sizeOrEstimatedSize(List<RemoteFile> segments, List<RemoteFile> subtitles) {
