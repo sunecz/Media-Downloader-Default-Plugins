@@ -48,6 +48,7 @@ import sune.app.mediadown.util.Opt;
 import sune.app.mediadown.util.Pair;
 import sune.app.mediadown.util.SyncObject;
 import sune.app.mediadown.util.Utils;
+import sune.app.mediadown.util.Utils.Ignore;
 import sune.app.mediadown.util.VideoUtils;
 import sune.app.mediadown.util.Web;
 import sune.app.mediadown.util.Web.GetRequest;
@@ -125,7 +126,7 @@ public final class SimpleDownloader implements Download, DownloadResult {
 				} else {
 					worker.submit(() -> {
 						HeadRequest request = new HeadRequest(Utils.url(mh.media().uri()), Shared.USER_AGENT, HEADERS);
-						long size = Utils.ignore(() -> Web.size(request), MediaConstants.UNKNOWN_SIZE);
+						long size = Ignore.defaultValue(() -> Web.size(request), MediaConstants.UNKNOWN_SIZE);
 						mh.size(size);
 						if(size > 0L) theSize.getAndAdd(size);
 						tracker.progress(counter.incrementAndGet() / count);
@@ -164,7 +165,7 @@ public final class SimpleDownloader implements Download, DownloadResult {
 		
 		eventRegistry.call(DownloadEvent.BEGIN, downloader);
 		manager.addEventListener(TrackerEvent.UPDATE, (t) -> eventRegistry.call(DownloadEvent.UPDATE, new Pair<>(downloader, manager)));
-		Utils.ignore(() -> NIO.createFile(dest));
+		Ignore.callVoid(() -> NIO.createFile(dest));
 		
 		List<MediaHolder> mediaHolders = MediaUtils.solids(media).stream()
 				.filter((m) -> m.type().is(MediaType.VIDEO) || m.type().is(MediaType.AUDIO))
@@ -188,7 +189,7 @@ public final class SimpleDownloader implements Download, DownloadResult {
 			String fileNameNoType = Utils.fileNameNoType(dest.getFileName().toString());
 			for(int i = 0, l = mediaHolders.size(); i < l; ++i) {
 				Path tempFile = dest.getParent().resolve(fileNameNoType + "." + i + ".part");
-				Utils.ignore(() -> NIO.deleteFile(tempFile));
+				Ignore.callVoid(() -> NIO.deleteFile(tempFile));
 				tempFiles.add(tempFile);
 			}
 			

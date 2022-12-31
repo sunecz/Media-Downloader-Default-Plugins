@@ -77,6 +77,7 @@ import sune.app.mediadown.util.Reflection2;
 import sune.app.mediadown.util.Reflection3;
 import sune.app.mediadown.util.Threads;
 import sune.app.mediadown.util.Utils;
+import sune.app.mediadown.util.Utils.Ignore;
 import sune.app.mediadown.util.Web;
 import sune.app.mediadown.util.WorkerProxy;
 import sune.app.mediadown.util.WorkerUpdatableTask;
@@ -740,7 +741,7 @@ public final class TVBarrandovEngine implements MediaEngine {
 		
 		private final void updateDatePicker(DatePicker picker, String text) {
 			LocalDate parsedDate;
-			if((parsedDate = Utils.ignore(() -> picker.getConverter().fromString(text))) != null) {
+			if((parsedDate = Ignore.call(() -> picker.getConverter().fromString(text))) != null) {
 				// If successfully parsed, set the date as the picker's value
 				picker.setValue(parsedDate);
 			}

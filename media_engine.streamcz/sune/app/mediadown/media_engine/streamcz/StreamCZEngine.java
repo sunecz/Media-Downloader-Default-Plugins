@@ -67,6 +67,7 @@ import sune.app.mediadown.util.Reflection2;
 import sune.app.mediadown.util.Reflection3;
 import sune.app.mediadown.util.Threads;
 import sune.app.mediadown.util.Utils;
+import sune.app.mediadown.util.Utils.Ignore;
 import sune.app.mediadown.util.Web;
 import sune.app.mediadown.util.Web.GetRequest;
 import sune.app.mediadown.util.Web.StreamResponse;
@@ -828,7 +829,7 @@ public final class StreamCZEngine implements MediaEngine {
 		protected final void await() throws Exception {
 			executor.shutdown();
 			// Do not throw the InterruptedException (i.e. when cancelled the loop, etc.)
-			Utils.ignore(() -> executor.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS));
+			Ignore.callVoid(() -> executor.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS));
 		}
 		
 		protected final void submit(T value) {

@@ -83,6 +83,7 @@ import sune.app.mediadown.util.Reflection2;
 import sune.app.mediadown.util.Reflection3;
 import sune.app.mediadown.util.SyncObject;
 import sune.app.mediadown.util.Utils;
+import sune.app.mediadown.util.Utils.Ignore;
 import sune.app.mediadown.util.Web;
 import sune.app.mediadown.util.Web.GetRequest;
 import sune.app.mediadown.util.Worker;
@@ -443,7 +444,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		
 		eventRegistry.call(DownloadEvent.BEGIN, downloader);
 		manager.addEventListener(TrackerEvent.UPDATE, (t) -> eventRegistry.call(DownloadEvent.UPDATE, new Pair<>(downloader, manager)));
-		Utils.ignore(() -> NIO.createFile(dest));
+		Ignore.callVoid(() -> NIO.createFile(dest));
 		
 		// Prepare the segments that should be downloaded
 		List<FileSegmentsHolder<?>> segmentsHolders = MediaUtils.segments(media);
@@ -482,7 +483,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 			
 			for(int i = 0, l = segmentsHolders.size(); i < l; ++i) {
 				Path tempFile = dest.getParent().resolve(fileNameNoType + "." + i + ".part");
-				Utils.ignore(() -> NIO.deleteFile(tempFile));
+				Ignore.callVoid(() -> NIO.deleteFile(tempFile));
 				tempFiles.add(tempFile);
 			}
 			
@@ -904,7 +905,8 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 							long fileSize = MediaConstants.UNKNOWN_SIZE;
 							
 							for(int i = 0; fileSize < 0L && i <= maxRetryAttempts; ++i) {
-								fileSize = Utils.ignore(() -> sizeOf(file.uri(), HEADERS), MediaConstants.UNKNOWN_SIZE);
+								fileSize = Ignore.defaultValue(() -> sizeOf(file.uri(), HEADERS),
+								                               MediaConstants.UNKNOWN_SIZE);
 							}
 							
 							file.size(fileSize);
@@ -986,7 +988,8 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 								
 								if(fileSize <= 0L) {
 									for(int i = 0; fileSize < 0L && i <= maxRetryAttempts; ++i) {
-										fileSize = Utils.ignore(() -> sizeOf(file.uri(), HEADERS), MediaConstants.UNKNOWN_SIZE);
+										fileSize = Ignore.defaultValue(() -> sizeOf(file.uri(), HEADERS),
+										                               MediaConstants.UNKNOWN_SIZE);
 									}
 									
 									sync(file, RemoteFile::size, fileSize);

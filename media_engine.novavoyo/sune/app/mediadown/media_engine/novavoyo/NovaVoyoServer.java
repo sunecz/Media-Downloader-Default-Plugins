@@ -59,6 +59,7 @@ import sune.app.mediadown.util.Reflection2;
 import sune.app.mediadown.util.Reflection3;
 import sune.app.mediadown.util.Threads;
 import sune.app.mediadown.util.Utils;
+import sune.app.mediadown.util.Utils.Ignore;
 import sune.app.mediadown.util.Web;
 import sune.app.mediadown.util.WorkerProxy;
 import sune.util.ssdf2.SSDCollection;
@@ -309,7 +310,7 @@ public final class NovaVoyoServer implements Server {
 		}
 		
 		private static final void saveConfiguration() {
-			Utils.ignore(() -> configuration().writer().save(configurationPath()), MediaDownloader::error);
+			Ignore.callVoid(() -> configuration().writer().save(configurationPath()), MediaDownloader::error);
 		}
 		
 		private static final void deviceReset() throws Exception {
