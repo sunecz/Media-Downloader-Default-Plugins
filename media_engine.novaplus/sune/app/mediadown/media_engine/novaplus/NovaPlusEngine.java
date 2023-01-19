@@ -154,78 +154,78 @@ public final class NovaPlusEngine implements MediaEngine {
 	private final int parseEpisodesPage(Program program, List<Episode> episodes, Document document,
 			boolean onlyFullEpisodes, WorkerProxy proxy,
 			CheckedBiFunction<WorkerProxy, Episode, Boolean> function) throws Exception {
-		Element elLoadMore = document.selectFirst(SEL_EPISODES_LOAD_MORE);
+		// Always obtain the first page from the document's content
+		Elements elItems = document.select(SEL_EPISODES);
+		if(elItems != null
+				&& parseEpisodeList(program, episodes, elItems, onlyFullEpisodes, proxy, function) == 2) {
+			return 1; // Do not continue
+		}
 		
 		// Check whether the load more button exists
-		if(elLoadMore != null) {
-			// If the button exists, load the episodes the dynamic way
-			String href = elLoadMore.absUrl("data-href");
-			Map<String, String> params = Utils.urlParams(href);
-			Map<String, String> excludedMap = params.entrySet().stream()
-				.filter((e) -> e.getKey().startsWith("excluded"))
-				.collect(Collectors.toMap(Entry::getKey, Entry::getValue));
-			// The random variable is here due to caching issue, this should circumvent it
-			String random = "&rand=" + String.valueOf(Math.random() * 1000000.0);
-			String excluded = random + '&' + Utils.joinURLParams(excludedMap);
-			int offset = Integer.valueOf(params.get("offset"));
-			String content = params.get("content");
-			
-			Map<String, String> headers = Map.of(
-				"Cache-Control", "no-cache, no-store, must-revalidate",
-				"Pragma", "no-cache",
-				"Expires", "0",
-				"X-Requested-With", "XMLHttpRequest"
-			);
-			
-			// The offset can be negative, therefore we can use it to obtain the first page
-			// with non-filtered/altered content.
-			final int itemsPerPage = document.select(SEL_EPISODES).size();
-			final int offsetShift = -itemsPerPage;
-			final int constPage = 2; // Must be > 1
-			
-			// Load episodes from other pages
-			Elements elItems = null;
-			do {
-				String pageURL = Utils.format(URL_EPISODE_LIST,
-					"page",     constPage,
-					"offset",   offset + offsetShift,
-					"content",  content,
-					"excluded", excluded
-				);
-				String pageContent = null;
-				Exception timeoutException = null;
-				int ctr = 0;
-				int numOfRetries = 5;
-				
-				// Sometimes a timeout can occur, retry to obtain the content again if it is null
-				do {
-					timeoutException = null;
-					
-					try {
-						pageContent = Web.request(new GetRequest(Utils.url(pageURL), Shared.USER_AGENT, headers)).content;
-					} catch(SocketTimeoutException ex) {
-						timeoutException = ex;
-					}
-				} while(pageContent == null && ++ctr <= numOfRetries);
-				
-				// If even retried request timed out, just throw the exception
-				if(timeoutException != null) throw timeoutException;
-				
-				if(pageContent == null) continue;
-				Document doc = Utils.parseDocument(pageContent, Utils.baseURL(pageURL));
-				elItems = doc.select(SEL_EPISODES);
-				
-				offset += itemsPerPage;
-			} while(elItems != null
-						&& parseEpisodeList(program, episodes, elItems, onlyFullEpisodes, proxy, function) == 0);
-		} else {
-			// If the button does NOT exist, load the episodes from the document
-			Elements elItems = document.select(SEL_EPISODES);
-			if(elItems != null
-					&& parseEpisodeList(program, episodes, elItems, onlyFullEpisodes, proxy, function) == 2) {
-				return 1; // Do not continue
-			}
+		Element elLoadMore = document.selectFirst(SEL_EPISODES_LOAD_MORE);
+		if(elLoadMore == null) {
+			return 0; // No more episodes present, nothing else to do
 		}
+		
+		// If the button exists, load the episodes the dynamic way
+		String href = elLoadMore.absUrl("data-href");
+		Map<String, String> params = Utils.urlParams(href);
+		Map<String, String> excludedMap = params.entrySet().stream()
+			.filter((e) -> e.getKey().startsWith("excluded"))
+			.collect(Collectors.toMap(Entry::getKey, Entry::getValue));
+		// The random variable is here due to caching issue, this should circumvent it
+		String random = "&rand=" + String.valueOf(Math.random() * 1000000.0);
+		String excluded = random + '&' + Utils.joinURLParams(excludedMap);
+		int offset = Integer.valueOf(params.get("offset"));
+		String content = params.get("content");
+		
+		Map<String, String> headers = Map.of(
+			"Cache-Control", "no-cache, no-store, must-revalidate",
+			"Pragma", "no-cache",
+			"Expires", "0",
+			"X-Requested-With", "XMLHttpRequest"
+		);
+		
+		// The offset can be negative, therefore we can use it to obtain the first page
+		// with non-filtered/altered content.
+		final int itemsPerPage = elItems != null ? elItems.size() : 0;
+		final int constPage = 2; // Must be > 1
+		
+		// Load episodes from other pages
+		elItems = null;
+		do {
+			String pageURL = Utils.format(URL_EPISODE_LIST,
+				"page",     constPage,
+				"offset",   offset,
+				"content",  content,
+				"excluded", excluded
+			);
+			String pageContent = null;
+			Exception timeoutException = null;
+			int ctr = 0;
+			int numOfRetries = 5;
+			
+			// Sometimes a timeout can occur, retry to obtain the content again if it is null
+			do {
+				timeoutException = null;
+				
+				try {
+					pageContent = Web.request(new GetRequest(Utils.url(pageURL), Shared.USER_AGENT, headers)).content;
+				} catch(SocketTimeoutException ex) {
+					timeoutException = ex;
+				}
+			} while(pageContent == null && ++ctr <= numOfRetries);
+			
+			// If even retried request timed out, just throw the exception
+			if(timeoutException != null) throw timeoutException;
+			
+			if(pageContent == null) continue;
+			Document doc = Utils.parseDocument(pageContent, Utils.baseURL(pageURL));
+			elItems = doc.select(SEL_EPISODES);
+			
+			offset += itemsPerPage;
+		} while(elItems != null
+					&& parseEpisodeList(program, episodes, elItems, onlyFullEpisodes, proxy, function) == 0);
 		
 		return 0;
 	}
