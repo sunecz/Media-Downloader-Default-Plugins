@@ -153,8 +153,9 @@ public final class SimpleDownloader implements Download, DownloadResult {
 	
 	@Override
 	public final void start() throws Exception {
-		if(state.is(TaskStates.RUNNING))
+		if(state.is(TaskStates.STARTED) && state.is(TaskStates.RUNNING)) {
 			return; // Nothing to do
+		}
 		
 		state.set(TaskStates.RUNNING);
 		state.set(TaskStates.STARTED);
