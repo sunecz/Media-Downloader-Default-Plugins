@@ -559,9 +559,18 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 							exception = ex;
 						}
 						
+						long size = segment.size();
+						
+						// Check whether the size is already available. If not, get it from
+						// the downloader itself. This should fix an issue when just a part
+						// of the whole segment was downloaded and the size couldn't be checked,
+						// thus the file became incomplete/corrupted.
+						if(size < 0L) {
+							size = downloader.totalBytes();
+						}
+						
 						// Check whether the downloaded size equals the total size, if not
 						// just retry the download again.
-						long size = segment.size();
 						if(size >= 0L && downloadedBytes != size) {
 							error = true;
 						}
