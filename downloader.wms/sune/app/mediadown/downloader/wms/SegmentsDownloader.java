@@ -18,14 +18,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Spliterator;
-import java.util.Spliterators;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiConsumer;
-import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.ToLongFunction;
 import java.util.regex.Matcher;
@@ -33,7 +30,6 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
-import java.util.stream.StreamSupport;
 
 import sune.app.mediadown.Download;
 import sune.app.mediadown.InternalState;
@@ -267,83 +263,8 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		return IntStream.range(from, to).map((i) -> to - i + from - 1).mapToObj(list::get);
 	}
 	
-	// Source: https://stackoverflow.com/a/23529010
-	private static final <A, B, C> Stream<C> zip(Stream<? extends A> a, Stream<? extends B> b,
-			BiFunction<? super A, ? super B, ? extends C> zipper) {
-		Objects.requireNonNull(zipper);
-		Spliterator<? extends A> aSpliterator = Objects.requireNonNull(a).spliterator();
-		Spliterator<? extends B> bSpliterator = Objects.requireNonNull(b).spliterator();
-		
-		// Zipping looses DISTINCT and SORTED characteristics
-		int characteristics = aSpliterator.characteristics()
-				            & bSpliterator.characteristics()
-				            & ~(Spliterator.DISTINCT | Spliterator.SORTED);
-		
-		long zipSize = ((characteristics & Spliterator.SIZED) != 0)
-			? Math.min(aSpliterator.getExactSizeIfKnown(), bSpliterator.getExactSizeIfKnown())
-			: -1L;
-		
-		Iterator<A> aIterator = Spliterators.iterator(aSpliterator);
-		Iterator<B> bIterator = Spliterators.iterator(bSpliterator);
-		Iterator<C> cIterator = new Iterator<C>() {
-			
-			@Override
-			public boolean hasNext() {
-				return aIterator.hasNext() && bIterator.hasNext();
-			}
-			
-			@Override
-			public C next() {
-				return zipper.apply(aIterator.next(), bIterator.next());
-			}
-		};
-		
-		Spliterator<C> split = Spliterators.spliterator(cIterator, zipSize, characteristics);
-		return StreamSupport.stream(split, a.isParallel() || b.isParallel());
-	}
-	
 	private static final InternalDownloader createDownloader(TrackerManager manager) {
 		return new FileDownloader(manager);
-	}
-	
-	private static final String formatTime(long time, TimeUnit unit, boolean alwaysShowMs) {
-		StringBuilder builder = new StringBuilder();
-		boolean written = false;
-		
-		long hours = unit.toHours(time);
-		if(hours > 0L) {
-			builder.append(hours).append('h');
-			time = time - unit.convert(hours, TimeUnit.HOURS);
-			written = true;
-		}
-		
-		long minutes = unit.toMinutes(time);
-		if(minutes > 0L) {
-			if(written) {
-				builder.append(' ');
-			}
-			
-			builder.append(minutes).append('m');
-			time = time - unit.convert(minutes, TimeUnit.MINUTES);
-			written = true;
-		}
-		
-		if(written) {
-			builder.append(' ');
-		}
-		
-		long seconds = unit.toSeconds(time);
-		builder.append(seconds);
-		time = time - unit.convert(seconds, TimeUnit.SECONDS);
-		
-		long millis = unit.toMillis(time);
-		if(millis > 0L || alwaysShowMs) {
-			builder.append('.').append(String.format("%03d", millis));
-		}
-		
-		builder.append('s');
-		
-		return builder.toString();
 	}
 	
 	private final void waitMs(long ms, TimeUpdateTrackerBase tracker) {
@@ -451,7 +372,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		List<FileSegmentsHolder<?>> segmentsHolders = MediaUtils.segments(media);
 		List<Media> mediaSingles = mediaSegmentedSingles(media);
 		@SuppressWarnings("unchecked")
-		List<RemoteFile> segments = zip(segmentsHolders.stream(), mediaSingles.stream(), Pair::new)
+		List<RemoteFile> segments = Utils.zip(segmentsHolders.stream(), mediaSingles.stream(), Pair::new)
 			.flatMap((p) -> {
 				double estimatedSize = TotalSizeEstimator.estimate(p.b);
 				List<FileSegment> fileSegments = (List<FileSegment>) p.a.segments();
@@ -640,7 +561,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 				.max().orElse(Double.NaN);
 			// Convert the segments files into the final file
 			ResolvedMedia output = new ResolvedMedia(media, dest, configuration);
-			List<ConversionMedia> inputs = zip(mediaSingles.stream(), tempFiles.stream(), Pair::new)
+			List<ConversionMedia> inputs = Utils.zip(mediaSingles.stream(), tempFiles.stream(), Pair::new)
 				.map((p) -> new ConversionMedia(p.a, p.b, Double.NaN))
 				.collect(Collectors.toList());
 			doConversion(output, duration, inputs);
@@ -831,8 +752,8 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 			if(timeMs >= 0L) {
 				String format = translation.getSingle("progress.retry_attempt_wait");
 				progressText = Utils.format(format, "attempt", attempt, "total_attempts", maxRetryAttempts,
-					"time", formatTime(timeMs, TimeUnit.MILLISECONDS, true),
-					"total_time", formatTime(totalTimeMs, TimeUnit.MILLISECONDS, true));
+					"time", Utils.OfFormat.time(timeMs, TimeUnit.MILLISECONDS, true),
+					"total_time", Utils.OfFormat.time(totalTimeMs, TimeUnit.MILLISECONDS, true));
 			} else {
 				String format = translation.getSingle("progress.retry_attempt");
 				progressText = Utils.format(format, "attempt", attempt, "total_attempts", maxRetryAttempts);
