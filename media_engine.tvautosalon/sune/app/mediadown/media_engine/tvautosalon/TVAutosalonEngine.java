@@ -323,7 +323,7 @@ public final class TVAutosalonEngine implements MediaEngine {
 		if(frameURL == null) {
 			return null;
 		}
-
+		
 		// Send the request to obtain the frame's content
 		Map<String, String> headers = Map.of("Referer", URL_REFERER);
 		String content = Web.request(new GetRequest(Utils.url(frameURL), Shared.USER_AGENT, headers)).content;
