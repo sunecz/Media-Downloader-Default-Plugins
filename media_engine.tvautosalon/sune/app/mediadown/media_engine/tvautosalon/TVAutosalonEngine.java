@@ -30,17 +30,15 @@ import sune.app.mediadown.media.VideoMedia;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.util.CheckedBiFunction;
-import sune.app.mediadown.util.JavaScript;
+import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.Pair;
 import sune.app.mediadown.util.Utils;
+import sune.app.mediadown.util.Utils.JS;
 import sune.app.mediadown.util.Web;
 import sune.app.mediadown.util.Web.GetRequest;
 import sune.app.mediadown.util.WorkerProxy;
 import sune.app.mediadown.util.WorkerUpdatableTask;
 import sune.util.ssdf2.SSDCollection;
-import sune.util.ssdf2.SSDF;
-import sune.util.ssdf2.SSDObject;
-import sune.util.ssdf2.SSDType;
 
 public final class TVAutosalonEngine implements MediaEngine {
 	
@@ -73,6 +71,85 @@ public final class TVAutosalonEngine implements MediaEngine {
 			case "epizody":            return "Autosalon";
 			default:                   return programName;
 		}
+	}
+	
+	private static final String mediaTitle(Document document) {
+		// Gather as much information as possible and construct the title
+		String programName = "";
+		String numSeason = "";
+		String numEpisode = "";
+		String episodeName = "";
+		
+		boolean first = true;
+		for(Element elBreadcrumbItem : document.select("#body .breadcrumb .breadcrumb-item")) {
+			// Skip the first item (homepage)
+			if(first) {
+				first = false;
+				continue;
+			}
+			
+			String text = elBreadcrumbItem.text();
+			// The active item is the episode name
+			if(elBreadcrumbItem.hasClass("active")) {
+				episodeName = text;
+			} else {
+				if(programName.isEmpty()) {
+					programName = text;
+				} else if(numSeason.isEmpty() && text.matches("^Sezóna\\s+\\d+$")) {
+					numSeason = text.replaceFirst("^Sezóna\\s+", "");
+				}
+			}
+		}
+		
+		Pattern regexNumEpisode = Pattern.compile("^(\\d+)\\. epizoda$");
+		for(Element elBadge : document.select("#main .article-title .badge")) {
+			String text = elBadge.text();
+			Matcher matcher;
+			if((matcher = regexNumEpisode.matcher(text)).matches()) {
+				numEpisode = matcher.group(1);
+				break;
+			}
+		}
+		
+		// Fix the program name, if needed
+		programName = maybeFixProgramName(programName);
+		
+		// Unset redundant episode name
+		if(episodeName.toLowerCase().equals(programName.toLowerCase() + " " + numEpisode))
+			episodeName = "";
+		
+		// Try to improve the episode name string (and possible extract more information)
+		Pattern regexEpisodeName;
+		Matcher matcher;
+		
+		// Extract the episode number and clean episode name, if the episode name contains the program name
+		regexEpisodeName = Pattern.compile("(?i)^" + Pattern.quote(programName) + " (\\d+): (.*)$");
+		if((matcher = regexEpisodeName.matcher(episodeName)).matches()) {
+			numEpisode = matcher.group(1);
+			episodeName = matcher.group(2);
+		}
+		
+		// Extract more informatio and clean episode name, if the episode name is in a specific format
+		regexEpisodeName = Pattern.compile("(?i)^" + Pattern.quote(programName) + " (\\d+) - (?:[^,]+, )?(\\d+)\\. díl(?:, (.*))?$");
+		if((matcher = regexEpisodeName.matcher(episodeName)).matches()) {
+			numSeason = matcher.group(1);
+			numEpisode = matcher.group(2);
+			episodeName = matcher.group(3);
+		}
+		
+		// Extract more informatio and clean episode name, if the episode name is in a specific format
+		regexEpisodeName = Pattern.compile("(?i)^(" + Pattern.quote(programName) + " - [^,]+), (\\d+)\\. díl(?:, (.*))?$");
+		if((matcher = regexEpisodeName.matcher(episodeName)).matches()) {
+			programName = matcher.group(1);
+			numEpisode = matcher.group(2);
+			episodeName = matcher.group(3);
+		}
+		
+		// Clean up, if some information is missing
+		if(numSeason.isEmpty()) numSeason = null;
+		if(numEpisode.isEmpty()) numEpisode = null;
+		
+		return MediaUtils.mediaTitle(programName, numSeason, numEpisode, episodeName, true, false, false);
 	}
 	
 	// ----- Internal methods
@@ -184,177 +261,70 @@ public final class TVAutosalonEngine implements MediaEngine {
 		
 		Document document = Utils.document(url);
 		Element elScript = document.selectFirst("#video > script");
-		
 		String src = null;
+		
 		if(elScript != null) {
-			// The video is embedded in the "standard" way
 			src = elScript.absUrl("src");
-		} else {
-			// Some videos (e.g. bonus videos) are embedded little bit differently
-			elScript = document.selectFirst("[id^='video-'] + script");
-			Pattern regex = Pattern.compile("default:\\s+src\\s*=\\s*[\"']([^\"']+)[\"'];");
-			Matcher matcher = regex.matcher(elScript.html());
-			if(matcher.find()) src = matcher.group(1);
 		}
 		
 		// Unable to obtain the source of script that embeds the video
-		if(src == null)
+		if(src == null) {
 			return null;
+		}
 		
 		String frameURL = null;
 		String script = Web.request(new GetRequest(Utils.url(src), Shared.USER_AGENT)).content;
 		int index;
-		if((index = script.indexOf("'https://video.onnetwork.tv/")) >= 0) {
-			frameURL = script.substring(index, script.indexOf(';', index)).trim();
+		if((index = script.indexOf("{\"")) >= 0) {
+			String configContent = Utils.bracketSubstring(script, '{', '}', false, index, script.length());
+			SSDCollection config = JSON.read(configContent);
+			String baseId = null;
+			
+			if((index = script.indexOf("var _ONNPBaseId")) >= 0) {
+				baseId = Utils.unquote(JS.extractVariableContent(script, "_ONNPBaseId", index)).strip();
+			}
+			
+			if(baseId == null) {
+				return null;
+			}
+			
+			String iid = config.getDirectString("iid");
+			String mid = config.getDirectString("mid");
+			
+			frameURL = Utils.format(
+				"https://video.onnetwork.tv/frame86.php"
+						+ "?id=ff%{base_id}s%{timestamp_ms}s1"
+						+ "&iid=%{iid}s"
+						+ "&e=1&lang=3&onnsfonn=1"
+						+ "&mid=%{mid}s",
+				"base_id", baseId,
+				"timestamp_ms", System.currentTimeMillis(),
+				"iid", iid,
+				"mid", mid
+			);
 		}
 		
 		// Unable to obtain the frame URL "template"
-		if(frameURL == null)
+		if(frameURL == null) {
 			return null;
-		
-		SSDCollection playerData = null;
-		if((index = script.indexOf("_NPlayer=")) >= 0) {
-			String data = Utils.bracketSubstring(script, '{', '}', false, index, script.length());
-			data = data.replaceAll("([\"'])\\+window\\.ONTVplayerNb", "0$1");
-			playerData = SSDF.read(data);
 		}
-		
-		// Unable to obtain the mandatory player data
-		if(playerData == null)
-			return null;
-		
-		SSDCollection pd = playerData;
-		frameURL = Utils.replaceAll("[\"']?\\+([^\\+]+)\\+[\"']?", frameURL, (matcher) -> {
-			String name = matcher.group(1).replaceFirst("Player\\.", "");
-			return pd.getDirectObject(name).stringValue();
-		});
-		frameURL = Utils.unquote(frameURL);
-		
-		SSDCollection fields = null;
-		if((index = script.indexOf("ONTVFields=")) >= 0) {
-			String data = Utils.bracketSubstring(script, '{', '}', false, index, script.length());
-			fields = SSDF.read(data);
-		}
-		
-		// Unable to obtain the mandatory player fields
-		if(fields == null)
-			return null;
-		
-		// Directly translated from the JavaScript code
-		SSDObject empty = SSDObject.ofRaw("", "");
-		for(SSDCollection field : fields.collectionsIterable()) {
-			SSDObject fieldObject, playerField;
-			if(!(fieldObject = field.getDirectObject("n", empty)).stringValue().isEmpty()
-					&& (playerField = playerData.getDirectObject(field.getName(), empty)) != null) {
-				if(field.getDirectObject("p", empty).stringValue().equals("gz")) {
-					if(playerField.getType() == SSDType.INTEGER && playerField.intValue() > 0) {
-						frameURL += '&' + fieldObject.stringValue() + '=' + playerField.stringValue();
-					}
-				} else if(field.getDirectObject("p", empty).stringValue().equals("gez")) {
-					if(playerField.getType() == SSDType.INTEGER && playerField.intValue() >= 0) {
-						frameURL += '&' + fieldObject.stringValue() + '=' + playerField.stringValue();
-					}
-				} else if(field.getDirectObject("p", empty).stringValue().equals("ne")) {
-					if(!playerField.stringValue().isEmpty()) {
-						frameURL += '&' + fieldObject.stringValue() + '=' + JavaScript.encodeURIComponent(playerField.stringValue());
-					}
-				}
-			}
-		}
-		
-		// Also append some additional information to mimic a correct frame URL
-		frameURL += "&wtop=" + url + "&apop=0&vpop=0&apopa=0&vpopa=0";
-		
+
 		// Send the request to obtain the frame's content
 		Map<String, String> headers = Map.of("Referer", URL_REFERER);
 		String content = Web.request(new GetRequest(Utils.url(frameURL), Shared.USER_AGENT, headers)).content;
 		
-		SSDCollection playerSettings = null;
-		if((index = content.indexOf("tUIPlayer")) >= 0) {
-			String data = Utils.bracketSubstring(content, '{', '}', false, index, content.length());
-			playerSettings = SSDF.read(data);
+		SSDCollection playerVideos = null;
+		if((index = content.indexOf("var playerVideos")) >= 0) {
+			String data = Utils.bracketSubstring(content, '[', ']', false, index, content.length());
+			playerVideos = JSON.read(data);
 		}
 		
 		// Unable to obtain the player settings
-		if(playerSettings == null)
+		if(playerVideos == null) {
 			return null;
-		
-		// Gather as much information as possible and construct the title
-		String programName = "";
-		String numSeason = "";
-		String numEpisode = "";
-		String episodeName = "";
-		
-		boolean first = true;
-		for(Element elBreadcrumbItem : document.select("#body .breadcrumb .breadcrumb-item")) {
-			// Skip the first item (homepage)
-			if(first) {
-				first = false;
-				continue;
-			}
-			
-			String text = elBreadcrumbItem.text();
-			// The active item is the episode name
-			if(elBreadcrumbItem.hasClass("active")) {
-				episodeName = text;
-			} else {
-				if(programName.isEmpty()) {
-					programName = text;
-				} else if(numSeason.isEmpty() && text.matches("^Sezóna\\s+\\d+$")) {
-					numSeason = text.replaceFirst("^Sezóna\\s+", "");
-				}
-			}
 		}
 		
-		Pattern regexNumEpisode = Pattern.compile("^(\\d+)\\. epizoda$");
-		for(Element elBadge : document.select("#main .article-title .badge")) {
-			String text = elBadge.text();
-			Matcher matcher;
-			if((matcher = regexNumEpisode.matcher(text)).matches()) {
-				numEpisode = matcher.group(1);
-				break;
-			}
-		}
-		
-		// Fix the program name, if needed
-		programName = maybeFixProgramName(programName);
-		
-		// Unset redundant episode name
-		if(episodeName.toLowerCase().equals(programName.toLowerCase() + " " + numEpisode))
-			episodeName = "";
-		
-		// Try to improve the episode name string (and possible extract more information)
-		Pattern regexEpisodeName;
-		Matcher matcher;
-		
-		// Extract the episode number and clean episode name, if the episode name contains the program name
-		regexEpisodeName = Pattern.compile("(?i)^" + Pattern.quote(programName) + " (\\d+): (.*)$");
-		if((matcher = regexEpisodeName.matcher(episodeName)).matches()) {
-			numEpisode = matcher.group(1);
-			episodeName = matcher.group(2);
-		}
-		
-		// Extract more informatio and clean episode name, if the episode name is in a specific format
-		regexEpisodeName = Pattern.compile("(?i)^" + Pattern.quote(programName) + " (\\d+) - (?:[^,]+, )?(\\d+)\\. díl(?:, (.*))?$");
-		if((matcher = regexEpisodeName.matcher(episodeName)).matches()) {
-			numSeason = matcher.group(1);
-			numEpisode = matcher.group(2);
-			episodeName = matcher.group(3);
-		}
-		
-		// Extract more informatio and clean episode name, if the episode name is in a specific format
-		regexEpisodeName = Pattern.compile("(?i)^(" + Pattern.quote(programName) + " - [^,]+), (\\d+)\\. díl(?:, (.*))?$");
-		if((matcher = regexEpisodeName.matcher(episodeName)).matches()) {
-			programName = matcher.group(1);
-			numEpisode = matcher.group(2);
-			episodeName = matcher.group(3);
-		}
-		
-		// Clean up, if some information is missing
-		if(numSeason.isEmpty()) numSeason = null;
-		if(numEpisode.isEmpty()) numEpisode = null;
-		
-		String title = MediaUtils.mediaTitle(programName, numSeason, numEpisode, episodeName, true, false, false);
+		String title = mediaTitle(document);
 		MediaSource source = MediaSource.of(this);
 		URI sourceURI = Utils.uri(url);
 		MediaLanguage language = MediaLanguage.UNKNOWN;
@@ -362,7 +332,7 @@ public final class TVAutosalonEngine implements MediaEngine {
 		
 		// Add all available media that are found in the player settings
 		SSDCollection emptyArray = SSDCollection.emptyArray();
-		for(SSDCollection video : playerSettings.getDirectCollection("videos").collectionsIterable()) {
+		for(SSDCollection video : playerVideos.collectionsIterable()) {
 			SSDCollection additionalURLs = video.getDirectCollection("urls", emptyArray);
 			String videoURL = video.getDirectString("url");
 			
@@ -381,8 +351,10 @@ public final class TVAutosalonEngine implements MediaEngine {
 			
 			for(Media m : media) {
 				sources.add(m);
-				if(!function.apply(proxy, m))
+				
+				if(!function.apply(proxy, m)) {
 					return null; // Do not continue
+				}
 			}
 		}
 		
