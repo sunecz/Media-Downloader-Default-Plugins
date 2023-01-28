@@ -55,7 +55,7 @@ public final class TVAutosalonEngine implements MediaEngine {
 	private static final String URL_REFERER = "https://autosalon.tv/";
 	
 	// Selectors
-	private static final String SELECTOR_PROGRAMS   = "#ms-navbar > .navbar-nav > .nav-item:first-child > .dropdown-menu > li > a";
+	private static final String SELECTOR_PROGRAMS   = "#ms-navbar > .navbar-nav > .nav-item:first-child > .dropdown-menu > li.dropdown-header";
 	private static final String SELECTOR_SEASONS    = "#main .cards-container-seasons .card-season:not(.more-link)";
 	private static final String SELECTOR_EPISODES   = "#main .cards-container-episodes .card-episode-wrapper";
 	private static final String SELECTOR_PAGE_ITEMS = "#main .pagination > .page-item";
@@ -166,16 +166,31 @@ public final class TVAutosalonEngine implements MediaEngine {
 		final Set<String> ignore = Set.of("/experti");
 		
 		Document document = Utils.document(URL_HOME);
-		for(Element elNavItem : document.select(SELECTOR_PROGRAMS)) {
-			String href = elNavItem.attr("href");
-			if(ignore.contains(href)) continue;
-			String url = elNavItem.absUrl("href");
-			String title = maybeFixProgramName(elNavItem.text());
-			Program program = new Program(Utils.uri(url), title);
+		for(Element elNavItemHeader : document.select(SELECTOR_PROGRAMS)) {
+			String title = elNavItemHeader.text();
 			
-			programs.add(program);
-			if(!function.apply(proxy, program))
-				return null; // Do not continue
+			for(Element elItem = elNavItemHeader;
+					(elItem = elItem.nextElementSibling()) != null && !elItem.hasClass("dropdown-divider");) {
+				Element elItemLink = elItem.selectFirst("a");
+				String href = elItemLink.attr("href");
+				
+				if(ignore.contains(href)) {
+					continue;
+				}
+				
+				String subTitle = elItem.text();
+				if(!subTitle.equalsIgnoreCase("epizody")) {
+					continue;
+				}
+				
+				String url = elItemLink.absUrl("href");
+				Program program = new Program(Utils.uri(url), title);
+				
+				programs.add(program);
+				if(!function.apply(proxy, program)) {
+					return null; // Do not continue
+				}
+			}
 		}
 		
 		return programs;
