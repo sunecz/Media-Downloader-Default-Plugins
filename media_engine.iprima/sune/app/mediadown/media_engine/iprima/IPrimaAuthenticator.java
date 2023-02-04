@@ -7,8 +7,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Supplier;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -16,6 +14,7 @@ import org.jsoup.nodes.Element;
 import sune.app.mediadown.Shared;
 import sune.app.mediadown.configuration.Configuration;
 import sune.app.mediadown.configuration.Configuration.ConfigurationProperty;
+import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.Property;
 import sune.app.mediadown.util.Reflection2;
 import sune.app.mediadown.util.Utils;
@@ -25,7 +24,6 @@ import sune.app.mediadown.util.Web.PostRequest;
 import sune.app.mediadown.util.Web.Response;
 import sune.app.mediadown.util.Web.StringResponse;
 import sune.util.ssdf2.SSDCollection;
-import sune.util.ssdf2.SSDF;
 
 final class IPrimaAuthenticator {
 	
@@ -33,18 +31,20 @@ final class IPrimaAuthenticator {
 	private static final URL URL_OAUTH_TOKEN;
 	private static final URL URL_OAUTH_AUTHORIZE;
 	private static final URL URL_LOGIN;
+	private static final URL URL_USER_AUTH;
 	
-	private static IPrimaAuthenticator.SessionData SESSION_DATA;
+	private static SessionData SESSION_DATA;
 	
 	static {
 		URL_OAUTH_LOGIN = Utils.url("https://auth.iprima.cz/oauth2/login");
 		URL_OAUTH_TOKEN = Utils.url("https://auth.iprima.cz/oauth2/token");
 		URL_OAUTH_AUTHORIZE = Utils.url("https://auth.iprima.cz/oauth2/authorize");
-		URL_LOGIN = Utils.url("https://www.iprima.cz/user-login-proxy");
+		URL_LOGIN = Utils.url("https://www.iprima.cz/vue-auth/login");
+		URL_USER_AUTH = Utils.url("https://www.iprima.cz/user-authorize");
 	}
 	
 	@FunctionalInterface private static interface _Callback<P, R> { R call(P param) throws Exception; }
-	private static final <C extends AutoCloseable, R> R tryAndClose(C closeable, IPrimaAuthenticator._Callback<C, R> action) throws Exception {
+	private static final <C extends AutoCloseable, R> R tryAndClose(C closeable, _Callback<C, R> action) throws Exception {
 		try(closeable) { return action.call(closeable); }
 	}
 	
@@ -57,7 +57,7 @@ final class IPrimaAuthenticator {
 		return Utils.urlParams(con.getURL().toExternalForm()).getOrDefault("code", null);
 	}
 	
-	private static final IPrimaAuthenticator.SessionTokens sessionTokens(String code) throws Exception {
+	private static final SessionTokens sessionTokens(String code) throws Exception {
 		Map<String, String> params = Utils.toMap(
 			"scope", "openid+email+profile+phone+address+offline_access",
 			"client_id", "prima_sso",
@@ -65,39 +65,52 @@ final class IPrimaAuthenticator {
 			"code", code,
 			"redirect_uri", "https://auth.iprima.cz/sso/auth-check");
 		return tryAndClose(Web.requestStream(new PostRequest(URL_OAUTH_TOKEN, Shared.USER_AGENT, params)),
-		                   response -> SessionTokens.parse(SSDF.readJSON(response.stream)));
+		                   (response) -> SessionTokens.parse(JSON.read(response.stream)));
 	}
 	
-	private static final String authorize(IPrimaAuthenticator.SessionTokens tokens) throws Exception {
+	private static final String authorize(SessionTokens tokens) throws Exception {
 		Map<String, String> params = Utils.toMap(
 			"response_type", "token_code",
 			"client_id", "sso_token",
 			"token", tokens.tokenDataString());
 		URL url = Utils.url(URL_OAUTH_AUTHORIZE.toExternalForm() + '?' + Utils.joinURLParams(params));
 		return tryAndClose(Web.requestStream(new GetRequest(url, Shared.USER_AGENT)),
-		                   response -> SSDF.readJSON(response.stream).getDirectString("code", null));
+		                   (response) -> JSON.read(response.stream).getDirectString("code", null));
 	}
 	
-	private static final boolean finishLogin(String code) throws Exception {
+	private static final String finishLogin(String code) throws Exception {
 		Map<String, String> params = Utils.toMap(
-			"auth_token_code", code,
-			"redirect_uri", "https://www.iprima.cz/");
+			"auth_token_code", code);
 		URL url = Utils.url(URL_LOGIN.toExternalForm() + '?' + Utils.joinURLParams(params));
 		return tryAndClose(Web.requestStream(new GetRequest(url, Shared.USER_AGENT, null, null, false)),
-		                   response -> response.code == 302);
+		                   (response) -> response.code == 200 ? code : null);
 	}
 	
-	public static final IPrimaAuthenticator.SessionData getSessionData() throws Exception {
+	private static final boolean userAuth(String code) throws Exception {
+		Map<String, String> params = Utils.toMap(
+			"auth_token_code", code);
+		URL url = Utils.url(URL_USER_AUTH.toExternalForm() + '?' + Utils.joinURLParams(params));
+		return tryAndClose(Web.requestStream(new GetRequest(url, Shared.USER_AGENT, null, null, false)),
+		                   (response) -> response.code == 200);
+	}
+	
+	public static final SessionData getSessionData() throws Exception {
 		if(SESSION_DATA == null) {
-			IPrimaAuthenticator.SessionTokens tokens = sessionTokens(loginOAuth(
+			SessionTokens tokens = sessionTokens(loginOAuth(
 				AuthenticationData.email(),
 				AuthenticationData.password()
 			));
-			boolean success = finishLogin(authorize(tokens));
-			// The device ID must be obtained AFTER logging in
-			String deviceId = DeviceManager.deviceId();
-			SESSION_DATA = success ? new SessionData(tokens.accessToken(), deviceId) : null;
+			boolean success = userAuth(finishLogin(authorize(tokens)));
+			
+			if(success) {
+				SESSION_DATA = new SessionData(
+					tokens.accessToken(),
+					// The device ID must be obtained AFTER logging in
+					DeviceManager.deviceId()
+				);
+			}
 		}
+		
 		return SESSION_DATA;
 	}
 	
@@ -109,21 +122,18 @@ final class IPrimaAuthenticator {
 		private static final String URL_LIST_DEVICES = "https://auth.iprima.cz/user/zarizeni";
 		private static final String URL_ADD_DEVICE = "https://www.iprima.cz/iprima-api/PlayApiProxy/Proxy/AddNewUserSlot";
 		
-		private static final String SELECTOR_DEVICES = "#devices > .item script";
-		private static final Pattern REGEX_DEVICE = Pattern.compile("\"data\":\\s*(\\{[^\\}]+\\})");
+		private static final String SELECTOR_DEVICES = "#main-content > div:nth-child(2) .table tr td:last-child > button";
 		
 		private static String deviceId; // For caching purposes
 		
 		private static final List<Device> listDevices() throws Exception {
 			List<Device> devices = new ArrayList<>();
 			Document document = Utils.document(URL_LIST_DEVICES);
-			for(Element elDevice : document.select(SELECTOR_DEVICES)) {
-				Matcher matcher = REGEX_DEVICE.matcher(elDevice.html());
-				if(matcher.find()) {
-					SSDCollection deviceData = SSDF.readJSON(matcher.group(1));
-					devices.add(Device.fromJSON(deviceData));
-				}
+			
+			for(Element elButton : document.select(SELECTOR_DEVICES)) {
+				devices.add(Device.fromRemoveButton(elButton));
 			}
+			
 			return devices;
 		}
 		
@@ -143,7 +153,7 @@ final class IPrimaAuthenticator {
 			StringResponse response = Web.request(new PostRequest(Utils.url(URL_ADD_DEVICE), Shared.USER_AGENT, params, null, headers));
 			if(response.code != 200)
 				throw new IllegalStateException("Unable to create a new WEB device. Response: " + response.content);
-			SSDCollection data = SSDF.readJSON(response.content);
+			SSDCollection data = JSON.read(response.content);
 			String slotId = data.getDirectString("slotId");
 			return new Device(slotId, type, name);
 		}
@@ -157,10 +167,14 @@ final class IPrimaAuthenticator {
 				Device device = listDevices().stream()
 					.filter((d) -> d.type().equals(DEVICE_TYPE))
 					.findFirst().orElse(null);
-				if(device == null)
+				
+				if(device == null) {
 					device = createDevice();
+				}
+				
 				deviceId = device.id();
 			}
+			
 			return deviceId;
 		}
 		
@@ -176,10 +190,10 @@ final class IPrimaAuthenticator {
 				this.slotName = slotName;
 			}
 			
-			public static final Device fromJSON(SSDCollection data) {
-				String slotId = data.getDirectString("slotId");
-				String slotType = data.getDirectString("slotType");
-				String slotName = data.getDirectString("slotName");
+			public static final Device fromRemoveButton(Element button) {
+				String slotId = button.attr("data-item-id");
+				String slotType = button.attr("data-item-type");
+				String slotName = button.attr("data-item-label");
 				return new Device(slotId, slotType, slotName);
 			}
 			
@@ -208,7 +222,7 @@ final class IPrimaAuthenticator {
 			this.refreshToken = refreshToken;
 		}
 		
-		public static final IPrimaAuthenticator.SessionTokens parse(SSDCollection json) {
+		public static final SessionTokens parse(SSDCollection json) {
 			return new SessionTokens(json.getDirectString("access_token"),
 			                         json.getDirectString("refresh_token"));
 		}
@@ -287,33 +301,33 @@ final class IPrimaAuthenticator {
 	private static final class Obf {
 		
 		private static final long[] va = {
-			0xfd1b7124731ffb21L, 0x73ddd206ab1dc618L, 0xf81abf6454f0d85aL, 0x1d745b9bb926ad37L, 
-			0x03be88aae686e24aL, 0xd7d1fbeb9ec962d5L, 0x8b18188c6c28cfa5L, 0x65a6b9bc930d7ea8L, 
-			0x21c9104c16e08c26L, 0xfc5a5a9c59e54088L, 0x67ad2e9ffbfb98e8L, 0x5c7863531e7c86e4L, 
-			0x842b86fffdf02483L, 0xcee4e4b28536368eL, 0x224e8a01daffeb3bL, 0x095f72b08467c7f5L, 
-			0x905cb4a0377e3151L, 0x456edb754817274aL, 0x841fb386c8c42469L, 0x04732ef57ca6df8bL, 
-			0x39ed0a5748a2b318L, 0xa2c8121f4f6c5b52L, 0x489e5af527aa4aefL, 0xb3fab0cb7f3bc8b5L, 
-			0xf8ad7fe27885d7f7L, 0x0c084fa8b8eaf7f0L, 0x8d4fc7bff1b80277L, 0xd0bea7ab885110acL, 
-			0x475a8f39dd3165e3L, 0xece3764b812a396aL, 0x39b9ffd239c08642L, 0x3104cd803a9bb6eeL, 
-			0xa425bdb7cc360267L, 0x1166949d7a0198c0L, 0x5e48d2dd6c20427dL, 0xda42d99b6265c364L, 
-			0xaba0a464f097c852L, 0x3a9d61474b99029cL, 0xea626e529d0358f3L, 0xf7e195dc9da1bf81L, 
-			0xa5b031a46fdefd11L, 0x8b36ccd0b07eea05L, 0x5117695dc752baa4L, 0xb248a15af5e240aeL, 
-			0x314def943416795dL, 0x3864bc1f7bf26995L, 0x789a362583e101e9L, 0xb251f8685453d356L
+			0xd7e834c61cccdbb2L, 0x398831d3c21c25e2L, 0x49aece001146d79fL, 0xd35a887aa4fe5b2bL,
+			0xa84ad17dbbaf2a0bL, 0xa091e24b1a644d8cL, 0xb542093a4302bf0bL, 0x2ad614ac7516d3e0L,
+			0xf4b22389273df26eL, 0x350e13a3d90cfd5dL, 0x6b9cfacb8696ca40L, 0x89fe3bd28799133aL,
+			0x3d923c29fe076aa3L, 0x95a788af4d954366L, 0xeeafded037d05d8eL, 0xf4c3dc3dd788b409L,
+			0x442687eb7e16d4e4L, 0x1afd7f61de5e657dL, 0x6c503ffcac3e91deL, 0x3944c261dd1a199dL,
+			0xd17d892b8379450bL, 0xcc7bbb648866e23fL, 0xc45ba01c497ce7ecL, 0x4c06e7ddf804c31eL,
+			0x0ff12c51dc414f14L, 0x9e63255dfb4ae43eL, 0x18a2fcd39eb9ffa1L, 0x8073d3d7acbb3740L,
+			0x1e27bdf30ff3dbc0L, 0x3e8b554097657621L, 0xfe37d09dd1e72f14L, 0x7c86f2cf444527c6L,
+			0xa363adfea88b2b31L, 0x4636cd647421e803L, 0x727ea2d7ff6af162L, 0xb1ae13d9a5232842L,
+			0x583eb9df1ee7269cL, 0xc4fa70fa95183893L, 0x37604f5ff875c3d0L, 0x2c16e369305db4b4L,
+			0xc9b4b684c943d5e3L, 0x8d27d19f11fd2709L, 0x5669756adcc553e2L, 0xc774edb2937ce9e2L,
+			0xfc17bf9fb6668e57L, 0x8ab1005a759ad42fL, 0xaa091b8923d07590L, 0x5c67ff50ffedaa67L
 		};
 		
 		private static final long[] vb = {
-			0xeaee711364e4f5aeL, 0xb3ea9e5a40997562L, 0xb685dc49cf8b83a6L, 0x6f7d5727c7e16356L, 
-			0xa0c88e9d3f14ccc0L, 0xfd0632ab9fb9c0cbL, 0x3be02189e5fae51dL, 0x165f9bc5d542347fL, 
-			0x2f29fa41d23b3b2cL, 0x52e02c2181f6e954L, 0x1865b8f774e03e8eL, 0x6a45821ba4224338L, 
-			0xe960a2f3b4df40faL, 0x41fa0e16dce6ea9cL, 0x348d2e90460bf85cL, 0x9a25b5e2d06bb12aL, 
-			0xeccb2a56e43d205aL, 0xe214fa78d01ec311L, 0x145201f1ea5bf6d4L, 0xe404ee0e7aaaa401L, 
-			0x3efb5dfd46155d59L, 0xb21d045449b456afL, 0xc563e5d1e83992d2L, 0x640c8700a1799b74L, 
-			0x976436d65e049f6eL, 0x654fe6be585a73c9L, 0xec9b6aadff56650eL, 0x39d44d488bdaf131L, 
-			0xe9cec1179aca7d54L, 0x4dc408a508f01e33L, 0xb3b0a716eb69263eL, 0x5e750f10234ba2e2L, 
-			0x80a0ed6f2b858ab2L, 0x38cd242be391a3f0L, 0xfe077be958b36757L, 0xe3fde3f5648365e1L, 
-			0x31fe74c1ba8180efL, 0x2df24e3e0d86b81dL, 0x601f33a1414393d3L, 0x0a5466cb938c27a1L, 
-			0x8ee6d69d47122619L, 0xce6afeacc6cfb76bL, 0x44532b10903d91dfL, 0x511fab5949a24d69L, 
-			0x96989c304a4be4fbL, 0x1027e82b0768b0ebL, 0xd67b399dce8652daL, 0x9936f4fb8abda33dL
+			0x1e2807bee6d00793L, 0xa2d8eae91583c21cL, 0x8e8b86e015cd48f2L, 0xfb75105c14800a1fL,
+			0xf51ba197d5c26179L, 0x835250bc3a4530fdL, 0x88de76fa013918f2L, 0xb1995cf332272251L,
+			0x44ea201d633a2d35L, 0x84c54c4637aa90b9L, 0x99c3bfd52f52eb0dL, 0x01e57e1e72831464L,
+			0xa5a6d98f83eab30cL, 0xfaaed8b6f383f376L, 0x484db652cc89c904L, 0xf58c4e2b44532027L,
+			0xa935ea83cc18cc71L, 0xaab40b9e58200e40L, 0x03fa2bb5d70702e0L, 0xd70f60b377feb42eL,
+			0x9f96a09d07902fc9L, 0x7b73ceb24a6be7d5L, 0x2e73389b9e125fecL, 0xa62b719878b4a9a5L,
+			0x18768659611c95e4L, 0xebaa9700a10badbaL, 0xb04aea4fe5c2f15fL, 0x071dc1803916f4dfL,
+			0xeafd2bee99750ab9L, 0xbe3bf3afa629b337L, 0xfabff8f8fdaaea80L, 0x644ccbc7996661e6L,
+			0xc8488ef0a7783c39L, 0x239531d9ed03699aL, 0x154bc79e36fcda53L, 0xe1e24380c7732d5eL,
+			0x12268b8066cf1691L, 0x0c43b7c549a4db27L, 0x97e90aade20b111cL, 0x10024e49a1e01d0cL,
+			0x9f0c97a4f34ef800L, 0x9f8f76c4e1648106L, 0x58e19644313729e8L, 0x34b5eccce071caf7L,
+			0xb2ae378192a65966L, 0x1ffe3066d06d6c6fL, 0x0473af4bd073ea40L, 0xb15f4e0564239feeL
 		};
 		
 		private static final int   T = 1 << 5;
