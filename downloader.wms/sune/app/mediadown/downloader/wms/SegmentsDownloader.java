@@ -57,6 +57,7 @@ import sune.app.mediadown.event.tracker.Tracker;
 import sune.app.mediadown.event.tracker.TrackerEvent;
 import sune.app.mediadown.event.tracker.TrackerManager;
 import sune.app.mediadown.event.tracker.WaitTracker;
+import sune.app.mediadown.exception.RejectedResponseException;
 import sune.app.mediadown.gui.table.ResolvedMedia;
 import sune.app.mediadown.language.Translation;
 import sune.app.mediadown.media.AudioMediaBase;
@@ -82,6 +83,7 @@ import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Utils.Ignore;
 import sune.app.mediadown.util.Web;
 import sune.app.mediadown.util.Web.GetRequest;
+import sune.app.mediadown.util.Web.Response;
 import sune.app.mediadown.util.Worker;
 
 public final class SegmentsDownloader implements Download, DownloadResult {
@@ -104,7 +106,6 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 	private final SyncObject lockPause = new SyncObject();
 	
 	private TotalSizeComputer totalSizeComputer;
-	private boolean updateRemoteFileSizes;
 	private final AtomicLong size = new AtomicLong(MediaConstants.UNKNOWN_SIZE);
 	private DownloadPipelineResult pipelineResult;
 	private InternalDownloader downloader;
@@ -267,6 +268,10 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		return new FileDownloader(manager);
 	}
 	
+	private static final boolean allowOnlySuccessfulResponse(Response response) {
+		return response.code == 200;
+	}
+	
 	private final void waitMs(long ms, TimeUpdateTrackerBase tracker) {
 		if(ms <= 0L) {
 			return;
@@ -324,8 +329,6 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 			// User requested no stream size computation, at least estimate the total size
 			Pair<Boolean, Long> sizeResult = sizeOrEstimatedSize(segments, subtitles);
 			sizeSet(sizeResult.b);
-			// Allow remote file sizes to be updated as they are being downloaded
-			updateRemoteFileSizes = true;
 			// Total size is not final
 			return false;
 		}
@@ -386,12 +389,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 			.map(RemoteMedia::new)
 			.collect(Collectors.toList());
 		
-		// Preapare mapping of segments, so that it can be used to map FileSegment to RemoteFile
-		// in the download loop.
-		Map<Object, RemoteFile> segmentsMapping = segments.stream()
-			.collect(Collectors.toMap(RemoteFile::value, Function.identity()));
-		
-		TotalUpdateNotifyDownloadTracker notifyTracker = new TotalUpdateNotifyDownloadTracker();
+		DownloadTracker notifyTracker = new DownloadTracker();
 		downloader.setTracker(notifyTracker);
 		
 		computeTotalSize(segments, subtitles);
@@ -413,11 +411,14 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 			downloader.addEventListener(DownloadEvent.UPDATE, handler::onUpdate);
 			downloader.addEventListener(DownloadEvent.ERROR, handler::onError);
 			
-			DownloadConfiguration downloadConfiguration = DownloadConfiguration.ofDefault();
 			Iterator<Path> tempFileIt = tempFiles.iterator();
 			Range<Long> rangeRequest = new Range<>(0L, -1L);
 			Tracker previousTracker = null;
 			RetryDownloadSimpleTracker retryTracker = null;
+			
+			DownloadConfiguration.Builder configurationBuilder = DownloadConfiguration.builder()
+				.rangeRequest(rangeRequest)
+				.responseFilter(SegmentsDownloader::allowOnlySuccessfulResponse);
 			
 			// Download the segments
 			downloadLoop:
@@ -428,7 +429,6 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 				long bytes = 0L;
 				for(FileSegment segment : segmentsHolder.segments()) {
 					if(!checkState()) break downloadLoop;
-					notifyTracker.updateFile(segmentsMapping.get(segment));
 					
 					GetRequest request = null;
 					boolean lastAttempt = false;
@@ -468,32 +468,38 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 						}
 						
 						try {
-							DownloadConfiguration config
-								= new DownloadConfiguration(new Range<>(bytes, -1L), rangeRequest, segment.size());
-							downloadedBytes = downloader.start(request, tempFile, config);
+							Range<Long> rangeOutput = new Range<>(bytes, -1L);
+							DownloadConfiguration downloadConfiguration
+								= configurationBuilder.rangeOutput(rangeOutput).totalBytes(segment.size()).build();
+							downloadedBytes = downloader.start(request, tempFile, downloadConfiguration);
 							error = downloader.isError() || downloadedBytes <= 0L;
 						} catch(InterruptedException ex) {
 							// When stopped, immediately break from the loop
 							break downloadLoop;
+						} catch(RejectedResponseException ex) {
+							// Retry, if the response is rejected by the filter
+							error = true;
 						} catch(Exception ex) {
 							error = true;
 							exception = ex;
 						}
 						
-						long size = segment.size();
-						
-						// Check whether the size is already available. If not, get it from
-						// the downloader itself. This should fix an issue when just a part
-						// of the whole segment was downloaded and the size couldn't be checked,
-						// thus the file became incomplete/corrupted.
-						if(size < 0L) {
-							size = downloader.totalBytes();
-						}
-						
-						// Check whether the downloaded size equals the total size, if not
-						// just retry the download again.
-						if(size >= 0L && downloadedBytes != size) {
-							error = true;
+						if(!error) {
+							long size = segment.size();
+							
+							// Check whether the size is already available. If not, get it from
+							// the downloader itself. This should fix an issue when just a part
+							// of the whole segment was downloaded and the size couldn't be checked,
+							// thus the file became incomplete/corrupted.
+							if(size < 0L) {
+								size = downloader.totalBytes();
+							}
+							
+							// Check whether the downloaded size equals the total size, if not
+							// just retry the download again.
+							if(size >= 0L && downloadedBytes != size) {
+								error = true;
+							}
 						}
 						
 						if(error) {
@@ -537,7 +543,6 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 				for(RemoteFile subtitle : subtitles) {
 					if(!checkState()) break;
 					
-					notifyTracker.updateFile(subtitle);
 					SubtitlesMedia sm = (SubtitlesMedia) ((RemoteMedia) subtitle).media;
 					String subtitleType = Opt.of(sm.format().fileExtensions())
 						.ifFalse(List::isEmpty).map((l) -> l.get(0))
@@ -550,7 +555,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 						+ (!subtitleType.isEmpty() ? '.' + subtitleType : "");
 					Path subDest = subtitlesDir.resolve(subtitleFileName);
 					GetRequest request = new GetRequest(Utils.url(sm.uri()), Shared.USER_AGENT, HEADERS);
-					downloader.start(request, subDest, downloadConfiguration);
+					downloader.start(request, subDest, DownloadConfiguration.ofDefault());
 				}
 			}
 			
@@ -717,28 +722,6 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		}
 	}
 	
-	private final class TotalUpdateNotifyDownloadTracker extends DownloadTracker {
-		
-		private RemoteFile file;
-		
-		public TotalUpdateNotifyDownloadTracker() {
-			super();
-		}
-		
-		public void updateFile(RemoteFile file) {
-			this.file = file;
-		}
-		
-		@Override
-		public void updateTotal(long bytes) {
-			super.updateTotal(bytes);
-			
-			if(updateRemoteFileSizes) {
-				sync(file, RemoteFile::size, bytes);
-			}
-		}
-	}
-	
 	private final class RetryDownloadSimpleTracker extends SimpleTracker implements TimeUpdateTrackerBase {
 		
 		private String progressText;
@@ -802,7 +785,6 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		
 		@Override
 		public boolean compute(List<RemoteFile> segments, List<RemoteFile> subtitles) throws Exception {
-			updateRemoteFileSizes = false;
 			Pair<Boolean, Long> sizeResult = sizeOrEstimatedSize(segments, subtitles);
 			sizeSet(sizeResult.b);
 			
@@ -887,7 +869,6 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		
 		@Override
 		public boolean compute(List<RemoteFile> segments, List<RemoteFile> subtitles) throws Exception {
-			updateRemoteFileSizes = true;
 			Pair<Boolean, Long> sizeResult = sizeOrEstimatedSize(segments, subtitles);
 			sizeSet(sizeResult.b);
 			
