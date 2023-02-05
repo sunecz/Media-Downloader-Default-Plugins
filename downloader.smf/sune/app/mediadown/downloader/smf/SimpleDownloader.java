@@ -204,7 +204,7 @@ public final class SimpleDownloader implements Download, DownloadResult {
 				if(!checkIfCanContinue()) break;
 				Path tempFile = tempFileIt.next();
 				GetRequest request = new GetRequest(Utils.url(mh.media().uri()), Shared.USER_AGENT, HEADERS);
-				downloader.start(request, tempFile, new DownloadConfiguration(mh.size()));
+				downloader.start(request, tempFile, DownloadConfiguration.ofTotalBytes(mh.size()));
 			}
 			
 			if(!checkIfCanContinue()) return;
@@ -226,7 +226,7 @@ public final class SimpleDownloader implements Download, DownloadResult {
 							+ (!subtitleType.isEmpty() ? '.' + subtitleType : "");
 					Path subDest = subtitlesDir.resolve(subtitleFileName);
 					GetRequest request = new GetRequest(Utils.url(sm.uri()), Shared.USER_AGENT, HEADERS);
-					downloader.start(request, subDest, new DownloadConfiguration(subtitle.size()));
+					downloader.start(request, subDest, DownloadConfiguration.ofTotalBytes(subtitle.size()));
 				}
 			}
 			
