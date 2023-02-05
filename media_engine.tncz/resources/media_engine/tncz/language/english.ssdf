@@ -1,0 +1,9 @@
+{
+	plugin: {
+		media_engine: {
+			tncz: {
+				title: "TN.cz"
+			}
+		}
+	}
+}
