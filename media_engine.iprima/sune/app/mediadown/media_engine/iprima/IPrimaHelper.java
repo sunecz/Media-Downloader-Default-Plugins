@@ -60,7 +60,6 @@ import sune.app.mediadown.util.Web;
 import sune.app.mediadown.util.WorkerProxy;
 import sune.util.ssdf2.SSDCollection;
 import sune.util.ssdf2.SSDCollectionType;
-import sune.util.ssdf2.SSDF;
 import sune.util.ssdf2.SSDType;
 
 final class IPrimaHelper {
@@ -330,7 +329,7 @@ final class IPrimaHelper {
 			// The response must be fixed first, since it contains escaped characters
 			// that are unescaped incorrectly while reading the respective data node.
 			response = response.replaceAll("\\\\(.)", "\\\\\\\\$1");
-			SSDCollection data = SSDF.readJSON(response);
+			SSDCollection data = JSON.read(response);
 			String content = data.getDirectString("related_content", null);
 			if(content == null)
 				return CALLBACK_EXIT; // Do not continue
@@ -475,7 +474,7 @@ final class IPrimaHelper {
 			}
 			String content = internal_request(Utils.uri(configURL), requestHeaders);
 			if(content == null || content.isEmpty()) return null;
-			SSDCollection data = SSDF.readJSON(content);
+			SSDCollection data = JSON.read(content);
 			// Try to obtain the full title of the media
 			String title = "";
 			Element elMediaInfo = document.selectFirst("script[type='application/ld+json']");
@@ -535,7 +534,7 @@ final class IPrimaHelper {
 					int index = con.indexOf(find);
 					if(index > 0) {
 						con = Utils.bracketSubstring(con, '{', '}', false, index + find.length() - 1, con.length());
-						SSDCollection json = SSDF.readJSON(con);
+						SSDCollection json = JSON.read(con);
 						fullName = json.getDirectString("title", "");
 						if(!fullName.isEmpty()) break;
 					}
@@ -695,7 +694,7 @@ final class IPrimaHelper {
 			// The response must be fixed first, since it contains escaped characters
 			// that are unescaped incorrectly while reading the respective data node.
 			response = Utils.replaceUnicode4Digits(response);
-			SSDCollection data = SSDF.readJSON(response);
+			SSDCollection data = JSON.read(response);
 			SSDCollection content = data.getCollection("data.strip.content");
 			if(content.length() <= 0)
 				return CALLBACK_EXIT;
@@ -765,7 +764,7 @@ final class IPrimaHelper {
 			response = response.replaceAll("\\\\", "\\\\\\\\"); // Escape backward slashes
 			response = response.replaceAll("\\\\\\\\\"", "\\\\\"");  // Unescape double quotes
 			response = response.replaceAll("\\\\/", "/"); // Unescape forward slashes
-			SSDCollection json = SSDF.readJSON(response);
+			SSDCollection json = JSON.read(response);
 			String content = json.getDirectString("content");
 			Document document = Utils.parseDocument(content);
 			Elements programs = document.select(".component--scope--cinematography > a");
@@ -775,7 +774,7 @@ final class IPrimaHelper {
 					continue;
 				String url = Utils.urlFix(elProgram.attr("href"), true);
 				String title = elProgram.attr("title");
-				SSDCollection data = SSDF.readJSON(elProgram.attr("data-item-json"));
+				SSDCollection data = JSON.read(elProgram.attr("data-item-json"));
 				String id = String.valueOf(data.getDirectInt("id"));
 				Program program = new Program(Utils.uri(url), title, "source", iprima, "id", id, "type", graphQLType);
 				if(!functionAddToList.apply(program)) return CALLBACK_EXIT; // Do not continue, if error
@@ -959,7 +958,7 @@ final class IPrimaHelper {
 				for(String urlPlay : urls) {
 					String content = internal_request(Utils.uri(urlPlay), requestHeaders);
 					if(content == null || content.isEmpty()) continue;
-					SSDCollection data = SSDF.readJSON(content);
+					SSDCollection data = JSON.read(content);
 					URI sourceURI = Utils.uri(urlPlay);
 					for(SSDCollection videoData : data.collectionsIterable()) {
 						// Obtain the program title

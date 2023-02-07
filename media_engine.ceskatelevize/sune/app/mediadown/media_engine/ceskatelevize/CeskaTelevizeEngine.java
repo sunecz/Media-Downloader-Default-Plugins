@@ -488,7 +488,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			StringResponse response = Web.request(new PostRequest(Utils.url(URL), Shared.USER_AGENT, null, headers).toBodyRequest(body));
 			if(response.code != 200)
 				throw new IllegalStateException("API returned non-OK code: " + response.code + ". Body: " + response.content);
-			return SSDF.readJSON(response.content);
+			return JSON.read(response.content);
 		}
 		
 		public static final CollectionAPIResult getProgramsWithCategory(int categoryId, int offset, int length) throws Exception {
@@ -736,7 +736,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 				} else if((matcher = REGEX_VAR_BASE_URL.matcher(content)).find()) {
 					info.baseURL = matcher.group(1);
 				} else if((matcher = REGEX_CALL_GET_PLAYLIST_URL.matcher(content)).find()) {
-					SSDCollection data = SSDF.readJSON(matcher.group(1)).getCollection(0, SSDCollection.empty());
+					SSDCollection data = JSON.read(matcher.group(1)).getCollection(0, SSDCollection.empty());
 					info.type = data.getDirectString("type", null);
 					info.id = data.getDirectString("id", null);
 				}

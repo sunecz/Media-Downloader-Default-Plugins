@@ -13,6 +13,7 @@ import org.cef.network.CefCookieManager;
 
 import io.netty.handler.codec.http.FullHttpRequest;
 import sune.app.mediadown.media.Media;
+import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadownloader.drm.DRMBrowser;
 import sune.app.mediadownloader.drm.DRMContext;
@@ -22,7 +23,6 @@ import sune.app.mediadownloader.drm.resolver.SimpleDRMResolver;
 import sune.app.mediadownloader.drm.util.JS;
 import sune.app.mediadownloader.drm.util.MPDQualityModifier;
 import sune.util.ssdf2.SSDCollection;
-import sune.util.ssdf2.SSDF;
 
 public class CeskaTelevizeDRMEngine implements DRMEngine {
 	
@@ -105,7 +105,7 @@ public class CeskaTelevizeDRMEngine implements DRMEngine {
 		public String modifyResponse(String uri, String mimeType, Charset charset, String content,
 				FullHttpRequest request) {
 			if(uri.contains("ivysilani/client-playlist/")) {
-				SSDCollection json = SSDF.readJSON(content);
+				SSDCollection json = JSON.read(content);
 				
 				// Remove ads from the playlist JSON data, so the recording is not interrupted
 				json.set("setup.vast.preRoll", SSDCollection.emptyArray());

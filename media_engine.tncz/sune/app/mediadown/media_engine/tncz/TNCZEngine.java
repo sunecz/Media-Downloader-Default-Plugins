@@ -25,6 +25,7 @@ import sune.app.mediadown.media.MediaUtils;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.util.CheckedBiFunction;
+import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Web;
@@ -33,7 +34,6 @@ import sune.app.mediadown.util.Web.StringResponse;
 import sune.app.mediadown.util.WorkerProxy;
 import sune.app.mediadown.util.WorkerUpdatableTask;
 import sune.util.ssdf2.SSDCollection;
-import sune.util.ssdf2.SSDF;
 
 public final class TNCZEngine implements MediaEngine {
 	
@@ -233,7 +233,7 @@ public final class TNCZEngine implements MediaEngine {
 			conScript = Utils.bracketSubstring(conScript, '{', '}', false, conScript.indexOf('{', 1), conScript.length());
 			
 			if(!conScript.isEmpty()) {
-				SSDCollection scriptData = SSDF.readJSON(conScript);
+				SSDCollection scriptData = JSON.read(conScript);
 				
 				if(scriptData != null) {
 					SSDCollection tracks = scriptData.getCollection("tracks");
