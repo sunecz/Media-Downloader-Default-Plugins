@@ -1014,6 +1014,8 @@ final class IPrimaHelper {
 	
 	private static final class EpisodeWrapper extends Wrapper<Episode> {
 		
+		private static Comparator<Wrapper<Episode>> comparator;
+		
 		private final int offset;
 		private final int index;
 		
@@ -1026,6 +1028,21 @@ final class IPrimaHelper {
 		// Utility function
 		private static final EpisodeWrapper cast(Wrapper<Episode> wrapper) {
 			return (EpisodeWrapper) wrapper;
+		}
+		
+		private static final Comparator<Wrapper<Episode>> comparator() {
+			if(comparator == null) {
+				synchronized(EpisodeWrapper.class) {
+					if(comparator == null) {
+						comparator = Comparator.<Wrapper<Episode>, Integer>comparing((e) -> cast(e).offset)
+							.thenComparing((e) -> cast(e).index)
+							.thenComparing((a, b) -> compareNatural(cast(a).value.title().toLowerCase(),
+							                                        cast(b).value.title().toLowerCase()));
+					}
+				}
+			}
+			
+			return comparator;
 		}
 		
 		@Override
@@ -1049,12 +1066,11 @@ final class IPrimaHelper {
 		
 		@Override
 		public int compareTo(Wrapper<Episode> w) {
-			if(Objects.requireNonNull(w) == this) return 0;
-			return Comparator.<Wrapper<Episode>, Integer>comparing((e) -> cast(e).offset)
-						.thenComparing((e) -> cast(e).index)
-						.thenComparing((a, b) -> compareNatural(cast(a).value.title().toLowerCase(),
-						                                        cast(b).value.title().toLowerCase()))
-						.compare(this, w);
+			if(Objects.requireNonNull(w) == this) {
+				return 0;
+			}
+			
+			return comparator().compare(this, w);
 		}
 	}
 	
