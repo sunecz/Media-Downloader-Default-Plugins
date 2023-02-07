@@ -12,9 +12,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 
 import javafx.scene.image.Image;
@@ -33,10 +35,10 @@ import sune.app.mediadown.media_engine.iprima.IPrimaHelper.StaticProgramObtainer
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.util.CheckedBiFunction;
+import sune.app.mediadown.util.CounterLock;
 import sune.app.mediadown.util.Reflection;
 import sune.app.mediadown.util.Threads;
 import sune.app.mediadown.util.Utils;
-import sune.app.mediadown.util.Utils.Ignore;
 import sune.app.mediadown.util.WorkerProxy;
 import sune.app.mediadown.util.WorkerUpdatableTask;
 
@@ -661,24 +663,57 @@ public final class IPrimaEngine implements MediaEngine {
 	private static abstract class ConcurrentLoop<T> {
 		
 		protected final ExecutorService executor = Threads.Pools.newWorkStealing();
+		protected final AtomicReference<Exception> exception = new AtomicReference<>();
+		protected final CounterLock counter = new CounterLock();
 		
 		protected abstract void iteration(T value) throws Exception;
 		
 		protected final void await() throws Exception {
-			executor.shutdown();
-			// Do not throw the InterruptedException (i.e. when cancelled the loop, etc.)
-			Ignore.callVoid(() -> executor.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS));
+			counter.await();
+			
+			executor.shutdownNow();
+			executor.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS);
+			
+			Exception ex;
+			if((ex = exception.get()) != null) {
+				throw ex;
+			}
 		}
 		
 		protected final void submit(T value) {
-			executor.submit(Utils.callable(() -> iteration(value)));
+			counter.increment();
+			executor.submit(new Iteration(value));
 		}
 		
 		@SuppressWarnings("unchecked")
 		public void iterate(T... values) throws Exception {
-			for(T value : values)
+			for(T value : values) {
 				submit(value);
+			}
+			
 			await();
+		}
+		
+		protected class Iteration implements Callable<Void> {
+			
+			protected final T value;
+			
+			public Iteration(T value) {
+				this.value = value;
+			}
+			
+			@Override
+			public Void call() throws Exception {
+				try {
+					iteration(value);
+					return null;
+				} catch(Exception ex) {
+					exception.compareAndSet(null, ex);
+					throw ex; // Propagate
+				} finally {
+					counter.decrement();
+				}
+			}
 		}
 	}
 }
