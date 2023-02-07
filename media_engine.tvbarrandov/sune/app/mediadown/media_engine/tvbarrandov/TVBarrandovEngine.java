@@ -315,7 +315,7 @@ public final class TVBarrandovEngine implements MediaEngine {
 							int index;
 							if((index = content.indexOf("ytInitialData = {")) >= 0) {
 								content = Utils.bracketSubstring(content, '{', '}', false, index, content.length());
-								SSDCollection data = JSON.read(content);
+								SSDCollection data = JavaScript.readObject(content);
 								
 								SSDCollection tabs = data.getCollection("contents.twoColumnBrowseResultsRenderer.tabs");
 								SSDCollection searchTab = tabs.getDirectCollection("" + (tabs.length() - 1));

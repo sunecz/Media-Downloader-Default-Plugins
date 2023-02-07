@@ -39,7 +39,6 @@ import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.server.Server;
 import sune.app.mediadown.util.CheckedBiFunction;
-import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.JavaScript;
 import sune.app.mediadown.util.Pair;
 import sune.app.mediadown.util.Regex;
@@ -96,7 +95,7 @@ public class YouTubeServer implements Server {
 			Matcher matcher = patternConfigVariable.matcher(scriptHTML);
 			if(matcher.find()) {
 				String playerConfig = Utils.bracketSubstring(scriptHTML, '{', '}', false, matcher.end() - 1, scriptHTML.length());
-				SSDCollection dataConfig = JSON.read(playerConfig);
+				SSDCollection dataConfig = JavaScript.readObject(playerConfig);
 				String title = dataConfig.getString("videoDetails.title");
 				SSDCollection formatsConfig = dataConfig.getCollection("streamingData.adaptiveFormats");
 				List<Tuple> videos = new ArrayList<>();

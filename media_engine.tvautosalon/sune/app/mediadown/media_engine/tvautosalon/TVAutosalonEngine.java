@@ -30,6 +30,7 @@ import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.util.CheckedBiFunction;
 import sune.app.mediadown.util.JSON;
+import sune.app.mediadown.util.JavaScript;
 import sune.app.mediadown.util.Pair;
 import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
@@ -292,7 +293,7 @@ public final class TVAutosalonEngine implements MediaEngine {
 		int index;
 		if((index = script.indexOf("{\"")) >= 0) {
 			String configContent = Utils.bracketSubstring(script, '{', '}', false, index, script.length());
-			SSDCollection config = JSON.read(configContent);
+			SSDCollection config = JavaScript.readObject(configContent);
 			String baseId = null;
 			
 			if((index = script.indexOf("var _ONNPBaseId")) >= 0) {

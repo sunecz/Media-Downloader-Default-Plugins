@@ -538,7 +538,7 @@ final class IPrimaHelper {
 					int index = con.indexOf(find);
 					if(index > 0) {
 						con = Utils.bracketSubstring(con, '{', '}', false, index + find.length() - 1, con.length());
-						SSDCollection json = JSON.read(con);
+						SSDCollection json = JavaScript.readObject(con);
 						fullName = json.getDirectString("title", "");
 						if(!fullName.isEmpty()) break;
 					}

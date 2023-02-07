@@ -60,6 +60,7 @@ import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.util.CheckedBiFunction;
 import sune.app.mediadown.util.CheckedSupplier;
 import sune.app.mediadown.util.JSON;
+import sune.app.mediadown.util.JavaScript;
 import sune.app.mediadown.util.Opt;
 import sune.app.mediadown.util.Reflection;
 import sune.app.mediadown.util.Reflection2;
@@ -515,7 +516,7 @@ public final class StreamCZEngine implements MediaEngine {
 				if((index = content.indexOf("APP_SERVER_STATE = ")) >= 0
 						&& (index = content.indexOf("data : ", index)) >= 0) {
 					String dataString = Utils.bracketSubstring(content, '{', '}', false, index + 7, content.length());
-					return JSON.read(dataString);
+					return JavaScript.readObject(dataString);
 				}
 			}
 			

@@ -736,7 +736,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 				} else if((matcher = REGEX_VAR_BASE_URL.matcher(content)).find()) {
 					info.baseURL = matcher.group(1);
 				} else if((matcher = REGEX_CALL_GET_PLAYLIST_URL.matcher(content)).find()) {
-					SSDCollection data = JSON.read(matcher.group(1)).getCollection(0, SSDCollection.empty());
+					SSDCollection data = JavaScript.readObject(matcher.group(1)).getCollection(0, SSDCollection.empty());
 					info.type = data.getDirectString("type", null);
 					info.id = data.getDirectString("id", null);
 				}
@@ -940,7 +940,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			
 			Element elData = document.selectFirst("script#__NEXT_DATA__");
 			if(elData != null) {
-				SSDCollection mediaData = JSON.read(elData.html());
+				SSDCollection mediaData = JavaScript.readObject(elData.html());
 				SSDCollection meta = mediaData.getCollection("props.pageProps.data.mediaMeta");
 				SSDCollection seasons = meta.getCollection("show.seasons", null);
 				// Try to obtain the season number

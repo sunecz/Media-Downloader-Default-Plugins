@@ -53,6 +53,7 @@ import sune.app.mediadown.server.Server;
 import sune.app.mediadown.util.CheckedBiFunction;
 import sune.app.mediadown.util.CheckedSupplier;
 import sune.app.mediadown.util.JSON;
+import sune.app.mediadown.util.JavaScript;
 import sune.app.mediadown.util.NIO;
 import sune.app.mediadown.util.Reflection2;
 import sune.app.mediadown.util.Reflection3;
@@ -166,7 +167,7 @@ public final class NovaVoyoServer implements Server {
 			int index;
 			if((index = content.indexOf("Player.init")) >= 0) {
 				content = Utils.bracketSubstring(content, '{', '}', false, index, content.length());
-				settings = JSON.read(content);
+				settings = JavaScript.readObject(content);
 				break;
 			}
 		}

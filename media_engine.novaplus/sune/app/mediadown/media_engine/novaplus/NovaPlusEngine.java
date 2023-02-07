@@ -29,7 +29,7 @@ import sune.app.mediadown.media.MediaUtils;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.util.CheckedBiFunction;
-import sune.app.mediadown.util.JSON;
+import sune.app.mediadown.util.JavaScript;
 import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Web;
@@ -285,7 +285,7 @@ public final class NovaPlusEngine implements MediaEngine {
 			conScript = Utils.bracketSubstring(conScript, '{', '}', false, conScript.indexOf('{', 1), conScript.length());
 			
 			if(!conScript.isEmpty()) {
-				SSDCollection scriptData = JSON.read(conScript);
+				SSDCollection scriptData = JavaScript.readObject(conScript);
 				if(scriptData != null) {
 					SSDCollection tracks = scriptData.getCollection("tracks");
 					URI sourceURI = Utils.uri(url);
