@@ -23,7 +23,6 @@ import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
@@ -51,6 +50,7 @@ import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.JavaScript;
 import sune.app.mediadown.util.Opt;
 import sune.app.mediadown.util.Reflection;
+import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Threads;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Utils.Ignore;
@@ -709,16 +709,16 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 	
 	private static final class SourceInfoExtractor {
 		
-		private static final Pattern REGEX_VAR_REQUEST_SOURCE;
-		private static final Pattern REGEX_VAR_BASE_URL;
-		private static final Pattern REGEX_VAR_WWW_SERVER_GET;
-		private static final Pattern REGEX_CALL_GET_PLAYLIST_URL;
+		private static final Regex REGEX_VAR_REQUEST_SOURCE;
+		private static final Regex REGEX_VAR_BASE_URL;
+		private static final Regex REGEX_VAR_WWW_SERVER_GET;
+		private static final Regex REGEX_CALL_GET_PLAYLIST_URL;
 		
 		static {
-			REGEX_VAR_REQUEST_SOURCE = Pattern.compile("var\\s+requestSource\\s*=\\s*[\"']([^\"']+)[\"']\\s*[^;]+;");
-			REGEX_VAR_BASE_URL = Pattern.compile("var\\s+baseUrl\\s*=\\s*[\"']([^\"']+)[\"'];");
-			REGEX_VAR_WWW_SERVER_GET = Pattern.compile("var\\s+wwwServerGet\\s*=\\s*[\"']([^\"']*)[\"'];");
-			REGEX_CALL_GET_PLAYLIST_URL = Pattern.compile("getPlaylistUrl\\(\\s*(\\[[^;]+\\]),[^;]+\\);");
+			REGEX_VAR_REQUEST_SOURCE = Regex.of("var\\s+requestSource\\s*=\\s*[\"']([^\"']+)[\"']\\s*[^;]+;");
+			REGEX_VAR_BASE_URL = Regex.of("var\\s+baseUrl\\s*=\\s*[\"']([^\"']+)[\"'];");
+			REGEX_VAR_WWW_SERVER_GET = Regex.of("var\\s+wwwServerGet\\s*=\\s*[\"']([^\"']*)[\"'];");
+			REGEX_CALL_GET_PLAYLIST_URL = Regex.of("getPlaylistUrl\\(\\s*(\\[[^;]+\\]),[^;]+\\);");
 		}
 		
 		public static final SourceInfo acquire(String url) {
@@ -816,8 +816,8 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 	private static final class WebMediaMetadataExtractor {
 		
 		private static final String SELECTOR_SCRIPT = "script#__NEXT_DATA__";
-		private static final Pattern PATTERN_IDEC = Pattern.compile("\"idec\":\"([^\"]+)\"");
-		private static final Pattern PATTERN_INDEX_ID = Pattern.compile("\"indexId\":\"([^\"]+)\"");
+		private static final Regex PATTERN_IDEC = Regex.of("\"idec\":\"([^\"]+)\"");
+		private static final Regex PATTERN_INDEX_ID = Regex.of("\"indexId\":\"([^\"]+)\"");
 		
 		public static final WebMediaMetadata extract(Document document) {
 			Element elScript = document.selectFirst(SELECTOR_SCRIPT);
@@ -913,8 +913,8 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 	
 	private static final class LinkingDataTitle {
 		
-		private static final Pattern REGEX_SEASON = Pattern.compile("^(\\d+|[IVXLCDM]+)(\\.\\s+.*)?$");
-		private static final Pattern REGEX_EPISODE = Pattern.compile("^(?:Epizoda\\s+)?([\\d\\s\\+]+)/\\d+(?:\\s+(.*))?$");
+		private static final Regex REGEX_SEASON = Regex.of("^(\\d+|[IVXLCDM]+)(\\.\\s+.*)?$");
+		private static final Regex REGEX_EPISODE = Regex.of("^(?:Epizoda\\s+)?([\\d\\s\\+]+)/\\d+(?:\\s+(.*))?$");
 		
 		public static final String ofTVEpisode(LinkingData ld, String defaultValue) throws Exception {
 			if(ld.isEmpty()) return defaultValue;
@@ -932,7 +932,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			if(matcherEpisode.matches()) {
 				String numString = matcherEpisode.group(1);
 				if(numString.matches("\\d+")) numEpisode = String.format("%02d", Integer.valueOf(numString));
-				else numEpisode = Stream.of(numString.split("\\s*\\+\\s*"))
+				else numEpisode = Stream.of(Regex.of("\\s*\\+\\s*").split(numString))
 						                .map((n) -> String.format("%02d", Integer.valueOf(n)))
 						                .reduce(null, (a, b) -> (a != null ? a + "-" : "") + b);
 				episodeName = matcherEpisode.group(2);
@@ -1141,7 +1141,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		
 		private static final String SUBDOMAIN = "decko";
 		private static final String FORMAT_SHOW_URL = "https://www.ceskatelevize.cz/porady/%{show_id}s-%{show_code}s/";
-		private static final Pattern REGEX_SHOW_CODE = Pattern.compile("^https?://decko.ceskatelevize.cz/([^/]+)/?$");
+		private static final Regex REGEX_SHOW_CODE = Regex.of("^https?://decko.ceskatelevize.cz/([^/]+)/?$");
 		
 		private CT_Decko() {}
 		public static final CT_Decko getInstance() { return _Singleton.getInstance(); }
@@ -1190,11 +1190,11 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		private static final String SUBDOMAIN = "ct24";
 		private static final String SELECTOR_VIDEO = ".video-player > .media-ivysilani-placeholder";
 		private static final String URL_PLAYER_IFRAME;
-		private static final Pattern REGEX_PLAYER_HASH;
+		private static final Regex REGEX_PLAYER_HASH;
 		
 		static {
 			URL_PLAYER_IFRAME = "%{url}s&hash=%{hash}s";
-			REGEX_PLAYER_HASH = Pattern.compile("media_ivysilani:\\{hash:\"(.*?)\"\\}");
+			REGEX_PLAYER_HASH = Regex.of("media_ivysilani:\\{hash:\"(.*?)\"\\}");
 		}
 		
 		private CT_24() {}

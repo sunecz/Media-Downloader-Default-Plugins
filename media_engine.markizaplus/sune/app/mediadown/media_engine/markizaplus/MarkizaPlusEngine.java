@@ -7,7 +7,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -27,6 +26,7 @@ import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.util.CheckedBiFunction;
 import sune.app.mediadown.util.JSON;
+import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Web;
 import sune.app.mediadown.util.Web.GetRequest;
@@ -59,8 +59,8 @@ public final class MarkizaPlusEngine implements MediaEngine {
 	private static final String TXT_PLAYER_CONFIG_BEGIN = "Player.init(";
 	
 	// Other
-	private static final Pattern REGEX_CONTENT_TITLE = Pattern.compile("(?i)Séria (\\d+), epizóda (\\d+)");
-	private static final Pattern REGEX_EPISODE_TITLE = Pattern.compile("^(?:.*?(?: - |: ))?(\\d+)\\. díl(?:(?: - |: )(.*))?$");
+	private static final Regex REGEX_CONTENT_TITLE = Regex.of("(?i)Séria (\\d+), epizóda (\\d+)");
+	private static final Regex REGEX_EPISODE_TITLE = Regex.of("^(?:.*?(?: - |: ))?(\\d+)\\. díl(?:(?: - |: )(.*))?$");
 	
 	static {
 		URL_EPISODES = "https://videoarchiv.markiza.sk/api/v1/plugin/broadcasted-episodes"
@@ -218,8 +218,8 @@ public final class MarkizaPlusEngine implements MediaEngine {
 		List<Episode> episodes = new ArrayList<>();
 		Document document = Utils.document(program.uri());
 		
-		final Pattern regexShowId = Pattern.compile("show-(\\d+)");
-		final Pattern regexSeasonId = Pattern.compile("seasonId=(\\d+)");
+		final Regex regexShowId = Regex.of("show-(\\d+)");
+		final Regex regexSeasonId = Regex.of("seasonId=(\\d+)");
 		
 		// Obtain the show ID so that we can use it later in the API calls.
 		// There should exist a script with a classes list that contains a special class
@@ -252,7 +252,7 @@ public final class MarkizaPlusEngine implements MediaEngine {
 			Element elButtonLoadMore = document.selectFirst(".b-episodes .js-load-next");
 			
 			if(elButtonLoadMore != null) {
-				final Pattern regexSeasonIdButton = Pattern.compile("season=(\\d+)");
+				final Regex regexSeasonIdButton = Regex.of("season=(\\d+)");
 				String loadMoreUrl = elButtonLoadMore.attr("href");
 				Matcher matcher;
 				

@@ -7,7 +7,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -32,6 +31,7 @@ import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.util.CheckedBiFunction;
 import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.Pair;
+import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Utils.JS;
 import sune.app.mediadown.util.Web;
@@ -101,7 +101,7 @@ public final class TVAutosalonEngine implements MediaEngine {
 			}
 		}
 		
-		Pattern regexNumEpisode = Pattern.compile("^(\\d+)\\. epizoda$");
+		Regex regexNumEpisode = Regex.of("^(\\d+)\\. epizoda$");
 		for(Element elBadge : document.select("#main .article-title .badge")) {
 			String text = elBadge.text();
 			Matcher matcher;
@@ -119,18 +119,18 @@ public final class TVAutosalonEngine implements MediaEngine {
 			episodeName = "";
 		
 		// Try to improve the episode name string (and possible extract more information)
-		Pattern regexEpisodeName;
+		Regex regexEpisodeName;
 		Matcher matcher;
 		
 		// Extract the episode number and clean episode name, if the episode name contains the program name
-		regexEpisodeName = Pattern.compile("(?i)^" + Pattern.quote(programName) + " (\\d+): (.*)$");
+		regexEpisodeName = Regex.of("(?i)^" + Regex.quote(programName) + " (\\d+): (.*)$");
 		if((matcher = regexEpisodeName.matcher(episodeName)).matches()) {
 			numEpisode = matcher.group(1);
 			episodeName = matcher.group(2);
 		}
 		
 		// Extract more informatio and clean episode name, if the episode name is in a specific format
-		regexEpisodeName = Pattern.compile("(?i)^" + Pattern.quote(programName) + " (\\d+) - (?:[^,]+, )?(\\d+)\\. díl(?:, (.*))?$");
+		regexEpisodeName = Regex.of("(?i)^" + Regex.quote(programName) + " (\\d+) - (?:[^,]+, )?(\\d+)\\. díl(?:, (.*))?$");
 		if((matcher = regexEpisodeName.matcher(episodeName)).matches()) {
 			numSeason = matcher.group(1);
 			numEpisode = matcher.group(2);
@@ -138,7 +138,7 @@ public final class TVAutosalonEngine implements MediaEngine {
 		}
 		
 		// Extract more informatio and clean episode name, if the episode name is in a specific format
-		regexEpisodeName = Pattern.compile("(?i)^(" + Pattern.quote(programName) + " - [^,]+), (\\d+)\\. díl(?:, (.*))?$");
+		regexEpisodeName = Regex.of("(?i)^(" + Regex.quote(programName) + " - [^,]+), (\\d+)\\. díl(?:, (.*))?$");
 		if((matcher = regexEpisodeName.matcher(episodeName)).matches()) {
 			programName = matcher.group(1);
 			numEpisode = matcher.group(2);

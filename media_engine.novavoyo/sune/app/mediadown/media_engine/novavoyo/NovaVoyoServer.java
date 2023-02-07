@@ -28,7 +28,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -57,6 +56,7 @@ import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.NIO;
 import sune.app.mediadown.util.Reflection2;
 import sune.app.mediadown.util.Reflection3;
+import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Threads;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Utils.Ignore;
@@ -76,7 +76,7 @@ public final class NovaVoyoServer implements Server {
 	public static final String URL     = PLUGIN.getURL();
 	public static final Image  ICON    = PLUGIN.getIcon();
 	
-	private static final Pattern REGEX_EPISODE = Pattern.compile("^(?:.*?(?: - |: ))?(\\d+)\\. díl(?:(?: - |: )(.*))?$");
+	private static final Regex REGEX_EPISODE = Regex.of("^(?:.*?(?: - |: ))?(\\d+)\\. díl(?:(?: - |: )(.*))?$");
 	
 	// Allow to create an instance when registering the engine
 	NovaVoyoServer() {

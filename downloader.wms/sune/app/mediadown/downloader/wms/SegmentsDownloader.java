@@ -26,7 +26,6 @@ import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.function.ToLongFunction;
 import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
@@ -78,6 +77,7 @@ import sune.app.mediadown.util.Pair;
 import sune.app.mediadown.util.Range;
 import sune.app.mediadown.util.Reflection2;
 import sune.app.mediadown.util.Reflection3;
+import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.SyncObject;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Utils.Ignore;
@@ -117,7 +117,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		= ConcurrentVarLazyLoader.of(SegmentsDownloader::buildHttpClient);
 	private static final ConcurrentVarLazyLoader<HttpRequest.Builder> httpRequestBuilder
 		= ConcurrentVarLazyLoader.of(SegmentsDownloader::buildHttpRequestBuilder);
-	private static final ConcurrentVarLazyLoader<Pattern> regexContentRange
+	private static final ConcurrentVarLazyLoader<Regex> regexContentRange
 		= ConcurrentVarLazyLoader.of(SegmentsDownloader::buildRegexContentRange);
 	
 	SegmentsDownloader(Media media, Path dest, MediaDownloadConfiguration configuration, int maxRetryAttempts,
@@ -171,9 +171,9 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 				          .setHeader("User-Agent", Shared.USER_AGENT);
 	}
 	
-	private static final Pattern buildRegexContentRange() {
+	private static final Regex buildRegexContentRange() {
 		// Source: https://httpwg.org/specs/rfc9110.html#field.content-range
-		return Pattern.compile("^([!#$%&'*+\\-.^_`|~0-9A-Za-z]+) (?:(\\d+)-(\\d+)/(\\d+|\\*)|\\*/(\\d+))$");
+		return Regex.of("^([!#$%&'*+\\-.^_`|~0-9A-Za-z]+) (?:(\\d+)-(\\d+)/(\\d+|\\*)|\\*/(\\d+))$");
 	}
 	
 	private static final long sizeOf(URI uri, Map<String, String> headers) throws Exception {

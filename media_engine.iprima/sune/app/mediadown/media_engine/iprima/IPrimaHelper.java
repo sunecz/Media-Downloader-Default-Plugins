@@ -25,7 +25,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 import org.jsoup.nodes.Document;
@@ -53,6 +52,7 @@ import sune.app.mediadown.util.JavaScript;
 import sune.app.mediadown.util.Opt;
 import sune.app.mediadown.util.Reflection2;
 import sune.app.mediadown.util.Reflection3;
+import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Threads;
 import sune.app.mediadown.util.TriFunction;
 import sune.app.mediadown.util.Utils;
@@ -69,7 +69,8 @@ final class IPrimaHelper {
 	
 	private static final int CALLBACK_EXIT = -1;
 	private static final String FORMAT_EPISODE_TITLE = "%{season}s - %{episode}s";
-	private static final Pattern REGEX_EPISODE_NAME = Pattern.compile("^\\d+\\.[^\\-]+-\\s+(.*)$");
+	private static final Regex REGEX_EPISODE_NAME = Regex.of("^\\d+\\.[^\\-]+-\\s+(.*)$");
+	private static final Regex REGEX_COMPARE_SPLIT = Regex.of("(?<=\\d+)(?!\\d)|(?<!\\d)(?=\\d+)");
 	
 	private static final ConcurrentVarLazyLoader<CookieManager> cookieManager
 		= ConcurrentVarLazyLoader.of(IPrimaHelper::ensureCookieManager);
@@ -185,8 +186,8 @@ final class IPrimaHelper {
 	
 	public static final int compareNatural(String a, String b) {
 		// See: https://stackoverflow.com/posts/comments/13599980
-		String[] sa = a.split("(?<=\\d+)(?!\\d)|(?<!\\d)(?=\\d+)");
-		String[] sb = b.split("(?<=\\d+)(?!\\d)|(?<!\\d)(?=\\d+)");
+		String[] sa = REGEX_COMPARE_SPLIT.split(a);
+		String[] sb = REGEX_COMPARE_SPLIT.split(b);
 		
 		int la = sa.length, lb = sb.length;
 		for(int i = 0, l = Math.min(la, lb), cmp; i < l; ++i) {
@@ -490,7 +491,7 @@ final class IPrimaHelper {
 					String regexNumEpisode = "\\s*\\((\\d+)\\)$";
 					// Extract the episode number, if it exists in the name
 					if(rawEpisode.equals("0")) {
-						Matcher matcher = Pattern.compile(regexNumEpisode).matcher(programName);
+						Matcher matcher = Regex.of(regexNumEpisode).matcher(programName);
 						if(matcher.find()) {
 							numEpisode = String.format("%02d", Integer.valueOf(matcher.group(1)));
 						}
@@ -546,10 +547,10 @@ final class IPrimaHelper {
 					episodeName = matcher.group(1);
 					// The episode name can be in the format "[program_name] - [season] ([episode])",
 					// which is not desirable.
-					String regex = "^" + Pattern.quote(programName) + " "
-					                   + Pattern.quote(seasonRoman) + " \\("
-							           + Pattern.quote(rawEpisode) + "\\)$";
-					if(Pattern.matches(regex, episodeName))
+					String regex = "^" + Regex.quote(programName) + " "
+					                   + Regex.quote(seasonRoman) + " \\("
+							           + Regex.quote(rawEpisode) + "\\)$";
+					if(Regex.matches(regex, episodeName))
 						episodeName = "";
 				}
 				title = MediaUtils.mediaTitle(programName, numSeason, numEpisode, episodeName, splitSeasonAndEpisode);
@@ -839,7 +840,7 @@ final class IPrimaHelper {
 		private static final String URL_API;
 		
 		// RegEx
-		private static final Pattern REGEX_SNIPPETS;
+		private static final Regex REGEX_SNIPPETS;
 		
 		// Selectors
 		private static final String SELECTOR_EPISODE = ".w-full h3 > a";
@@ -849,7 +850,7 @@ final class IPrimaHelper {
 		
 		static {
 			URL_API = "%{base_url}s/_snippet/%{type}s/%{count}d/%{offset}d/%{program_id}s";
-			REGEX_SNIPPETS = Pattern.compile("new\\s+InfiniteCarousel\\([^,]+,\\s*'/_snippet/([^/]+)/[^']+/(\\d+)',[^\\)]+\\)", Pattern.DOTALL);
+			REGEX_SNIPPETS = Regex.of("new\\s+InfiniteCarousel\\([^,]+,\\s*'/_snippet/([^/]+)/[^']+/(\\d+)',[^\\)]+\\)", Regex.Flags.DOTALL);
 		}
 		
 		private SnippetEpisodeObtainer() {
@@ -902,8 +903,8 @@ final class IPrimaHelper {
 		private static final String URL_API_PLAY;
 		
 		// RegEx
-		private static final Pattern REGEX_PLAY_IDS;
-		private static final Pattern REGEX_NUM_EPISODE;
+		private static final Regex REGEX_PLAY_IDS;
+		private static final Regex REGEX_NUM_EPISODE;
 		
 		// Selectors
 		private static final String SELECTOR_SCRIPT = ".main-container > .content > header > .play-video > script";
@@ -913,8 +914,8 @@ final class IPrimaHelper {
 		
 		static {
 			URL_API_PLAY = "https://api.play-backend.iprima.cz/api/v1/products/play/ids-%{play_id}s";
-			REGEX_PLAY_IDS = Pattern.compile("videos\\s*=\\s*'([^']+)';");
-			REGEX_NUM_EPISODE = Pattern.compile("^.*?/([^/]+?)$");
+			REGEX_PLAY_IDS = Regex.of("videos\\s*=\\s*'([^']+)';");
+			REGEX_NUM_EPISODE = Regex.of("^.*?/([^/]+?)$");
 		}
 		
 		private PlayIDsMediaObtainer() {

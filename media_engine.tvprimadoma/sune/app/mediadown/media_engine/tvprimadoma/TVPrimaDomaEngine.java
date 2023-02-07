@@ -6,7 +6,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -30,6 +29,7 @@ import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.util.CheckedBiFunction;
 import sune.app.mediadown.util.JavaScript;
+import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Web;
 import sune.app.mediadown.util.Web.GetRequest;
@@ -64,14 +64,14 @@ public final class TVPrimaDomaEngine implements MediaEngine {
 	private static final String SELECTOR_VIDEO_BREADCRUMB = "main .breadcrumbs-comp .breadcrumb-item";
 	
 	// RegExp
-	private static final Pattern REGEX_STARTS_WITH_EPISODE_NUMBER;
-	private static final Pattern REGEX_SEASON;
-	private static final Pattern REGEX_EPISODE_AND_SEASON;
+	private static final Regex REGEX_STARTS_WITH_EPISODE_NUMBER;
+	private static final Regex REGEX_SEASON;
+	private static final Regex REGEX_EPISODE_AND_SEASON;
 	
 	static {
-		REGEX_STARTS_WITH_EPISODE_NUMBER = Pattern.compile("(?i)^\\d+\\.? (díl|epizoda).*?$");
-		REGEX_SEASON = Pattern.compile("(?i)^Sezóna (\\d+).*?$");
-		REGEX_EPISODE_AND_SEASON = Pattern.compile("(?i)^((\\d+)\\.? díl(?:\\s*[,-]\\s+(?:série|sezóna) (\\d+))?[\\-\\s]*).*?$");
+		REGEX_STARTS_WITH_EPISODE_NUMBER = Regex.of("(?i)^\\d+\\.? (díl|epizoda).*?$");
+		REGEX_SEASON = Regex.of("(?i)^Sezóna (\\d+).*?$");
+		REGEX_EPISODE_AND_SEASON = Regex.of("(?i)^((\\d+)\\.? díl(?:\\s*[,-]\\s+(?:série|sezóna) (\\d+))?[\\-\\s]*).*?$");
 	}
 	
 	// Allow to create an instance when registering the engine
@@ -82,7 +82,7 @@ public final class TVPrimaDomaEngine implements MediaEngine {
 			Program program, WorkerProxy proxy, CheckedBiFunction<WorkerProxy, Episode, Boolean> function)
 			throws Exception {
 		String programTitle = program.title();
-		Pattern regexProgramName = Pattern.compile("^" + Pattern.quote(programTitle) + "[\\-\\s]*");
+		Regex regexProgramName = Regex.of("^" + Regex.quote(programTitle) + "[\\-\\s]*");
 		
 		// All episodes are shown, just obtain them
 		for(Element elEpisode : elContainer.select(SELECTOR_EPISODES)) {
@@ -272,7 +272,7 @@ public final class TVPrimaDomaEngine implements MediaEngine {
 		}
 		
 		// Remove program name from the episode name, if it is present
-		Pattern regexProgramName = Pattern.compile("^" + Pattern.quote(programName) + "[\\-\\s]*");
+		Regex regexProgramName = Regex.of("^" + Regex.quote(programName) + "[\\-\\s]*");
 		Matcher matcher = regexProgramName.matcher(episodeName);
 		if(matcher.find()) episodeName = episodeName.substring(matcher.end(0));
 		
@@ -449,7 +449,7 @@ public final class TVPrimaDomaEngine implements MediaEngine {
 				return null;
 			
 			SSDCollection pd = playerData;
-			frameURL = Utils.replaceAll("[\"']?\\+([^\\+]+)\\+[\"']?", frameURL, (matcher) -> {
+			frameURL = Regex.of("[\"']?\\+([^\\+]+)\\+[\"']?").replaceAll(frameURL, (matcher) -> {
 				String name = matcher.group(1).replaceFirst("Player\\.", "");
 				return pd.getDirectObject(name).stringValue();
 			});

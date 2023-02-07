@@ -26,7 +26,6 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 import org.jsoup.nodes.Document;
@@ -75,6 +74,7 @@ import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.JavaScript;
 import sune.app.mediadown.util.Reflection2;
 import sune.app.mediadown.util.Reflection3;
+import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Threads;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Utils.Ignore;
@@ -101,7 +101,7 @@ public final class TVBarrandovEngine implements MediaEngine {
 	private static final String SELECTOR_PROGRAMS = SELECTOR_GRID;
 	private static final String SELECTOR_EPISODES = SELECTOR_GRID + " > .show-box:not(.show-box--date)";
 	
-	private static Pattern REGEX_EPISODE_URL;
+	private static Regex REGEX_EPISODE_URL;
 	
 	// Allow to create an instance when registering the engine
 	TVBarrandovEngine() {
@@ -109,7 +109,7 @@ public final class TVBarrandovEngine implements MediaEngine {
 	
 	private static final String maybeImproveEpisodeTitle(Program program, String url, String title) {
 		if(REGEX_EPISODE_URL == null) {
-			REGEX_EPISODE_URL = Pattern.compile("/video/\\d+((?:-[^-]+)+)-(\\d{1,2})-(\\d{1,2})-(\\d{4})$");
+			REGEX_EPISODE_URL = Regex.of("/video/\\d+((?:-[^-]+)+)-(\\d{1,2})-(\\d{1,2})-(\\d{4})$");
 		}
 		
 		Matcher matcher = REGEX_EPISODE_URL.matcher(url);
@@ -120,7 +120,7 @@ public final class TVBarrandovEngine implements MediaEngine {
 			// Check whether there is any more text for the episode title
 			if(!normalizedName.equals(extractedName)) {
 				// Try to beautify the episode title in the URL
-				extractedName = extractedName.replaceFirst("^" + Pattern.quote(normalizedName), "");
+				extractedName = extractedName.replaceFirst("^" + Regex.quote(normalizedName), "");
 				extractedName = extractedName.replaceFirst("^-", "");
 				extractedName = extractedName.replaceAll("-", " ");
 				if(!extractedName.isEmpty()) {
@@ -238,7 +238,7 @@ public final class TVBarrandovEngine implements MediaEngine {
 			String queryURL = "https://www.youtube.com/c/TelevizeBarrandovOfficial/search?query=%{query}s";
 			String query = null, programName = null, dateString = null;
 			
-			Pattern regex = Pattern.compile("^/video/\\d+((?:-[^-]+)+)-(\\d{1,2})-(\\d{1,2})-(\\d{4})$");
+			Regex regex = Regex.of("^/video/\\d+((?:-[^-]+)+)-(\\d{1,2})-(\\d{1,2})-(\\d{4})$");
 			Matcher matcher = regex.matcher(uri.getPath());
 			if(matcher.matches()) {
 				programName = Utils.titlize(matcher.group(1).substring(1));
@@ -332,8 +332,8 @@ public final class TVBarrandovEngine implements MediaEngine {
 									String title = itemData.getString("title.runs.0.text").toLowerCase();
 									// Choose the result we want, it should at least contain the required
 									// words, i.e. program name and the date string.
-									if(Pattern.compile("(?U)\\b" + Pattern.quote(programName) + "\\b").matcher(title).find()
-											&& Pattern.compile("(?U)\\b" + Pattern.quote(dateString) + "\\b").matcher(title).find()) {
+									if(Regex.of("(?U)\\b" + Regex.quote(programName) + "\\b").matcher(title).find()
+											&& Regex.of("(?U)\\b" + Regex.quote(dateString) + "\\b").matcher(title).find()) {
 										uriToProcess = Utils.uri("https://www.youtube.com/watch?v=" + videoId);
 										// Video found, do not continue
 										break;
@@ -960,19 +960,19 @@ public final class TVBarrandovEngine implements MediaEngine {
 	
 	private static final class JSONUtils {
 		
-		private static Pattern REGEX_SINGLELINE_COMMENT;
-		private static Pattern REGEX_MULTILINE_COMMENT;
+		private static Regex REGEX_SINGLELINE_COMMENT;
+		private static Regex REGEX_MULTILINE_COMMENT;
 		
-		private static final Pattern regexSingleLineComments() {
+		private static final Regex regexSingleLineComments() {
 			if(REGEX_SINGLELINE_COMMENT == null) {
-				REGEX_SINGLELINE_COMMENT = Pattern.compile("(?m)^(.*(?:\"[^\"\\/\\n\\r]*\\/\\/[^\"\\/\\n\\r]*\")*)\\s*\\/\\/.*$");
+				REGEX_SINGLELINE_COMMENT = Regex.of("(?m)^(.*(?:\"[^\"\\/\\n\\r]*\\/\\/[^\"\\/\\n\\r]*\")*)\\s*\\/\\/.*$");
 			}
 			return REGEX_SINGLELINE_COMMENT;
 		}
 		
-		private static final Pattern regexMultiLineComments() {
+		private static final Regex regexMultiLineComments() {
 			if(REGEX_MULTILINE_COMMENT == null) {
-				REGEX_MULTILINE_COMMENT = Pattern.compile("(?s)^(.*(?:\"[^\"\\/\\*\\n\\r]*\\/\\*[^\"\\/\\*\\n\\r]*\")*)\\/\\*(?!\\/\\*).*\\*\\/\\s*");
+				REGEX_MULTILINE_COMMENT = Regex.of("(?s)^(.*(?:\"[^\"\\/\\*\\n\\r]*\\/\\*[^\"\\/\\*\\n\\r]*\")*)\\/\\*(?!\\/\\*).*\\*\\/\\s*");
 			}
 			return REGEX_MULTILINE_COMMENT;
 		}

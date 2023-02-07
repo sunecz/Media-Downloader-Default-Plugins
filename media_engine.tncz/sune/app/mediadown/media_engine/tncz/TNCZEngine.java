@@ -7,7 +7,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -26,6 +25,7 @@ import sune.app.mediadown.media.MediaUtils;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.util.CheckedBiFunction;
+import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Web;
 import sune.app.mediadown.util.Web.GetRequest;
@@ -59,8 +59,8 @@ public final class TNCZEngine implements MediaEngine {
 	private static final String TXT_PLAYER_CONFIG_BEGIN = "Player.init(";
 	
 	// Others
-	private static final Pattern REGEX_SHOW_ID = Pattern.compile("\"show\":\"(\\d+)\"");
-	private static final Pattern REGEX_EPISODE = Pattern.compile("^(?:.*?(?: - |: ))?(\\d+)\\. díl(?:(?: - |: )(.*))?$");
+	private static final Regex REGEX_SHOW_ID = Regex.of("\"show\":\"(\\d+)\"");
+	private static final Regex REGEX_EPISODE = Regex.of("^(?:.*?(?: - |: ))?(\\d+)\\. díl(?:(?: - |: )(.*))?$");
 	
 	static {
 		URL_EPISODE_LIST = "https://tn.nova.cz/api/v1/episodes/more"

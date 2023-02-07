@@ -26,7 +26,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -65,6 +64,7 @@ import sune.app.mediadown.util.Opt;
 import sune.app.mediadown.util.Reflection;
 import sune.app.mediadown.util.Reflection2;
 import sune.app.mediadown.util.Reflection3;
+import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Threads;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Utils.Ignore;
@@ -87,10 +87,10 @@ public final class StreamCZEngine implements MediaEngine {
 	public static final Image  ICON    = PLUGIN.getIcon();
 	
 	// RegExp
-	private static final Pattern REGEX_SEASON;
+	private static final Regex REGEX_SEASON;
 	
 	static {
-		REGEX_SEASON = Pattern.compile("(?i)^(\\d+). série$");
+		REGEX_SEASON = Regex.of("(?i)^(\\d+). série$");
 	}
 	
 	// Allow to create an instance when registering the engine

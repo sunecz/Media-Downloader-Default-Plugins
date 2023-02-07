@@ -10,7 +10,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -43,6 +42,7 @@ import sune.app.mediadown.util.CheckedBiFunction;
 import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.JavaScript;
 import sune.app.mediadown.util.Pair;
+import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Tuple;
 import sune.app.mediadown.util.UserAgent;
 import sune.app.mediadown.util.Utils;
@@ -64,7 +64,7 @@ public class YouTubeServer implements Server {
 	public static final String URL     = PLUGIN.getURL();
 	public static final Image  ICON    = PLUGIN.getIcon();
 	
-	private static Pattern REGEX_EMBED_URL;
+	private static Regex REGEX_EMBED_URL;
 	
 	private final WorkerProxy _dwp = WorkerProxy.defaultProxy();
 	
@@ -74,7 +74,7 @@ public class YouTubeServer implements Server {
 	
 	private static final String maybeTransformEmbedURL(String url) {
 		if(REGEX_EMBED_URL == null) {
-			REGEX_EMBED_URL = Pattern.compile("^https?://(?:www\\.|m\\.)?youtube\\.com/embed/([^?#]+)(?:[?#].*)?$");
+			REGEX_EMBED_URL = Regex.of("^https?://(?:www\\.|m\\.)?youtube\\.com/embed/([^?#]+)(?:[?#].*)?$");
 		}
 		Matcher matcher = REGEX_EMBED_URL.matcher(url);
 		return matcher.matches()
@@ -90,7 +90,7 @@ public class YouTubeServer implements Server {
 		Document document = Utils.parseDocument(response.content, url);
 		Signature.Context ctx = Signature.Extractor.extract(document);
 		Elements scripts = document.getElementsByTag("script");
-		Pattern patternConfigVariable = Pattern.compile("var ytInitialPlayerResponse\\s+=\\s+\\{");
+		Regex patternConfigVariable = Regex.of("var ytInitialPlayerResponse\\s+=\\s+\\{");
 		for(Element script : scripts) {
 			String scriptHTML = script.html();
 			Matcher matcher = patternConfigVariable.matcher(scriptHTML);
@@ -275,10 +275,10 @@ public class YouTubeServer implements Server {
 		private static final long SEGMENT_SIZE = 10L * 1024L * 1024L; // 10 MiB
 		private static final double MS_TO_SECONDS = 1e-3;
 		
-		private static final Pattern REGEX_OTF_SEGMENTS = Pattern.compile(
+		private static final Regex REGEX_OTF_SEGMENTS = Regex.of(
 			"Segment-Count: (\\d+)\\s+Segment-Durations-Ms: ((?:\\d+(?:\\(r=\\d+\\))?,)+)"
 		);
-		private static final Pattern REGEX_OTF_SEGMENT_DURATION = Pattern.compile(
+		private static final Regex REGEX_OTF_SEGMENT_DURATION = Regex.of(
   			"(\\d+)(?:\\(r=(\\d+)\\))?"
   		);
 		
@@ -650,9 +650,9 @@ public class YouTubeServer implements Server {
 			
 			private static final Pair<CheckedBiFunction<char[], Integer, char[]>, Integer>[] getFunctionCalls(String script,
 					Map<String, CheckedBiFunction<char[], Integer, char[]>> mapping, String objectName) {
-				String quotedObjectName = Pattern.quote(objectName);
-				Pattern findPattern = Pattern.compile(String.format(PATTERN_STRING_FIND, quotedObjectName));
-				Pattern fmapPattern = Pattern.compile(String.format(PATTERN_STRING_FMAP, quotedObjectName));
+				String quotedObjectName = Regex.quote(objectName);
+				Regex findPattern = Regex.of(String.format(PATTERN_STRING_FIND, quotedObjectName));
+				Regex fmapPattern = Regex.of(String.format(PATTERN_STRING_FMAP, quotedObjectName));
 				Matcher matcher = findPattern.matcher(script);
 				if(matcher.find()) {
 					// Parse the function content to function calls
@@ -735,8 +735,8 @@ public class YouTubeServer implements Server {
 		
 		protected static final class Extractor {
 			
-			private static final Pattern REGEX_FUNCTION_NAME
-				= Pattern.compile("a\\.get\\(\"n\"\\).*?b=(?<fnc>[^\\[\\(]+)(?:\\[(?<idx>\\d+)\\])?\\(b\\)");
+			private static final Regex REGEX_FUNCTION_NAME
+				= Regex.of("a\\.get\\(\"n\"\\).*?b=(?<fnc>[^\\[\\(]+)(?:\\[(?<idx>\\d+)\\])?\\(b\\)");
 			
 			private static final String extractLookupFunctionName(String script, String lookupName, int index) {
 				if(index < 0) return lookupName;

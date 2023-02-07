@@ -17,6 +17,7 @@ import sune.app.mediadown.configuration.Configuration.ConfigurationProperty;
 import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.Property;
 import sune.app.mediadown.util.Reflection2;
+import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Web;
 import sune.app.mediadown.util.Web.GetRequest;
@@ -140,7 +141,7 @@ final class IPrimaAuthenticator {
 		// Taken from: https://authstatic.primacdn.cz/sso/device_id.js (function: generateDid)
 		private static final String generateDeviceId() {
 			Property<Long> d = new Property<>(System.nanoTime());
-			return Utils.replaceAll("[xy]", "d-xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx", (match) -> {
+			return Regex.of("[xy]").replaceAll("d-xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx", (match) -> {
 				int r = (int) ((d.getValue() + (int) (Math.random() * 16.0)) % 16L);
 				d.setValue((long) Math.floor(d.getValue() / 16.0));
 				return Integer.toHexString(match.group(0).equals("x") ? r : (r & 0x3 | 0x8));

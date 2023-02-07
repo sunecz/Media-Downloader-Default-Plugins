@@ -9,7 +9,6 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Optional;
 import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import org.jsoup.nodes.Document;
@@ -30,6 +29,7 @@ import sune.app.mediadown.media.MediaUtils;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.util.CheckedBiFunction;
+import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Web;
 import sune.app.mediadown.util.Web.GetRequest;
@@ -65,7 +65,7 @@ public final class NovaPlusEngine implements MediaEngine {
 	private static final String SEL_LABEL_VOYO = ".c-badge";
 	private static final String URL_EPISODE_LIST;
 	
-	private static final Pattern REGEX_EPISODE = Pattern.compile("^(?:.*?(?: - |: ))?(\\d+)\\. díl(?:(?: - |: )(.*))?$");
+	private static final Regex REGEX_EPISODE = Regex.of("^(?:.*?(?: - |: ))?(\\d+)\\. díl(?:(?: - |: )(.*))?$");
 	
 	static {
 		URL_EPISODE_LIST = "https://tv.nova.cz/api/v1/mixed/more"
