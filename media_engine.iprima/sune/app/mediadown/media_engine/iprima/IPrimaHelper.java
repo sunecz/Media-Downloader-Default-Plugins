@@ -330,15 +330,12 @@ final class IPrimaHelper {
 		
 		private final int callback(IPrima iprima, Program program, String response, Map<String, Object> args,
 				CheckedFunction<Episode, Boolean> functionAddToList) throws Exception {
-			// The response must be fixed first, since it contains escaped characters
-			// that are unescaped incorrectly while reading the respective data node.
-			response = response.replaceAll("\\\\(.)", "\\\\\\\\$1");
 			SSDCollection data = JSON.read(response);
 			String content = data.getDirectString("related_content", null);
 			if(content == null)
 				return CALLBACK_EXIT; // Do not continue
 			// Another fixing and tidying up
-			content = Utils.replaceUnicode4Digits(content);
+			content = Utils.replaceUnicodeEscapeSequences(content);
 			content = content.replace("\\n", "");
 			content = content.replace("\\/", "/");
 			Document document = Utils.parseDocument(content);
@@ -697,7 +694,7 @@ final class IPrimaHelper {
 				CheckedFunction<Program, Boolean> functionAddToList) throws Exception {
 			// The response must be fixed first, since it contains escaped characters
 			// that are unescaped incorrectly while reading the respective data node.
-			response = Utils.replaceUnicode4Digits(response);
+			response = Utils.replaceUnicodeEscapeSequences(response);
 			SSDCollection data = JSON.read(response);
 			SSDCollection content = data.getCollection("data.strip.content");
 			if(content.length() <= 0)
@@ -761,13 +758,6 @@ final class IPrimaHelper {
 		
 		private static final int callback(IPrima iprima, String response, String type, CheckedFunction<Program, Boolean> functionAddToList,
 				String graphQLType) throws Exception {
-			// The response must be fixed first, since it contains escaped characters
-			// that are unescaped incorrectly while reading the respective data node.
-			response = response.replaceAll("\\\\u0022", "\\\\\""); // Escape double quotes
-			response = Utils.replaceUnicode4Digits(response); // Replace Unicode characters
-			response = response.replaceAll("\\\\", "\\\\\\\\"); // Escape backward slashes
-			response = response.replaceAll("\\\\\\\\\"", "\\\\\"");  // Unescape double quotes
-			response = response.replaceAll("\\\\/", "/"); // Unescape forward slashes
 			SSDCollection json = JSON.read(response);
 			String content = json.getDirectString("content");
 			Document document = Utils.parseDocument(content);
