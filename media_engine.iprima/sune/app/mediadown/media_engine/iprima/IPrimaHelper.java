@@ -1,5 +1,7 @@
 package sune.app.mediadown.media_engine.iprima;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.net.CookieManager;
 import java.net.URI;
 import java.net.URL;
@@ -9,6 +11,7 @@ import java.net.http.HttpClient.Version;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.HttpResponse.BodyHandlers;
+import java.nio.channels.ClosedByInterruptException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -47,6 +50,7 @@ import sune.app.mediadown.plugin.PluginConfiguration;
 import sune.app.mediadown.util.CheckedBiFunction;
 import sune.app.mediadown.util.CheckedFunction;
 import sune.app.mediadown.util.CheckedSupplier;
+import sune.app.mediadown.util.CounterLock;
 import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.JavaScript;
 import sune.app.mediadown.util.Opt;
@@ -1058,44 +1062,75 @@ final class IPrimaHelper {
 		
 		private final ExecutorService executor;
 		private final AtomicReference<Exception> exception = new AtomicReference<>();
+		private final CounterLock counter = new CounterLock();
+		private final AtomicBoolean isShutdown = new AtomicBoolean();
 		
 		public ThreadedSpawnableTaskQueue(int maxThreads) {
 			this.executor = Threads.Pools.newWorkStealing(maxThreads);
-		}
-		
-		private final Callable<R> newTask(P arg) {
-			return (() -> {
-				boolean shouldShutdown = false;
-				try {
-					R val = runTask(arg);
-					shouldShutdown = shouldShutdown(val);
-					return val;
-				} catch(Exception ex) {
-					shouldShutdown = exception.compareAndSet(null, ex);
-					throw ex;
-				} finally {
-					if(shouldShutdown) {
-						executor.shutdownNow();
-					}
-				}
-			});
 		}
 		
 		protected abstract R runTask(P arg) throws Exception;
 		protected abstract boolean shouldShutdown(R val);
 		
 		public final ThreadedSpawnableTaskQueue<P, R> addTask(P arg) {
-			executor.submit(newTask(arg));
+			if(isShutdown.get()) {
+				return this;
+			}
+			
+			counter.increment();
+			executor.submit(new Task(arg));
 			return this;
 		}
 		
 		public final void await() throws Exception {
-			executor.shutdown();
+			counter.await();
+			
+			executor.shutdownNow();
 			executor.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS);
 			
 			Exception ex;
-			if((ex = exception.get()) != null)
+			if((ex = exception.get()) != null) {
 				throw ex;
+			}
+		}
+		
+		private final class Task implements Callable<R> {
+			
+			private final P arg;
+			
+			public Task(P arg) {
+				this.arg = arg;
+			}
+			
+			@Override
+			public R call() throws Exception {
+				boolean shouldShutdown = false;
+				
+				try {
+					R val = runTask(arg);
+					shouldShutdown = shouldShutdown(val);
+					return val;
+				} catch(UncheckedIOException ex) {
+					IOException cause = ex.getCause();
+					
+					if(cause instanceof ClosedByInterruptException) {
+						// Interrupted, ignore
+						return null;
+					}
+					
+					shouldShutdown = exception.compareAndSet(null, ex);
+					throw ex; // Propagate
+				} catch(Exception ex) {
+					shouldShutdown = exception.compareAndSet(null, ex);
+					throw ex; // Propagate
+				} finally {
+					counter.decrement();
+					
+					if(shouldShutdown) {
+						isShutdown.set(true);
+					}
+				}
+			}
 		}
 	}
 	
