@@ -5,6 +5,7 @@ import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
 
@@ -14,6 +15,7 @@ import org.jsoup.nodes.Element;
 import sune.app.mediadown.Shared;
 import sune.app.mediadown.configuration.Configuration;
 import sune.app.mediadown.configuration.Configuration.ConfigurationProperty;
+import sune.app.mediadown.media_engine.iprima.IPrimaAuthenticator.ProfileManager.Profile;
 import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.Property;
 import sune.app.mediadown.util.Reflection2;
@@ -23,25 +25,28 @@ import sune.app.mediadown.util.Web;
 import sune.app.mediadown.util.Web.GetRequest;
 import sune.app.mediadown.util.Web.PostRequest;
 import sune.app.mediadown.util.Web.Response;
+import sune.app.mediadown.util.Web.StreamResponse;
 import sune.app.mediadown.util.Web.StringResponse;
 import sune.util.ssdf2.SSDCollection;
 
 final class IPrimaAuthenticator {
 	
-	private static final URL URL_OAUTH_LOGIN;
-	private static final URL URL_OAUTH_TOKEN;
-	private static final URL URL_OAUTH_AUTHORIZE;
-	private static final URL URL_LOGIN;
-	private static final URL URL_USER_AUTH;
+	private static final String URL_OAUTH_LOGIN;
+	private static final String URL_OAUTH_TOKEN;
+	private static final String URL_OAUTH_AUTHORIZE;
+	private static final String URL_LOGIN;
+	private static final String URL_USER_AUTH;
+	private static final String URL_PROFILE_SELECT;
 	
 	private static SessionData SESSION_DATA;
 	
 	static {
-		URL_OAUTH_LOGIN = Utils.url("https://auth.iprima.cz/oauth2/login");
-		URL_OAUTH_TOKEN = Utils.url("https://auth.iprima.cz/oauth2/token");
-		URL_OAUTH_AUTHORIZE = Utils.url("https://auth.iprima.cz/oauth2/authorize");
-		URL_LOGIN = Utils.url("https://www.iprima.cz/vue-auth/login");
-		URL_USER_AUTH = Utils.url("https://www.iprima.cz/user-authorize");
+		URL_OAUTH_LOGIN = "https://auth.iprima.cz/oauth2/login";
+		URL_OAUTH_TOKEN = "https://auth.iprima.cz/oauth2/token";
+		URL_OAUTH_AUTHORIZE = "https://auth.iprima.cz/oauth2/authorize";
+		URL_LOGIN = "https://www.iprima.cz/vue-auth/login";
+		URL_USER_AUTH = "https://www.iprima.cz/user-authorize";
+		URL_PROFILE_SELECT = "https://auth.iprima.cz/user/profile-select-perform/%{profile_id}s?continueUrl=/user/login";
 	}
 	
 	@FunctionalInterface private static interface _Callback<P, R> { R call(P param) throws Exception; }
@@ -49,48 +54,96 @@ final class IPrimaAuthenticator {
 		try(closeable) { return action.call(closeable); }
 	}
 	
+	private static final URL responseUrl(Response response) {
+		return Reflection2.<HttpURLConnection>getField(Response.class, response, "connection").getURL();
+	}
+	
 	private static final String loginOAuth(String email, String password) throws Exception {
-		StringResponse response = Web.request(new GetRequest(URL_OAUTH_LOGIN, Shared.USER_AGENT));
+		StringResponse response = Web.request(new GetRequest(Utils.url(URL_OAUTH_LOGIN), Shared.USER_AGENT));
 		String csrfToken = Utils.parseDocument(response.content).selectFirst("input[name='_csrf_token']").val();
-		Map<String, String> params = Utils.toMap("_email", email, "_password", password, "_csrf_token", csrfToken);
-		response = Web.request(new PostRequest(URL_OAUTH_LOGIN, Shared.USER_AGENT, params));
-		HttpURLConnection con = Reflection2.getField(Response.class, response, "connection");
-		return Utils.urlParams(con.getURL().toExternalForm()).getOrDefault("code", null);
+		Map<String, String> params = Map.of("_email", email, "_password", password, "_csrf_token", csrfToken);
+		response = Web.request(new PostRequest(Utils.url(URL_OAUTH_LOGIN), Shared.USER_AGENT, params));
+		return selectFirstProfile(response);
+	}
+	
+	private static final String selectProfile(String profileId) throws Exception {
+		URL url = Utils.url(Utils.format(URL_PROFILE_SELECT, "profile_id", profileId));
+		StreamResponse response = Web.requestStream(new GetRequest(url, Shared.USER_AGENT));
+		String responseUrl = responseUrl(response).toExternalForm();
+		return Utils.urlParams(responseUrl).getOrDefault("code", null);
+	}
+	
+	private static final List<Profile> profiles(StringResponse response) throws Exception {
+		String url = responseUrl(response).toExternalForm();
+		return ProfileManager.isProfileSelectPage(url)
+					? ProfileManager.extractProfiles(response.content)
+					: ProfileManager.listProfiles();
+	}
+	
+	private static final String selectFirstProfile(StringResponse response) throws Exception {
+		List<Profile> profiles = profiles(response);
+		
+		// At least one profile should be automatically available
+		if(profiles.isEmpty()) {
+			throw new IllegalStateException("No profile exists");
+		}
+		
+		return selectProfile(profiles.get(0).id());
 	}
 	
 	private static final SessionTokens sessionTokens(String code) throws Exception {
-		Map<String, String> params = Utils.toMap(
+		if(code == null) {
+			return null;
+		}
+		
+		Map<String, String> params = Map.of(
 			"scope", "openid+email+profile+phone+address+offline_access",
 			"client_id", "prima_sso",
 			"grant_type", "authorization_code",
 			"code", code,
-			"redirect_uri", "https://auth.iprima.cz/sso/auth-check");
-		return tryAndClose(Web.requestStream(new PostRequest(URL_OAUTH_TOKEN, Shared.USER_AGENT, params)),
+			"redirect_uri", "https://auth.iprima.cz/sso/auth-check"
+		);
+		
+		return tryAndClose(Web.requestStream(new PostRequest(Utils.url(URL_OAUTH_TOKEN), Shared.USER_AGENT, params)),
 		                   (response) -> SessionTokens.parse(JSON.read(response.stream)));
 	}
 	
 	private static final String authorize(SessionTokens tokens) throws Exception {
-		Map<String, String> params = Utils.toMap(
+		Map<String, String> params = Map.of(
 			"response_type", "token_code",
 			"client_id", "sso_token",
-			"token", tokens.tokenDataString());
-		URL url = Utils.url(URL_OAUTH_AUTHORIZE.toExternalForm() + '?' + Utils.joinURLParams(params));
+			"token", tokens.tokenDataString()
+		);
+		
+		URL url = Utils.url(URL_OAUTH_AUTHORIZE + '?' + Utils.joinURLParams(params));
 		return tryAndClose(Web.requestStream(new GetRequest(url, Shared.USER_AGENT)),
 		                   (response) -> JSON.read(response.stream).getDirectString("code", null));
 	}
 	
 	private static final String finishLogin(String code) throws Exception {
-		Map<String, String> params = Utils.toMap(
-			"auth_token_code", code);
-		URL url = Utils.url(URL_LOGIN.toExternalForm() + '?' + Utils.joinURLParams(params));
+		if(code == null) {
+			return null;
+		}
+		
+		Map<String, String> params = Map.of(
+			"auth_token_code", code
+		);
+		
+		URL url = Utils.url(URL_LOGIN + '?' + Utils.joinURLParams(params));
 		return tryAndClose(Web.requestStream(new GetRequest(url, Shared.USER_AGENT, null, null, false)),
 		                   (response) -> response.code == 200 ? code : null);
 	}
 	
 	private static final boolean userAuth(String code) throws Exception {
-		Map<String, String> params = Utils.toMap(
-			"auth_token_code", code);
-		URL url = Utils.url(URL_USER_AUTH.toExternalForm() + '?' + Utils.joinURLParams(params));
+		if(code == null) {
+			return false;
+		}
+		
+		Map<String, String> params = Map.of(
+			"auth_token_code", code
+		);
+		
+		URL url = Utils.url(URL_USER_AUTH + '?' + Utils.joinURLParams(params));
 		return tryAndClose(Web.requestStream(new GetRequest(url, Shared.USER_AGENT, null, null, false)),
 		                   (response) -> response.code == 200);
 	}
@@ -115,13 +168,60 @@ final class IPrimaAuthenticator {
 		return SESSION_DATA;
 	}
 	
-	private static final class DeviceManager {
+	protected static final class ProfileManager {
+		
+		private static final String URL_PROFILE_PAGE = "https://auth.iprima.cz/user/profile-select";
+		
+		private static final String SELECTOR_PROFILE = ".profile-select";
+		
+		public static final boolean isProfileSelectPage(String url) {
+			return url.startsWith(URL_PROFILE_PAGE);
+		}
+		
+		public static final List<Profile> extractProfiles(String content) throws Exception {
+			List<Profile> profiles = new ArrayList<>();
+			Document document = Utils.parseDocument(content);
+			
+			for(Element elButton : document.select(SELECTOR_PROFILE)) {
+				String id = elButton.attr("data-identifier");
+				String name = elButton.selectFirst(".card-body").text();
+				profiles.add(new Profile(id, name));
+			}
+			
+			return profiles;
+		}
+		
+		public static final List<Profile> listProfiles() throws Exception {
+			return extractProfiles(Web.request(new GetRequest(Utils.url(URL_PROFILE_PAGE), Shared.USER_AGENT)).content);
+		}
+		
+		public static final class Profile {
+			
+			private final String id;
+			private final String name;
+			
+			private Profile(String id, String name) {
+				this.id = Objects.requireNonNull(id);
+				this.name = Objects.requireNonNull(name);
+			}
+			
+			public String id() {
+				return id;
+			}
+			
+			public String name() {
+				return name;
+			}
+		}
+	}
+	
+	protected static final class DeviceManager {
 		
 		private static final String DEVICE_NAME = "Media Downloader";
 		private static final String DEVICE_TYPE = "WEB";
 		
 		private static final String URL_LIST_DEVICES = "https://auth.iprima.cz/user/zarizeni";
-		private static final String URL_ADD_DEVICE = "https://www.iprima.cz/iprima-api/PlayApiProxy/Proxy/AddNewUserSlot";
+		private static final String URL_ADD_DEVICE = "https://prima.iprima.cz/iprima-api/PlayApiProxy/Proxy/AddNewUserSlot";
 		
 		private static final String SELECTOR_DEVICES = "#main-content > div:nth-child(2) .table tr td:last-child > button";
 		
@@ -149,8 +249,8 @@ final class IPrimaAuthenticator {
 		}
 		
 		private static final Device createDevice(String id, String type, String name) throws Exception {
-			Map<String, String> params = Utils.toMap("slotType", type, "title", name, "deviceUID", id);
-			Map<String, String> headers = Utils.toMap("Referer", "https://prima.iprima.cz/", "X-Requested-With", "XMLHttpRequest");
+			Map<String, String> params = Map.of("slotType", type, "title", name, "deviceUID", id);
+			Map<String, String> headers = Map.of("Referer", "https://prima.iprima.cz/", "X-Requested-With", "XMLHttpRequest");
 			StringResponse response = Web.request(new PostRequest(Utils.url(URL_ADD_DEVICE), Shared.USER_AGENT, params, null, headers));
 			if(response.code != 200)
 				throw new IllegalStateException("Unable to create a new WEB device. Response: " + response.content);
@@ -253,7 +353,7 @@ final class IPrimaAuthenticator {
 		
 		public final Map<String, String> requestHeaders() {
 			if(requestHeaders == null) {
-				requestHeaders = Utils.toMap(
+				requestHeaders = Map.of(
 					"X-OTT-Access-Token", accessToken,
 					"X-OTT-CDN-Url-Type", "WEB",
 					"X-OTT-Device", deviceId
