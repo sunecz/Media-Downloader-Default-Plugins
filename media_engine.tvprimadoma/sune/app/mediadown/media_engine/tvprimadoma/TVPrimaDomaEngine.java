@@ -5,14 +5,14 @@ import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.regex.Matcher;
 
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
-import org.jsoup.select.Elements;
 
 import javafx.scene.image.Image;
 import sune.app.mediadown.Episode;
+import sune.app.mediadown.MediaGetter;
+import sune.app.mediadown.MediaGetters;
 import sune.app.mediadown.Program;
 import sune.app.mediadown.Shared;
 import sune.app.mediadown.engine.MediaEngine;
@@ -28,18 +28,15 @@ import sune.app.mediadown.media.VideoMedia;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.util.CheckedBiFunction;
+import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.JavaScript;
-import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
+import sune.app.mediadown.util.Utils.JS;
 import sune.app.mediadown.util.Web;
 import sune.app.mediadown.util.Web.GetRequest;
-import sune.app.mediadown.util.Web.StringResponse;
 import sune.app.mediadown.util.WorkerProxy;
 import sune.app.mediadown.util.WorkerUpdatableTask;
 import sune.util.ssdf2.SSDCollection;
-import sune.util.ssdf2.SSDF;
-import sune.util.ssdf2.SSDObject;
-import sune.util.ssdf2.SSDType;
 
 public final class TVPrimaDomaEngine implements MediaEngine {
 	
@@ -52,62 +49,35 @@ public final class TVPrimaDomaEngine implements MediaEngine {
 	public static final Image  ICON    = PLUGIN.getIcon();
 	
 	// URLs
-	private static final String URL_PROGRAMS = "https://primadoma.tv/porady/";
+	private static final String URL_PROGRAMS = "https://primadoma.tv/porady";
 	private static final String URL_REFERER = "https://primadoma.tv/";
 	
 	// Selectors
-	private static final String SELECTOR_PROGRAMS = "main .boxed-show-box";
-	private static final String SELECTOR_EPISODES_CONTAINERS = "main .boxed-video-comp";
-	private static final String SELECTOR_EPISODES = ".boxed-video-item";
-	private static final String SELECTOR_EPISODES_MORE = ".inline-more-link";
-	private static final String SELECTOR_PAGINATION_ITEMS = "main .pagination-comp > a";
-	private static final String SELECTOR_VIDEO_BREADCRUMB = "main .breadcrumbs-comp .breadcrumb-item";
-	
-	// RegExp
-	private static final Regex REGEX_STARTS_WITH_EPISODE_NUMBER;
-	private static final Regex REGEX_SEASON;
-	private static final Regex REGEX_EPISODE_AND_SEASON;
-	
-	static {
-		REGEX_STARTS_WITH_EPISODE_NUMBER = Regex.of("(?i)^\\d+\\.? (díl|epizoda).*?$");
-		REGEX_SEASON = Regex.of("(?i)^Sezóna (\\d+).*?$");
-		REGEX_EPISODE_AND_SEASON = Regex.of("(?i)^((\\d+)\\.? díl(?:\\s*[,-]\\s+(?:série|sezóna) (\\d+))?[\\-\\s]*).*?$");
-	}
+	private static final String SELECTOR_PROGRAMS = ".container .row .col > article > a";
+	private static final String SELECTOR_EPISODES_CONTAINERS = ".head + section > .container > .row";
+	private static final String SELECTOR_EPISODES = ".col > article > a";
+	private static final String SELECTOR_EPISODES_PAGINATION = ".pagination-desktop";
 	
 	// Allow to create an instance when registering the engine
 	TVPrimaDomaEngine() {
 	}
 	
-	private final boolean parseEpisodesList(List<Episode> episodes, Element elContainer, String titlePrefix,
-			Program program, WorkerProxy proxy, CheckedBiFunction<WorkerProxy, Episode, Boolean> function)
+	private final boolean parseEpisodesList(List<Episode> episodes, Element elContainer, Program program,
+			WorkerProxy proxy, CheckedBiFunction<WorkerProxy, Episode, Boolean> function)
 			throws Exception {
-		String programTitle = program.title();
-		Regex regexProgramName = Regex.of("^" + Regex.quote(programTitle) + "[\\-\\s]*");
-		
 		// All episodes are shown, just obtain them
 		for(Element elEpisode : elContainer.select(SELECTOR_EPISODES)) {
-			Element elTitle = elEpisode.selectFirst(".text-part h3 a");
-			String url = elTitle.absUrl("href");
+			Element elTitle = elEpisode.selectFirst("h3");
+			String url = elEpisode.absUrl("href");
 			String title = elTitle.text();
-			
-			// Prepend the title prefix, if any
-			if(!titlePrefix.isEmpty()) {
-				// Do not prepend if the title starts with episode number
-				Matcher matcher = REGEX_STARTS_WITH_EPISODE_NUMBER.matcher(title);
-				if(!matcher.matches()) title = titlePrefix + " - " + title;
-			}
-			
-			// Remove program name from the episode name, if it is present
-			if(title.startsWith(programTitle)) {
-				Matcher matcher = regexProgramName.matcher(title);
-				if(matcher.find()) title = title.substring(matcher.end(0));
-			}
-			
 			Episode episode = new Episode(program, Utils.uri(url), title);
+			
 			episodes.add(episode);
-			if(!function.apply(proxy, episode))
+			if(!function.apply(proxy, episode)) {
 				return false; // Do not continue
+			}
 		}
+		
 		// All episodes successfully obtained
 		return true;
 	}
@@ -123,24 +93,17 @@ public final class TVPrimaDomaEngine implements MediaEngine {
 	private final List<Program> internal_getPrograms(WorkerProxy proxy,
 			CheckedBiFunction<WorkerProxy, Program, Boolean> function) throws Exception {
 		List<Program> programs = new ArrayList<>();
+		Document document = Utils.document(Utils.url(URL_PROGRAMS));
 		
-		for(int page = 1;; ++page) {
-			StringResponse response
-				= Web.request(new GetRequest(Utils.url(URL_PROGRAMS + page), Shared.USER_AGENT, null, null, false));
-			// When a page does not exist, it will redirect to homepage
-			if(response.code != 200) break;
+		for(Element elProgram : document.select(SELECTOR_PROGRAMS)) {
+			Element elTitle = elProgram.selectFirst("h3");
+			String url = elProgram.absUrl("href");
+			String title = elTitle.text();
+			Program program = new Program(Utils.uri(url), title);
 			
-			Document document = Utils.parseDocument(response.content, response.url);
-			for(Element elProgram : document.select(SELECTOR_PROGRAMS)) {
-				Element elTitle = elProgram.selectFirst(".text-part h3 a");
-				String url = elTitle.absUrl("href");
-				String title = elTitle.text();
-				Program program = new Program(Utils.uri(url), title);
-				
-				programs.add(program);
-				if(!function.apply(proxy, program))
-					return null; // Do not continue
-			}
+			programs.add(program);
+			if(!function.apply(proxy, program))
+				return null; // Do not continue
 		}
 		
 		return programs;
@@ -153,47 +116,41 @@ public final class TVPrimaDomaEngine implements MediaEngine {
 	private final List<Episode> internal_getEpisodes(Program program, WorkerProxy proxy,
 			CheckedBiFunction<WorkerProxy, Episode, Boolean> function) throws Exception {
 		List<Episode> episodes = new ArrayList<>();
-		
 		Document document = Utils.document(program.uri());
+		
 		for(Element elContainer : document.select(SELECTOR_EPISODES_CONTAINERS)) {
-			String titlePrefix = "";
+			Element elContainerTitle = elContainer.selectFirst("h2");
 			
-			// Obtain the title prefix, if any
-			Element elContainerTitle = elContainer.previousElementSibling();
-			if(elContainerTitle.tagName().equals("h2")) {
+			if(elContainerTitle != null) {
 				String text = elContainerTitle.text();
 				
-				// Set the title prefix only if is not the program name
-				if(!text.equalsIgnoreCase(program.title()))
-					titlePrefix = text;
+				// Ignore the most watched videos, since they will be present
+				// somewhere in the list anyway.
+				if(text.toLowerCase().contains("nejsledovanější")) {
+					continue;
+				}
 			}
 			
-			// Check whether all episodes are actually shown
-			Element elLinkMore = elContainer.selectFirst(SELECTOR_EPISODES_MORE);
-			if(elLinkMore != null) {
-				String linkURL = elLinkMore.absUrl("href");
-				int page = 1, maxPage = 0;
+			// Always parse the existing items
+			if(!parseEpisodesList(episodes, elContainer, program, proxy, function)) {
+				return null;
+			}
+		}
+		
+		// Check whether all episodes are actually shown
+		Element elPagination = document.selectFirst(SELECTOR_EPISODES_PAGINATION);
+		if(elPagination != null) {
+			final int maxPage = Integer.valueOf(elPagination.children().last().previousElementSibling().text());
+			String urlBase = elPagination.selectFirst("[aria-current]").nextElementSibling().selectFirst("a")
+				.absUrl("href").replaceFirst("\\?page=\\d+", "?page=%{page}d");
+			
+			for(int page = 2; page <= maxPage; ++page) {
+				Document pageDocument = Utils.document(Utils.format(urlBase, "page", page));
+				Element elContainer = pageDocument.selectFirst(SELECTOR_EPISODES_CONTAINERS);
 				
-				do {
-					String pageURL = linkURL + '/' + page;
-					Document pageDocument = Utils.document(pageURL);
-					
-					// Obtain the last page number
-					if(maxPage == 0) {
-						Elements elPaginationItems = pageDocument.select(SELECTOR_PAGINATION_ITEMS);
-						if(!elPaginationItems.isEmpty()) {
-							Element elLast = elPaginationItems.get(elPaginationItems.size() - 1);
-							maxPage = Integer.valueOf(Utils.urlBasename(elLast.attr("href")));
-						}
-					}
-					
-					Element elContainerPage = pageDocument.selectFirst(SELECTOR_EPISODES_CONTAINERS);
-					if(!parseEpisodesList(episodes, elContainerPage, titlePrefix, program, proxy, function))
-						return null;
-				} while(++page <= maxPage);
-			} else {
-				if(!parseEpisodesList(episodes, elContainer, titlePrefix, program, proxy, function))
+				if(!parseEpisodesList(episodes, elContainer, program, proxy, function)) {
 					return null;
+				}
 			}
 		}
 		
@@ -207,78 +164,66 @@ public final class TVPrimaDomaEngine implements MediaEngine {
 	private final List<Media> internal_getMedia(String url, WorkerProxy proxy,
 			CheckedBiFunction<WorkerProxy, Media, Boolean> function) throws Exception {
 		List<Media> sources = new ArrayList<>();
-		
 		Document document = Utils.document(url);
-		Element elScript = document.selectFirst("header + * .active > script");
+		
+		// The video can be embedded from Stream.cz
+		Element elIframe = document.selectFirst(".container div > iframe");
+		if(elIframe != null) {
+			String iframeSrc = elIframe.absUrl("src");
+			
+			// The video can also be embedded from Stream.cz
+			if(iframeSrc.startsWith("https://www.stream.cz")) {
+				// Must transform the URL first to the canonical (one visited directly from Stream.cz)
+				Document iframeDocument = Utils.document(iframeSrc);
+				String canonicalUrl = iframeDocument.selectFirst("link[rel='canonical']").absUrl("href");
+				
+				MediaGetter getter;
+				if((getter = MediaGetters.fromURL(canonicalUrl)) != null) {
+					WorkerUpdatableTask<CheckedBiFunction<WorkerProxy, Media, Boolean>, Void> task
+						= getter.getMedia(Utils.uri(canonicalUrl), Map.of(),
+						                  (p, media) -> sources.add(media) && function.apply(p, media));
+					
+					// Run the task. Must be canceled afterwards, otherwise it will run in the background.
+					try { task.startAndWaitChecked(); } finally { task.cancel(); }
+					
+					return sources; // Sources obtained, do not continue
+				}
+			}
+		}
+		
+		Element elScript = document.selectFirst(".container div > script");
 		
 		// Unable to obtain the embedding script
-		if(elScript == null)
+		if(elScript == null) {
 			return null;
+		}
 		
 		String scriptSrc = elScript.absUrl("src");
-		SSDCollection videoList = OnNetwork.videoList(url, scriptSrc, URL_REFERER);
+		SSDCollection videoList = OnNetwork.videoList(scriptSrc);
 		
 		// Unable to obtain the player settings
-		if(videoList == null)
+		if(videoList == null) {
 			return null;
+		}
 		
 		// Gather as much information as possible and construct the title
 		String programName = "";
-		String numSeason = "";
-		String numEpisode = "";
+		String numSeason = null;
+		String numEpisode = null;
 		String episodeName = "";
 		
-		// Parse the breadcrumb items for information
-		int ctr = 0;
-		for(Element elItem : document.select(SELECTOR_VIDEO_BREADCRUMB)) {
-			// First item is just a homepage link
-			if(ctr == 0) { ++ctr; continue; }
-			String text = elItem.text();
-			
-			if(ctr == 1) {
-				programName = text;
-			} else if(ctr == 2) {
-				// If it has a season format, mark it as a season,
-				// otherwise use it as an episode name.
-				Matcher matcher = REGEX_SEASON.matcher(text);
-				if(matcher.matches()) numSeason = matcher.group(1);
-				else episodeName = text;
-			} else {
-				if(!episodeName.isEmpty()) {
-					// If the current text starts with an episode number,
-					// clear the previous episode name contents.
-					Matcher matcher = REGEX_STARTS_WITH_EPISODE_NUMBER.matcher(text);
-					if(matcher.matches()) episodeName = "";
-					else episodeName += " - ";
-				}
-				
-				episodeName += text;
-			}
-			
-			++ctr;
+		// Obtain the program name from logos, since there is no other stable
+		// place where it can be found.
+		Element elLogo = document.selectFirst(".container > .row > .col > div + div + .d-md-flex > div:first-child > a");
+		if(elLogo != null) {
+			programName = elLogo.attr("title");
 		}
 		
-		// Try to extract the episode and season number from the episode name
-		if(numSeason.isEmpty() || numEpisode.isEmpty()) {
-			Matcher matcher = REGEX_EPISODE_AND_SEASON.matcher(episodeName);
-			if(matcher.matches()) {
-				// Set the matched episode and season, if needed
-				if(numEpisode.isEmpty()) numEpisode = matcher.group(2);
-				if(numSeason .isEmpty()) numSeason  = matcher.group(3);
-				
-				// Remove the matched text from the episode name
-				episodeName = episodeName.substring(matcher.end(1));
-			}
+		// Obtain the episode name from the episode title
+		Element elTitle = document.selectFirst(".container > .row > .col > div + div h1");
+		if(elTitle != null) {
+			episodeName = elTitle.text();
 		}
-		
-		// Remove program name from the episode name, if it is present
-		Regex regexProgramName = Regex.of("^" + Regex.quote(programName) + "[\\-\\s]*");
-		Matcher matcher = regexProgramName.matcher(episodeName);
-		if(matcher.find()) episodeName = episodeName.substring(matcher.end(0));
-		
-		// Clean up, if some information is missing
-		if(numSeason.isEmpty()) numSeason = null;
-		if(numEpisode.isEmpty()) numEpisode = null;
 		
 		String title = MediaUtils.mediaTitle(programName, numSeason, numEpisode, episodeName, true, false, false);
 		MediaSource source = MediaSource.of(this);
@@ -425,89 +370,55 @@ public final class TVPrimaDomaEngine implements MediaEngine {
 		private OnNetwork() {
 		}
 		
-		public static final SSDCollection videoList(String url, String scriptSrc, String referer) throws Exception {
+		public static final SSDCollection videoList(String url) throws Exception {
 			String frameURL = null;
-			String script = Web.request(new GetRequest(Utils.url(scriptSrc), Shared.USER_AGENT)).content;
+			String script = Web.request(new GetRequest(Utils.url(url), Shared.USER_AGENT)).content;
 			int index;
-			if((index = script.indexOf("'https://video.onnetwork.tv/")) >= 0) {
-				frameURL = script.substring(index, script.indexOf(';', index)).trim();
+			if((index = script.indexOf("{\"")) >= 0) {
+				String configContent = Utils.bracketSubstring(script, '{', '}', false, index, script.length());
+				SSDCollection config = JavaScript.readObject(configContent);
+				String baseId = null;
+				
+				if((index = script.indexOf("var _ONNPBaseId")) >= 0) {
+					baseId = Utils.unquote(JS.extractVariableContent(script, "_ONNPBaseId", index)).strip();
+				}
+				
+				if(baseId == null) {
+					return null;
+				}
+				
+				String iid = config.getDirectString("iid");
+				String mid = config.getDirectString("mid");
+				
+				frameURL = Utils.format(
+					"https://video.onnetwork.tv/frame86.php"
+							+ "?id=ff%{base_id}s%{timestamp_ms}s1"
+							+ "&iid=%{iid}s"
+							+ "&e=1&lang=3&onnsfonn=1"
+							+ "&mid=%{mid}s",
+					"base_id", baseId,
+					"timestamp_ms", System.currentTimeMillis(),
+					"iid", iid,
+					"mid", mid
+				);
 			}
 			
 			// Unable to obtain the frame URL "template"
-			if(frameURL == null)
+			if(frameURL == null) {
 				return null;
-			
-			SSDCollection playerData = null;
-			if((index = script.indexOf("_NPlayer=")) >= 0) {
-				String data = Utils.bracketSubstring(script, '{', '}', false, index, script.length());
-				data = data.replaceAll("([\"'])\\+window\\.ONTVplayerNb", "0$1");
-				playerData = SSDF.read(data);
 			}
-			
-			// Unable to obtain the mandatory player data
-			if(playerData == null)
-				return null;
-			
-			SSDCollection pd = playerData;
-			frameURL = Regex.of("[\"']?\\+([^\\+]+)\\+[\"']?").replaceAll(frameURL, (matcher) -> {
-				String name = matcher.group(1).replaceFirst("Player\\.", "");
-				return pd.getDirectObject(name).stringValue();
-			});
-			frameURL = Utils.unquote(frameURL);
-			
-			SSDCollection fields = null;
-			if((index = script.indexOf("ONTVFields=")) >= 0) {
-				String data = Utils.bracketSubstring(script, '{', '}', false, index, script.length());
-				fields = SSDF.read(data);
-			}
-			
-			// Unable to obtain the mandatory player fields
-			if(fields == null)
-				return null;
-			
-			// Directly translated from the JavaScript code
-			SSDObject empty = SSDObject.ofRaw("", "");
-			for(SSDCollection field : fields.collectionsIterable()) {
-				SSDObject fieldObject, playerField;
-				if(!(fieldObject = field.getDirectObject("n", empty)).stringValue().isEmpty()
-						&& (playerField = playerData.getDirectObject(field.getName(), empty)) != null) {
-					if(field.getDirectObject("p", empty).stringValue().equals("gz")) {
-						if(playerField.getType() == SSDType.INTEGER && playerField.intValue() > 0) {
-							frameURL += '&' + fieldObject.stringValue() + '=' + playerField.stringValue();
-						}
-					} else if(field.getDirectObject("p", empty).stringValue().equals("gez")) {
-						if(playerField.getType() == SSDType.INTEGER && playerField.intValue() >= 0) {
-							frameURL += '&' + fieldObject.stringValue() + '=' + playerField.stringValue();
-						}
-					} else if(field.getDirectObject("p", empty).stringValue().equals("ne")) {
-						if(!playerField.stringValue().isEmpty()) {
-							frameURL += '&' + fieldObject.stringValue() + '=' + JavaScript.encodeURIComponent(playerField.stringValue());
-						}
-					}
-				}
-			}
-			
-			// Also append some additional information to mimic a correct frame URL
-			frameURL += "&wtop=" + url + "&apop=0&vpop=0&apopa=0&vpopa=0";
-			
+
 			// Send the request to obtain the frame's content
-			Map<String, String> headers = Map.of("Referer", referer);
+			Map<String, String> headers = Map.of("Referer", URL_REFERER);
 			String content = Web.request(new GetRequest(Utils.url(frameURL), Shared.USER_AGENT, headers)).content;
 			
-			SSDCollection videoList = null;
-			if((index = content.indexOf("tUIPlayer")) >= 0) {
-				String data = Utils.bracketSubstring(content, '{', '}', false, index, content.length());
-				
-				// Since some settings can cause errors due to JavaScript code being present,
-				// obtain just the video list.
-				if((index = data.indexOf("videos")) >= 0) {
-					data = Utils.bracketSubstring(data, '[', ']', false, index, data.length());
-				}
-				
-				videoList = SSDF.read(data);
+			SSDCollection playerVideos = null;
+			if((index = content.indexOf("var playerVideos")) >= 0) {
+				String data = Utils.bracketSubstring(content, '[', ']', false, index, content.length());
+				playerVideos = JSON.read(data);
 			}
 			
-			return videoList;
+			return playerVideos;
 		}
 	}
 }
