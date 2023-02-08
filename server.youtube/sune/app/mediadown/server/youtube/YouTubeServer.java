@@ -134,7 +134,7 @@ public class YouTubeServer implements Server {
 					String videoURL = null;
 					// Video's URL does not need to be signed
 					if(format.has("url")) {
-						videoURL = format.getDirectString("url");
+						videoURL = JavaScript.replaceUnicodeEscapeSequences(format.getDirectString("url"));
 					}
 					// Video's URL must be signed
 					else {
