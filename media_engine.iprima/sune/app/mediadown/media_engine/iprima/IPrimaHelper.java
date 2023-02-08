@@ -242,7 +242,7 @@ final class IPrimaHelper {
 		private static DefaultEpisodeObtainer INSTANCE;
 		
 		static {
-			URL_API_IPRIMA = "https://www.iprima.cz/iprima-api/View_Entity_Node_Program/ThemedContent/More"
+			URL_API_IPRIMA = "https://prima.iprima.cz/iprima-api/View_Entity_Node_Program/ThemedContent/More"
 			        + "?id=%{id}s" + "&offset=%{offset}d" + "&subpage_type=%{type}s";
 			SELECTOR_PRICE_WRAPPER = Utils.join(",", SELECTOR_PRICE_WRAPPERS.stream()
 			        .map((s) -> ".component--scope--" + s + "--picture--bottom--price")
@@ -744,7 +744,7 @@ final class IPrimaHelper {
 		private static PrimaAPIProgramObtainer INSTANCE;
 		
 		static {
-			URL_API = "https://www.iprima.cz/iprima-api/ListWithFilter/%{type}s/Content"
+			URL_API = "https://prima.iprima.cz/iprima-api/ListWithFilter/%{type}s/Content"
 					+ "?filter=all"
 					+ "&channel_restriction=%{subdomain}s";
 		}
