@@ -1,15 +1,19 @@
 package sune.app.mediadown.media_engine.markizaplus;
 
+import java.net.SocketTimeoutException;
 import java.net.URI;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.Optional;
 import java.util.regex.Matcher;
+import java.util.stream.Collectors;
 
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
+import org.jsoup.select.Elements;
 
 import javafx.scene.image.Image;
 import sune.app.mediadown.Episode;
@@ -30,6 +34,7 @@ import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Web;
 import sune.app.mediadown.util.Web.GetRequest;
+import sune.app.mediadown.util.Web.StringResponse;
 import sune.app.mediadown.util.WorkerProxy;
 import sune.app.mediadown.util.WorkerUpdatableTask;
 import sune.util.ssdf2.SSDCollection;
@@ -45,17 +50,16 @@ public final class MarkizaPlusEngine implements MediaEngine {
 	public static final Image  ICON    = PLUGIN.getIcon();
 	
 	// Programs
-	private static final String URL_PROGRAMS = "https://videoarchiv.markiza.sk/relacie-a-serialy";
-	private static final String SEL_PROGRAMS = ".b-show-listing .b-tiles-wrapper > .b-tile > a";
+	private static final String URL_PROGRAMS = "https://www.markiza.sk/relacie";
+	private static final String SEL_PROGRAMS = ":not(.tab-content) > .c-show-wrapper > .c-show";
 	
 	// Episodes
 	private static final String URL_EPISODES;
-	private static final String SEL_EPISODES = ".b-episodes .b-article > a";
-	private static final String SEL_EPISODES_HEADER = ".b-episodes .b-episodes-header + * .b-article > a";
-	private static final String SEL_PLAYLIST = ".b-content-wrapper .video-holder ~ .row aside .b-article > a";
+	private static final String SEL_EPISODES = ".c-article-wrapper [class^='col-']";
+	private static final String SEL_EPISODES_LOAD_MORE = ".js-load-more-trigger .c-button";
 	
 	// Media
-	private static final String SEL_PLAYER_IFRAME = ".video-holder iframe";
+	private static final String SEL_PLAYER_IFRAME = ".iframe-wrap iframe";
 	private static final String TXT_PLAYER_CONFIG_BEGIN = "Player.init(";
 	
 	// Other
@@ -63,12 +67,11 @@ public final class MarkizaPlusEngine implements MediaEngine {
 	private static final Regex REGEX_EPISODE_TITLE = Regex.of("^(?:.*?(?: - |: ))?(\\d+)\\. díl(?:(?: - |: )(.*))?$");
 	
 	static {
-		URL_EPISODES = "https://videoarchiv.markiza.sk/api/v1/plugin/broadcasted-episodes"
-			+ "?show=%{showId}d"
-			+ "&season=%{seasonId}d"
-			+ "&count=%{count}d"
-			+ "&dir=%{order}s"
-			+ "&page=%{page}d";
+		URL_EPISODES = "https://www.markiza.sk/api/v1/mixed/more"
+			+ "?page=%{page}d"
+			+ "&offset=%{offset}d"
+			+ "&content=%{content}s"
+			+ "%{excluded}s";
 	}
 	
 	private final WorkerProxy _dwp = WorkerProxy.defaultProxy();
@@ -77,50 +80,113 @@ public final class MarkizaPlusEngine implements MediaEngine {
 	MarkizaPlusEngine() {
 	}
 	
-	private static final String apiUrlEpisodes(int showId, int seasonId, int count, int page) {
-		return Utils.format(URL_EPISODES, "showId", showId, "seasonId", seasonId, "count", count, "order", "DESC",
-		                    "page", page);
-	}
-	
-	private static final boolean parseEpisodesList(Program program, List<Episode> episodes, Document document,
-			String selector, WorkerProxy proxy, CheckedBiFunction<WorkerProxy, Episode, Boolean> function) throws Exception {
-		for(Element elEpisode : document.select(selector)) {
-			// Skip episodes that are available only on Voyo
-			if(elEpisode.selectFirst(".e-voyo") != null) {
+	private final int parseEpisodeList(Program program, List<Episode> episodes, Elements elItems,
+			boolean onlyFullEpisodes, WorkerProxy proxy,
+			CheckedBiFunction<WorkerProxy, Episode, Boolean> function) throws Exception {
+		int counter = 0;
+		
+		for(Element elItem : elItems) {
+			if(elItem.selectFirst(".-voyo") != null) {
+				++counter; continue;
+			}
+			
+			if(onlyFullEpisodes
+					&& elItem.selectFirst(".c-article[data-tracking-tile-asset=\"episode\"]") == null) {
 				continue;
 			}
 			
-			URI episodeUri = Utils.uri(elEpisode.absUrl("href"));
-			String episodeTitle = elEpisode.selectFirst(".e-title").text();
-			Episode episode = new Episode(program, episodeUri, episodeTitle);
-			
-			episodes.add(episode);
-			if(!function.apply(proxy, episode))
-				return false; // Do not continue
+			Element elLink = elItem.selectFirst(".title > a");
+			if(elLink != null) {
+				String episodeURL = elLink.absUrl("href");
+				String episodeName = elLink.text();
+				Episode episode = new Episode(program, Utils.uri(episodeURL), Utils.validateFileName(episodeName));
+				episodes.add(episode);
+				if(!function.apply(proxy, episode))
+					return 2; // Do not continue
+			}
 		}
 		
-		return true;
+		// If all episodes are from VOYO, no more free episodes are available
+		return counter == elItems.size() ? 1 : 0;
 	}
 	
-	private static final boolean loopSeasonEpisodes(Program program, List<Episode> episodes, int showId, int seasonId,
-			WorkerProxy proxy, CheckedBiFunction<WorkerProxy, Episode, Boolean> function) throws Exception {
-		final int itemsPerPage = 32;
-		
-		for(int page = 1;; ++page) {
-			URI uri = Utils.uri(apiUrlEpisodes(showId, seasonId, itemsPerPage, page));
-			Document document = Utils.document(uri);
-			
-			if(!parseEpisodesList(program, episodes, document, SEL_EPISODES, proxy, function)) {
-				return false; // Cancelled, do not continue
-			}
-			
-			// If there is no load more button then it is the last page
-			if(document.selectFirst(".b-episodes .js-load-next") == null) {
-				break;
-			}
+	private final int parseEpisodesPage(Program program, List<Episode> episodes, Document document,
+			boolean onlyFullEpisodes, WorkerProxy proxy,
+			CheckedBiFunction<WorkerProxy, Episode, Boolean> function) throws Exception {
+		// Always obtain the first page from the document's content
+		Elements elItems = document.select(SEL_EPISODES);
+		if(elItems != null
+				&& parseEpisodeList(program, episodes, elItems, onlyFullEpisodes, proxy, function) == 2) {
+			return 1; // Do not continue
 		}
 		
-		return true;
+		// Check whether the load more button exists
+		Element elLoadMore = document.selectFirst(SEL_EPISODES_LOAD_MORE);
+		if(elLoadMore == null) {
+			return 0; // No more episodes present, nothing else to do
+		}
+		
+		// If the button exists, load the episodes the dynamic way
+		String href = elLoadMore.absUrl("data-href");
+		Map<String, String> params = Utils.urlParams(href);
+		Map<String, String> excludedMap = params.entrySet().stream()
+			.filter((e) -> e.getKey().startsWith("excluded"))
+			.collect(Collectors.toMap(Entry::getKey, Entry::getValue));
+		// The random variable is here due to caching issue, this should circumvent it
+		String random = "&rand=" + String.valueOf(Math.random() * 1000000.0);
+		String excluded = random + '&' + Utils.joinURLParams(excludedMap);
+		int offset = Integer.valueOf(params.get("offset"));
+		String content = params.get("content");
+		
+		Map<String, String> headers = Map.of(
+			"Cache-Control", "no-cache, no-store, must-revalidate",
+			"Pragma", "no-cache",
+			"Expires", "0",
+			"X-Requested-With", "XMLHttpRequest"
+		);
+		
+		// The offset can be negative, therefore we can use it to obtain the first page
+		// with non-filtered/altered content.
+		final int itemsPerPage = elItems != null ? elItems.size() : 0;
+		final int constPage = 2; // Must be > 1
+		
+		// Load episodes from other pages
+		elItems = null;
+		do {
+			String pageURL = Utils.format(URL_EPISODES,
+				"page",     constPage,
+				"offset",   offset,
+				"content",  content,
+				"excluded", excluded
+			);
+			String pageContent = null;
+			Exception timeoutException = null;
+			int ctr = 0;
+			int numOfRetries = 5;
+			
+			// Sometimes a timeout can occur, retry to obtain the content again if it is null
+			do {
+				timeoutException = null;
+				
+				try {
+					pageContent = Web.request(new GetRequest(Utils.url(pageURL), Shared.USER_AGENT, headers)).content;
+				} catch(SocketTimeoutException ex) {
+					timeoutException = ex;
+				}
+			} while(pageContent == null && ++ctr <= numOfRetries);
+			
+			// If even retried request timed out, just throw the exception
+			if(timeoutException != null) throw timeoutException;
+			
+			if(pageContent == null) continue;
+			Document doc = Utils.parseDocument(pageContent, Utils.baseURL(pageURL));
+			elItems = doc.select(SEL_EPISODES);
+			
+			offset += itemsPerPage;
+		} while(elItems != null
+					&& parseEpisodeList(program, episodes, elItems, onlyFullEpisodes, proxy, function) == 0);
+		
+		return 0;
 	}
 	
 	private static final String mediaTitle(SSDCollection streamInfo, Document document) {
@@ -140,7 +206,7 @@ public final class MarkizaPlusEngine implements MediaEngine {
 		Element elContentTitle = null;
 		if(numSeason <= 0 || numEpisode <= 0) {
 			// Usually the season and episode number is in the title of the video
-			elContentTitle = document.selectFirst(".b-content-wrapper > .video-holder ~ .row .e-title");
+			elContentTitle = document.selectFirst(".c-hero .c-title");
 			
 			if(elContentTitle != null
 					&& (matcher = REGEX_CONTENT_TITLE.matcher(elContentTitle.text().strip())).find()) {
@@ -152,11 +218,11 @@ public final class MarkizaPlusEngine implements MediaEngine {
 		}
 		
 		if(programName.isEmpty()) {
-			// Obtain the program name from the page title
-			Element elPageTitle = document.selectFirst(".b-content-wrapper h2");
+			// Obtain the program name from the page navigation
+			Element elNavProgramItem = document.selectFirst(".c-breadcrumbs li:nth-child(2) > a");
 			
-			if(elPageTitle != null) {
-				programName = elPageTitle.text().strip();
+			if(elNavProgramItem != null) {
+				programName = elNavProgramItem.text().strip();
 			}
 		}
 		
@@ -176,7 +242,7 @@ public final class MarkizaPlusEngine implements MediaEngine {
 					episodeName += text.substring(end);
 				}
 			} else {
-				elContentTitle = document.selectFirst(".b-content-wrapper > .video-holder ~ .row .e-title");
+				elContentTitle = document.selectFirst(".c-hero .c-title");
 				episodeName = elContentTitle.text().strip();
 			}
 		}
@@ -216,72 +282,28 @@ public final class MarkizaPlusEngine implements MediaEngine {
 	private final List<Episode> internal_getEpisodes(Program program, WorkerProxy proxy,
 			CheckedBiFunction<WorkerProxy, Episode, Boolean> function) throws Exception {
 		List<Episode> episodes = new ArrayList<>();
-		Document document = Utils.document(program.uri());
 		
-		final Regex regexShowId = Regex.of("show-(\\d+)");
-		final Regex regexSeasonId = Regex.of("seasonId=(\\d+)");
-		
-		// Obtain the show ID so that we can use it later in the API calls.
-		// There should exist a script with a classes list that contains a special class
-		// with the show ID in it.
-		int showId = -1;
-		for(Element elScript : document.select("head > script:not([src])")) {
-			String content = elScript.html();
-			Matcher matcher;
+		for(String urlPath : List.of("videa/cele-epizody")) {
+			URI uri = Utils.uri(Utils.urlConcat(program.uri().toString(), urlPath));
 			
-			if((matcher = regexShowId.matcher(content)).find()) {
-				showId = Integer.valueOf(matcher.group(1));
-				break; // Show ID found, no need to continue
-			}
-		}
-		
-		// Obtain all available seasons from the dropdown menu, if it exists
-		List<Integer> seasons = new ArrayList<>();
-		for(Element elSeasonItem : document.select(".b-episodes-dropdown > .dropdown-menu > .js-episodes-season")) {
-			String seasonDataUrl = elSeasonItem.attr("data-url");
-			Matcher matcher;
+			StringResponse response = Web.request(new GetRequest(Utils.url(uri), Shared.USER_AGENT));
+			if(response.code != 200) continue; // Probably does not exist, ignore
 			
-			if((matcher = regexSeasonId.matcher(seasonDataUrl)).find()) {
-				int seasonId = Integer.valueOf(matcher.group(1));
-				seasons.add(seasonId);
-			}
+			Document document = Utils.parseDocument(response.content, uri);
+			if(parseEpisodesPage(program, episodes, document, false, proxy, function) != 0)
+				return null;
 		}
 		
-		// If the list does not exist, obtain the only season ID from the load more button
-		if(seasons.isEmpty()) {
-			Element elButtonLoadMore = document.selectFirst(".b-episodes .js-load-next");
-			
-			if(elButtonLoadMore != null) {
-				final Regex regexSeasonIdButton = Regex.of("season=(\\d+)");
-				String loadMoreUrl = elButtonLoadMore.attr("href");
-				Matcher matcher;
-				
-				if((matcher = regexSeasonIdButton.matcher(loadMoreUrl)).find()) {
-					int seasonId = Integer.valueOf(matcher.group(1));
-					seasons.add(seasonId);
-				}
-			}
-		}
-		
-		if(!seasons.isEmpty()) {
-			// Load all episodes from all found seasons
-			for(int seasonId : seasons) {
-				if(!loopSeasonEpisodes(program, episodes, showId, seasonId, proxy, function)) {
-					break; // Cancelled, do not continue
-				}
-			}
-		} else {
-			// If there are no seasons, just load the episodes from the document
-			parseEpisodesList(program, episodes, document, SEL_EPISODES_HEADER, proxy, function);
-		}
-		
-		// If there are still no episodes, try to obtain them from the playlist
+		// If no episodes were found, try to obtain them from the All videos page.
 		if(episodes.isEmpty()) {
-			Element elFirstEpisode = document.selectFirst(SEL_EPISODES_HEADER);
+			URI uri = Utils.uri(Utils.urlConcat(program.uri().toString(), "videa"));
+			StringResponse response = Web.request(new GetRequest(Utils.url(uri), Shared.USER_AGENT));
 			
-			// Must check whether the playlist is even valid (i.e. there is no free episodes list)
-			if(elFirstEpisode == null || elFirstEpisode.selectFirst(".e-voyo") != null) {
-				parseEpisodesList(program, episodes, document, SEL_PLAYLIST, proxy, function);
+			if(response.code == 200) {
+				Document document = Utils.parseDocument(response.content, uri);
+				
+				if(parseEpisodesPage(program, episodes, document, true, proxy, function) != 0)
+					return null;
 			}
 		}
 		
@@ -302,7 +324,7 @@ public final class MarkizaPlusEngine implements MediaEngine {
 			return null;
 		}
 		
-		String iframeUrl = iframe.absUrl("src");
+		String iframeUrl = iframe.absUrl("data-src");
 		String content = Web.request(new GetRequest(Utils.url(iframeUrl), Shared.USER_AGENT)).content;
 		
 		if(content != null && !content.isEmpty()) {
@@ -415,7 +437,7 @@ public final class MarkizaPlusEngine implements MediaEngine {
 		String host = urlObj.getHost();
 		if((host.startsWith("www."))) // www prefix
 			host = host.substring(4);
-		if(!host.equals("videoarchiv.markiza.sk"))
+		if(!host.equals("markiza.sk"))
 			return false;
 		// Otherwise, it is probably compatible URL
 		return true;
