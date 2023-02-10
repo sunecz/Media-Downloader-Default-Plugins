@@ -396,13 +396,6 @@ final class IPrimaAuthenticator {
 		}
 		
 		private static final <T> T valueOrElse(String propertyName, Supplier<T> orElse) {
-			// TODO: Reverse changes
-			Configuration configuration = configuration();
-			
-			if(configuration == null) {
-				return orElse.get();
-			}
-			
 			return Optional.<ConfigurationProperty<T>>ofNullable(configuration().property(propertyName))
 						.map(ConfigurationProperty::value).orElseGet(orElse);
 		}

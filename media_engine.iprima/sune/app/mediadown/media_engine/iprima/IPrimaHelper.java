@@ -27,7 +27,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentSkipListSet;
@@ -56,7 +55,6 @@ import sune.app.mediadown.media.MediaUtils;
 import sune.app.mediadown.media_engine.iprima.IPrimaEngine.IPrima;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginConfiguration;
-import sune.app.mediadown.plugin.PluginFile;
 import sune.app.mediadown.util.CheckedBiFunction;
 import sune.app.mediadown.util.CheckedFunction;
 import sune.app.mediadown.util.CheckedSupplier;
@@ -229,8 +227,7 @@ final class IPrimaHelper {
 	}
 	
 	public static final PluginConfiguration configuration() {
-		// TODO: Reverse changes
-		return Optional.ofNullable(PLUGIN).map(PluginBase::getContext).map(PluginFile::getConfiguration).orElse(null);
+		return PLUGIN.getContext().getConfiguration();
 	}
 	
 	static final class DefaultEpisodeObtainer {
