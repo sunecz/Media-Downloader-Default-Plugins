@@ -269,9 +269,13 @@ public final class IPrimaAuthenticator {
 		}
 		
 		public static final boolean removeDevice(String id) throws Exception {
-			Map<String, String> params = Map.of("slotType", "WEB", "slotId", id);
-			Map<String, String> headers = Map.of("Referer", "https://prima.iprima.cz/", "X-Requested-With", "XMLHttpRequest");
-			PostRequest request = new PostRequest(Utils.url(URL_REMOVE_DEVICE), Shared.USER_AGENT, params, null, headers);
+			SSDCollection json = SSDCollection.empty();
+			json.setDirect("slotType", "WEB");
+			json.setDirect("slotId", id);
+			String body = json.toJSON(true);
+			Map<String, String> headers = Map.of("Referer", "https://prima.iprima.cz/");
+			PostRequest request = new PostRequest(Utils.url(URL_REMOVE_DEVICE), Shared.USER_AGENT, null, null, headers,
+				true, null, -1L, -1L, 5000, body);
 			try(StreamResponse response = Web.requestStream(request)) {
 				return response.code == 200;
 			}
