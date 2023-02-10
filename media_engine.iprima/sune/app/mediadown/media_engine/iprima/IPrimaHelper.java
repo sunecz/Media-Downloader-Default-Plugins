@@ -2,23 +2,32 @@ package sune.app.mediadown.media_engine.iprima;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.lang.StackWalker.Option;
+import java.lang.StackWalker.StackFrame;
+import java.lang.reflect.Constructor;
 import java.net.CookieManager;
 import java.net.URI;
 import java.net.URL;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpClient.Redirect;
 import java.net.http.HttpClient.Version;
 import java.net.http.HttpRequest;
+import java.net.http.HttpRequest.BodyPublisher;
+import java.net.http.HttpRequest.BodyPublishers;
 import java.net.http.HttpResponse;
 import java.net.http.HttpResponse.BodyHandlers;
 import java.nio.channels.ClosedByInterruptException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentSkipListSet;
@@ -47,6 +56,7 @@ import sune.app.mediadown.media.MediaUtils;
 import sune.app.mediadown.media_engine.iprima.IPrimaEngine.IPrima;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginConfiguration;
+import sune.app.mediadown.plugin.PluginFile;
 import sune.app.mediadown.util.CheckedBiFunction;
 import sune.app.mediadown.util.CheckedFunction;
 import sune.app.mediadown.util.CheckedSupplier;
@@ -54,6 +64,7 @@ import sune.app.mediadown.util.CounterLock;
 import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.JavaScript;
 import sune.app.mediadown.util.Opt;
+import sune.app.mediadown.util.Reflection;
 import sune.app.mediadown.util.Reflection2;
 import sune.app.mediadown.util.Reflection3;
 import sune.app.mediadown.util.Regex;
@@ -218,7 +229,8 @@ final class IPrimaHelper {
 	}
 	
 	public static final PluginConfiguration configuration() {
-		return PLUGIN.getContext().getConfiguration();
+		// TODO: Reverse changes
+		return Optional.ofNullable(PLUGIN).map(PluginBase::getContext).map(PluginFile::getConfiguration).orElse(null);
 	}
 	
 	static final class DefaultEpisodeObtainer {
@@ -989,7 +1001,98 @@ final class IPrimaHelper {
 		}
 	}
 	
-	private static abstract class Wrapper<T> implements Comparable<Wrapper<T>> {
+	static final class FastWeb {
+		
+		private static final ConcurrentVarLazyLoader<CookieManager> cookieManager
+			= ConcurrentVarLazyLoader.of(FastWeb::ensureCookieManager);
+		private static final ConcurrentVarLazyLoader<HttpClient> httpClient
+			= ConcurrentVarLazyLoader.of(FastWeb::buildHttpClient);
+		private static final ConcurrentVarLazyLoader<HttpRequest.Builder> httpRequestBuilder
+			= ConcurrentVarLazyLoader.of(FastWeb::buildHttpRequestBuilder);
+		
+		// Forbid anyone to create an instance of this class
+		private FastWeb() {
+		}
+		
+		private static final CookieManager ensureCookieManager() throws Exception {
+			Reflection3.invokeStatic(Web.class, "ensureCookieManager");
+			return (CookieManager) Reflection2.getField(Web.class, null, "COOKIE_MANAGER");
+		}
+		
+		private static final HttpClient buildHttpClient() throws Exception {
+			return HttpClient.newBuilder()
+						.connectTimeout(Duration.ofMillis(5000))
+						.executor(Threads.Pools.newWorkStealing())
+						.followRedirects(Redirect.NORMAL)
+						.cookieHandler(cookieManager.value())
+						.version(Version.HTTP_2)
+						.build();
+		}
+		
+		private static final HttpRequest.Builder buildHttpRequestBuilder() throws Exception {
+			return HttpRequest.newBuilder()
+						.setHeader("User-Agent", Shared.USER_AGENT);
+		}
+		
+		private static final HttpRequest.Builder maybeAddHeaders(HttpRequest.Builder request, Map<String, String> headers) {
+			if(!headers.isEmpty()) {
+				request.headers(
+					headers.entrySet().stream()
+						.flatMap((e) -> Stream.of(e.getKey(), e.getValue()))
+						.toArray(String[]::new)
+				);
+			}
+			return request;
+		}
+		
+		public static final String bodyString(Map<String, Object> data) {
+			StringBuilder sb = new StringBuilder();
+			
+			boolean first = true;
+			for(Entry<String, Object> e : data.entrySet()) {
+				if(first) first = false; else sb.append('&');
+				sb.append(URLEncoder.encode(e.getKey(), Shared.CHARSET))
+				  .append('=')
+				  .append(URLEncoder.encode(Objects.toString(e.getValue()), Shared.CHARSET));
+			}
+			
+			return sb.toString();
+		}
+		
+		public static final HttpResponse<String> getRequest(URI uri, Map<String, String> headers) throws Exception {
+			HttpRequest request = maybeAddHeaders(httpRequestBuilder.value().copy().GET().uri(uri), headers).build();
+			HttpResponse<String> response = httpClient.value().sendAsync(request, BodyHandlers.ofString(Shared.CHARSET)).join();
+			return response;
+		}
+		
+		public static final String get(URI uri, Map<String, String> headers) throws Exception {
+			return getRequest(uri, headers).body();
+		}
+		
+		public static final HttpResponse<String> postRequest(URI uri, Map<String, String> headers,
+				Map<String, Object> data) throws Exception {
+			return postRequest(uri, headers, bodyString(data));
+		}
+		
+		public static final Document document(URI uri, Map<String, String> headers) throws Exception {
+			HttpResponse<String> response = getRequest(uri, headers);
+			return Utils.parseDocument(response.body(), response.uri());
+		}
+		
+		public static final Document document(URI uri) throws Exception {
+			return document(uri, Map.of());
+		}
+		
+		public static final HttpResponse<String> postRequest(URI uri, Map<String, String> headers,
+				String payload) throws Exception {
+			BodyPublisher body = BodyPublishers.ofString(payload, Shared.CHARSET);
+			HttpRequest request = maybeAddHeaders(httpRequestBuilder.value().copy().POST(body).uri(uri), headers).build();
+			HttpResponse<String> response = httpClient.value().sendAsync(request, BodyHandlers.ofString(Shared.CHARSET)).join();
+			return response;
+		}
+	}
+	
+	static abstract class Wrapper<T> implements Comparable<Wrapper<T>> {
 		
 		protected final T value;
 		
@@ -1002,7 +1105,49 @@ final class IPrimaHelper {
 		}
 	}
 	
-	private static final class EpisodeWrapper extends Wrapper<Episode> {
+	static final class ProgramWrapper implements Comparable<ProgramWrapper> {
+		
+		private final Program program;
+		
+		public ProgramWrapper(Program program) {
+			this.program = Objects.requireNonNull(program);
+		}
+		
+		@Override
+		public int hashCode() {
+			return Objects.hash(program);
+		}
+		
+		@Override
+		public boolean equals(Object obj) {
+			if(this == obj)
+				return true;
+			if(obj == null)
+				return false;
+			if(getClass() != obj.getClass())
+				return false;
+			ProgramWrapper other = (ProgramWrapper) obj;
+			// Do not compare program data
+			return Objects.equals(program.uri(), other.program.uri())
+						&& Objects.equals(program.title().toLowerCase(), other.program.title().toLowerCase());
+		}
+		
+		@Override
+		public int compareTo(ProgramWrapper w) {
+			if(Objects.requireNonNull(w) == this) return 0;
+			return Comparator.<ProgramWrapper>nullsLast((a, b) ->
+							IPrimaHelper.compareNatural(a.program.title().toLowerCase(),
+							                            b.program.title().toLowerCase()))
+						.thenComparing((e) -> e.program.uri())
+						.compare(this, w);
+		}
+		
+		public Program program() {
+			return program;
+		}
+	}
+	
+	static final class EpisodeWrapper extends Wrapper<Episode> {
 		
 		private static Comparator<Wrapper<Episode>> comparator;
 		
@@ -1064,7 +1209,7 @@ final class IPrimaHelper {
 		}
 	}
 	
-	private static abstract class ThreadedSpawnableTaskQueue<P, R> {
+	static abstract class ThreadedSpawnableTaskQueue<P, R> {
 		
 		private final ExecutorService executor;
 		private final AtomicReference<Exception> exception = new AtomicReference<>();
@@ -1140,7 +1285,7 @@ final class IPrimaHelper {
 		}
 	}
 	
-	private static final class ConcurrentVarLazyLoader<T> {
+	static final class ConcurrentVarLazyLoader<T> {
 		
 		private final AtomicBoolean isSet = new AtomicBoolean();
 		private final AtomicBoolean isSetting = new AtomicBoolean();
@@ -1184,8 +1329,108 @@ final class IPrimaHelper {
 		}
 	}
 	
+	static abstract class ConcurrentLoop<T> {
+		
+		protected final ExecutorService executor = Threads.Pools.newWorkStealing();
+		protected final AtomicReference<Exception> exception = new AtomicReference<>();
+		protected final CounterLock counter = new CounterLock();
+		
+		protected abstract void iteration(T value) throws Exception;
+		
+		protected final void await() throws Exception {
+			counter.await();
+			
+			executor.shutdownNow();
+			executor.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS);
+			
+			Exception ex;
+			if((ex = exception.get()) != null) {
+				throw ex;
+			}
+		}
+		
+		protected final void submit(T value) {
+			counter.increment();
+			executor.submit(new Iteration(value));
+		}
+		
+		@SuppressWarnings("unchecked")
+		public void iterate(T... values) throws Exception {
+			for(T value : values) {
+				submit(value);
+			}
+			
+			await();
+		}
+		
+		protected class Iteration implements Callable<Void> {
+			
+			protected final T value;
+			
+			public Iteration(T value) {
+				this.value = value;
+			}
+			
+			@Override
+			public Void call() throws Exception {
+				try {
+					iteration(value);
+					return null;
+				} catch(Exception ex) {
+					exception.compareAndSet(null, ex);
+					throw ex; // Propagate
+				} finally {
+					counter.decrement();
+				}
+			}
+		}
+	}
+	
+	// Context-dependant Singleton instantiator
+	static final class _Singleton {
+		
+		private static final Map<Class<?>, _Singleton> instances = new HashMap<>();
+		
+		private final Class<?> clazz;
+		private Object instance;
+		
+		private _Singleton(Class<?> clazz) {
+			this.clazz = clazz;
+		}
+		
+		public static final <T> T getInstance() {
+			Class<?> clazz = StackWalker.getInstance(Option.RETAIN_CLASS_REFERENCE).walk((stream) -> {
+				return stream.filter((p) -> p.getDeclaringClass() != _Singleton.class)
+						 .map(StackFrame::getDeclaringClass)
+						 .findFirst().get();
+			});
+			return instances.computeIfAbsent(clazz, _Singleton::new).instance();
+		}
+		
+		private final <T> T newInstance() {
+			try {
+				@SuppressWarnings("unchecked")
+				Constructor<T> ctor = (Constructor<T>) clazz.getDeclaredConstructor();
+				Reflection.setAccessible(ctor, true);
+				T instance = ctor.newInstance();
+				Reflection.setAccessible(ctor, false);
+				return instance;
+			} catch(Exception ex) {
+				// Assume, the class is instantiable
+			}
+			// This should not happen
+			return null;
+		}
+		
+		protected final <T> T instance() {
+			@SuppressWarnings("unchecked")
+			T obj = (T) (instance == null ? (instance = newInstance()) : instance);
+			return obj;
+		}
+	}
+	
 	@FunctionalInterface
-	protected static interface CheckedPentaFunction<A, B, C, D, E, R> {
+	static interface CheckedPentaFunction<A, B, C, D, E, R> {
 		
 		R apply(A a, B b, C c, D d, E e) throws Exception;
 		default <V> CheckedPentaFunction<A, B, C, D, E, V> andThen(CheckedFunction<? super R, ? extends V> after) {

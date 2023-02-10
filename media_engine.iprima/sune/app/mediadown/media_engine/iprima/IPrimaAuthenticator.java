@@ -34,7 +34,6 @@ final class IPrimaAuthenticator {
 	private static final String URL_OAUTH_LOGIN;
 	private static final String URL_OAUTH_TOKEN;
 	private static final String URL_OAUTH_AUTHORIZE;
-	private static final String URL_LOGIN;
 	private static final String URL_USER_AUTH;
 	private static final String URL_PROFILE_SELECT;
 	
@@ -44,8 +43,7 @@ final class IPrimaAuthenticator {
 		URL_OAUTH_LOGIN = "https://auth.iprima.cz/oauth2/login";
 		URL_OAUTH_TOKEN = "https://auth.iprima.cz/oauth2/token";
 		URL_OAUTH_AUTHORIZE = "https://auth.iprima.cz/oauth2/authorize";
-		URL_LOGIN = "https://www.iprima.cz/vue-auth/login";
-		URL_USER_AUTH = "https://www.iprima.cz/user-authorize";
+		URL_USER_AUTH = "https://www.iprima.cz/?auth_token_code=%{code}s";
 		URL_PROFILE_SELECT = "https://auth.iprima.cz/user/profile-select-perform/%{profile_id}s?continueUrl=/user/login";
 	}
 	
@@ -77,7 +75,7 @@ final class IPrimaAuthenticator {
 		String url = responseUrl(response).toExternalForm();
 		return ProfileManager.isProfileSelectPage(url)
 					? ProfileManager.extractProfiles(response.content)
-					: ProfileManager.listProfiles();
+					: ProfileManager.profiles();
 	}
 	
 	private static final String selectFirstProfile(StringResponse response) throws Exception {
@@ -120,20 +118,6 @@ final class IPrimaAuthenticator {
 		                   (response) -> JSON.read(response.stream).getDirectString("code", null));
 	}
 	
-	private static final String finishLogin(String code) throws Exception {
-		if(code == null) {
-			return null;
-		}
-		
-		Map<String, String> params = Map.of(
-			"auth_token_code", code
-		);
-		
-		URL url = Utils.url(URL_LOGIN + '?' + Utils.joinURLParams(params));
-		return tryAndClose(Web.requestStream(new GetRequest(url, Shared.USER_AGENT, null, null, false)),
-		                   (response) -> response.code == 200 ? code : null);
-	}
-	
 	private static final boolean userAuth(String code) throws Exception {
 		if(code == null) {
 			return false;
@@ -145,7 +129,7 @@ final class IPrimaAuthenticator {
 		
 		URL url = Utils.url(URL_USER_AUTH + '?' + Utils.joinURLParams(params));
 		return tryAndClose(Web.requestStream(new GetRequest(url, Shared.USER_AGENT, null, null, false)),
-		                   (response) -> response.code == 200);
+		                   (response) -> response.code == 302);
 	}
 	
 	public static final SessionData getSessionData() throws Exception {
@@ -154,13 +138,14 @@ final class IPrimaAuthenticator {
 				AuthenticationData.email(),
 				AuthenticationData.password()
 			));
-			boolean success = userAuth(finishLogin(authorize(tokens)));
+			boolean success = userAuth(authorize(tokens));
 			
 			if(success) {
 				SESSION_DATA = new SessionData(
 					tokens.accessToken(),
 					// The device ID must be obtained AFTER logging in
-					DeviceManager.deviceId()
+					DeviceManager.deviceId(),
+					ProfileManager.profiles().get(0).id()
 				);
 			}
 		}
@@ -173,6 +158,8 @@ final class IPrimaAuthenticator {
 		private static final String URL_PROFILE_PAGE = "https://auth.iprima.cz/user/profile-select";
 		
 		private static final String SELECTOR_PROFILE = ".profile-select";
+		
+		private static List<Profile> profiles;
 		
 		public static final boolean isProfileSelectPage(String url) {
 			return url.startsWith(URL_PROFILE_PAGE);
@@ -191,8 +178,16 @@ final class IPrimaAuthenticator {
 			return profiles;
 		}
 		
-		public static final List<Profile> listProfiles() throws Exception {
+		private static final List<Profile> listProfiles() throws Exception {
 			return extractProfiles(Web.request(new GetRequest(Utils.url(URL_PROFILE_PAGE), Shared.USER_AGENT)).content);
+		}
+		
+		public static final List<Profile> profiles() throws Exception {
+			if(profiles == null) {
+				profiles = listProfiles();
+			}
+			
+			return profiles;
 		}
 		
 		public static final class Profile {
@@ -344,11 +339,13 @@ final class IPrimaAuthenticator {
 		
 		private final String accessToken;
 		private final String deviceId;
+		private final String profileId;
 		private Map<String, String> requestHeaders;
 		
-		public SessionData(String accessToken, String deviceId) {
+		public SessionData(String accessToken, String deviceId, String profileId) {
 			this.accessToken = accessToken;
 			this.deviceId = deviceId;
+			this.profileId = profileId;
 		}
 		
 		public final Map<String, String> requestHeaders() {
@@ -360,6 +357,18 @@ final class IPrimaAuthenticator {
 				);
 			}
 			return requestHeaders;
+		}
+		
+		public String accessToken() {
+			return accessToken;
+		}
+		
+		public String deviceId() {
+			return deviceId;
+		}
+		
+		public String profileId() {
+			return profileId;
 		}
 	}
 	
@@ -374,6 +383,13 @@ final class IPrimaAuthenticator {
 		}
 		
 		private static final <T> T valueOrElse(String propertyName, Supplier<T> orElse) {
+			// TODO: Reverse changes
+			Configuration configuration = configuration();
+			
+			if(configuration == null) {
+				return orElse.get();
+			}
+			
 			return Optional.<ConfigurationProperty<T>>ofNullable(configuration().property(propertyName))
 						.map(ConfigurationProperty::value).orElseGet(orElse);
 		}

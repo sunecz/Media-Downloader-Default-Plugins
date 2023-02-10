@@ -1,22 +1,12 @@
 package sune.app.mediadown.media_engine.iprima;
 
-import java.lang.StackWalker.Option;
-import java.lang.StackWalker.StackFrame;
-import java.lang.reflect.Constructor;
 import java.net.URI;
 import java.net.URL;
 import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
-import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentSkipListSet;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 
 import javafx.scene.image.Image;
@@ -24,20 +14,19 @@ import sune.app.mediadown.Episode;
 import sune.app.mediadown.Program;
 import sune.app.mediadown.engine.MediaEngine;
 import sune.app.mediadown.media.Media;
+import sune.app.mediadown.media_engine.iprima.IPrimaHelper.ConcurrentLoop;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper.DefaultEpisodeObtainer;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper.DefaultMediaObtainer;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper.DefaultMediaObtainerNewURL;
-import sune.app.mediadown.media_engine.iprima.IPrimaHelper.GraphQLProgramObtainer;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper.PlayIDsMediaObtainer;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper.PrimaAPIProgramObtainer;
+import sune.app.mediadown.media_engine.iprima.IPrimaHelper.ProgramWrapper;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper.SnippetEpisodeObtainer;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper.StaticProgramObtainer;
+import sune.app.mediadown.media_engine.iprima.IPrimaHelper._Singleton;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.util.CheckedBiFunction;
-import sune.app.mediadown.util.CounterLock;
-import sune.app.mediadown.util.Reflection;
-import sune.app.mediadown.util.Threads;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.WorkerProxy;
 import sune.app.mediadown.util.WorkerUpdatableTask;
@@ -53,14 +42,8 @@ public final class IPrimaEngine implements MediaEngine {
 	public static final Image  ICON    = PLUGIN.getIcon();
 	
 	private static final IPrima[] SUPPORTED_WEBS = {
-		PrimaIPrima.getInstance(),
+		PrimaPlus.getInstance(),
 		ZoomIPrima.getInstance(),
-		LoveIPrima.getInstance(),
-		CoolIPrima.getInstance(),
-		ShowIPrima.getInstance(),
-		StarIPrima.getInstance(),
-		KrimiIPrima.getInstance(),
-		MaxIPrima.getInstance(),
 		CNNIPrima.getInstance(),
 		PauzaIPrima.getInstance(),
 	};
@@ -262,82 +245,6 @@ public final class IPrimaEngine implements MediaEngine {
 		boolean isCompatibleSubdomain(String subdomain);
 	}
 	
-	// Context-dependant Singleton instantiator
-	private static final class _Singleton {
-		
-		private static final Map<Class<?>, _Singleton> instances = new HashMap<>();
-		
-		private final Class<?> clazz;
-		private Object instance;
-		
-		private _Singleton(Class<?> clazz) {
-			this.clazz = clazz;
-		}
-		
-		public static final <T> T getInstance() {
-			Class<?> clazz = StackWalker.getInstance(Option.RETAIN_CLASS_REFERENCE).walk((stream) -> {
-				return stream.filter((p) -> p.getDeclaringClass() != _Singleton.class)
-						 .map(StackFrame::getDeclaringClass)
-						 .findFirst().get();
-			});
-			return instances.computeIfAbsent(clazz, _Singleton::new).instance();
-		}
-		
-		private final <T> T newInstance() {
-			try {
-				@SuppressWarnings("unchecked")
-				Constructor<T> ctor = (Constructor<T>) clazz.getDeclaredConstructor();
-				Reflection.setAccessible(ctor, true);
-				T instance = ctor.newInstance();
-				Reflection.setAccessible(ctor, false);
-				return instance;
-			} catch(Exception ex) {
-				// Assume, the class is instantiable
-			}
-			// This should not happen
-			return null;
-		}
-		
-		protected final <T> T instance() {
-			@SuppressWarnings("unchecked")
-			T obj = (T) (instance == null ? (instance = newInstance()) : instance);
-			return obj;
-		}
-	}
-	
-	private static final class PrimaIPrima implements IPrima {
-		
-		private static final String SUBDOMAIN = "prima";
-		
-		private PrimaIPrima() {}
-		public static final PrimaIPrima getInstance() { return _Singleton.getInstance(); }
-		
-		@Override
-		public List<Program> getPrograms(IPrimaEngine engine, WorkerProxy proxy,
-				CheckedBiFunction<WorkerProxy, Program, Boolean> function) throws Exception {
-			return GraphQLProgramObtainer.getInstance().getPrograms(this, proxy, function);
-		}
-		
-		@Override
-		public List<Episode> getEpisodes(IPrimaEngine engine, Program program, WorkerProxy proxy,
-				CheckedBiFunction<WorkerProxy, Episode, Boolean> function) throws Exception {
-			return DefaultEpisodeObtainer.getInstance().getEpisodes(program, proxy, function);
-		}
-		
-		@Override
-		public List<Media> getMedia(IPrimaEngine engine, String url, WorkerProxy proxy,
-				CheckedBiFunction<WorkerProxy, Media, Boolean> function) throws Exception {
-			return DefaultMediaObtainer.getInstance().getMedia(url, proxy, function, engine);
-		}
-		
-		@Override
-		public boolean isCompatibleSubdomain(String subdomain) {
-			// Some movies are on the www subdomain that is effectively the same subdomain as iprima,
-			// so we also have to handle that subdomain.
-			return subdomain.equalsIgnoreCase(SUBDOMAIN) || subdomain.equalsIgnoreCase("www");
-		}
-	}
-	
 	private static final class ZoomIPrima implements IPrima {
 		
 		private static final String SUBDOMAIN = "zoom";
@@ -368,193 +275,7 @@ public final class IPrimaEngine implements MediaEngine {
 			return subdomain.equalsIgnoreCase(SUBDOMAIN);
 		}
 	}
-	
-	private static final class LoveIPrima implements IPrima {
-		
-		private static final String SUBDOMAIN = "love";
-		
-		private LoveIPrima() {}
-		public static final LoveIPrima getInstance() { return _Singleton.getInstance(); }
-		
-		@Override
-		public List<Program> getPrograms(IPrimaEngine engine, WorkerProxy proxy,
-				CheckedBiFunction<WorkerProxy, Program, Boolean> function) throws Exception {
-			return PrimaAPIProgramObtainer.getInstance().getPrograms(this, SUBDOMAIN, proxy, function);
-		}
-		
-		@Override
-		public List<Episode> getEpisodes(IPrimaEngine engine, Program program, WorkerProxy proxy,
-				CheckedBiFunction<WorkerProxy, Episode, Boolean> function) throws Exception {
-			return DefaultEpisodeObtainer.getInstance().getEpisodes(program, proxy, function);
-		}
-		
-		@Override
-		public List<Media> getMedia(IPrimaEngine engine, String url, WorkerProxy proxy,
-				CheckedBiFunction<WorkerProxy, Media, Boolean> function) throws Exception {
-			return DefaultMediaObtainer.getInstance().getMedia(url, proxy, function, engine);
-		}
-		
-		@Override
-		public boolean isCompatibleSubdomain(String subdomain) {
-			return subdomain.equalsIgnoreCase(SUBDOMAIN);
-		}
-	}
-	
-	private static final class CoolIPrima implements IPrima {
-		
-		private static final String SUBDOMAIN = "cool";
-		
-		private CoolIPrima() {}
-		public static final CoolIPrima getInstance() { return _Singleton.getInstance(); }
-		
-		@Override
-		public List<Program> getPrograms(IPrimaEngine engine, WorkerProxy proxy,
-				CheckedBiFunction<WorkerProxy, Program, Boolean> function) throws Exception {
-			return PrimaAPIProgramObtainer.getInstance().getPrograms(this, SUBDOMAIN, proxy, function);
-		}
-		
-		@Override
-		public List<Episode> getEpisodes(IPrimaEngine engine, Program program, WorkerProxy proxy,
-				CheckedBiFunction<WorkerProxy, Episode, Boolean> function) throws Exception {
-			return DefaultEpisodeObtainer.getInstance().getEpisodes(program, proxy, function);
-		}
-		
-		@Override
-		public List<Media> getMedia(IPrimaEngine engine, String url, WorkerProxy proxy,
-				CheckedBiFunction<WorkerProxy, Media, Boolean> function) throws Exception {
-			return DefaultMediaObtainer.getInstance().getMedia(url, proxy, function, engine);
-		}
-		
-		@Override
-		public boolean isCompatibleSubdomain(String subdomain) {
-			return subdomain.equalsIgnoreCase(SUBDOMAIN);
-		}
-	}
-	
-	private static final class ShowIPrima implements IPrima {
-		
-		private static final String SUBDOMAIN = "show";
-		
-		private ShowIPrima() {}
-		public static final ShowIPrima getInstance() { return _Singleton.getInstance(); }
-		
-		@Override
-		public List<Program> getPrograms(IPrimaEngine engine, WorkerProxy proxy,
-				CheckedBiFunction<WorkerProxy, Program, Boolean> function) throws Exception {
-			return PrimaAPIProgramObtainer.getInstance().getPrograms(this, SUBDOMAIN, proxy, function);
-		}
-		
-		@Override
-		public List<Episode> getEpisodes(IPrimaEngine engine, Program program, WorkerProxy proxy,
-				CheckedBiFunction<WorkerProxy, Episode, Boolean> function) throws Exception {
-			return DefaultEpisodeObtainer.getInstance().getEpisodes(program, proxy, function);
-		}
-		
-		@Override
-		public List<Media> getMedia(IPrimaEngine engine, String url, WorkerProxy proxy,
-				CheckedBiFunction<WorkerProxy, Media, Boolean> function) throws Exception {
-			return DefaultMediaObtainer.getInstance().getMedia(url, proxy, function, engine);
-		}
-		
-		@Override
-		public boolean isCompatibleSubdomain(String subdomain) {
-			return subdomain.equalsIgnoreCase(SUBDOMAIN);
-		}
-	}
-	
-	private static final class StarIPrima implements IPrima {
-		
-		private static final String SUBDOMAIN = "star";
-		
-		private StarIPrima() {}
-		public static final StarIPrima getInstance() { return _Singleton.getInstance(); }
-		
-		@Override
-		public List<Program> getPrograms(IPrimaEngine engine, WorkerProxy proxy,
-				CheckedBiFunction<WorkerProxy, Program, Boolean> function) throws Exception {
-			return PrimaAPIProgramObtainer.getInstance().getPrograms(this, SUBDOMAIN, proxy, function);
-		}
-		
-		@Override
-		public List<Episode> getEpisodes(IPrimaEngine engine, Program program, WorkerProxy proxy,
-				CheckedBiFunction<WorkerProxy, Episode, Boolean> function) throws Exception {
-			return DefaultEpisodeObtainer.getInstance().getEpisodes(program, proxy, function);
-		}
-		
-		@Override
-		public List<Media> getMedia(IPrimaEngine engine, String url, WorkerProxy proxy,
-				CheckedBiFunction<WorkerProxy, Media, Boolean> function) throws Exception {
-			return DefaultMediaObtainer.getInstance().getMedia(url, proxy, function, engine);
-		}
-		
-		@Override
-		public boolean isCompatibleSubdomain(String subdomain) {
-			return subdomain.equalsIgnoreCase(SUBDOMAIN);
-		}
-	}
-	
-	private static final class KrimiIPrima implements IPrima {
-		
-		private static final String SUBDOMAIN = "krimi";
-		
-		private KrimiIPrima() {}
-		public static final KrimiIPrima getInstance() { return _Singleton.getInstance(); }
-		
-		@Override
-		public List<Program> getPrograms(IPrimaEngine engine, WorkerProxy proxy,
-				CheckedBiFunction<WorkerProxy, Program, Boolean> function) throws Exception {
-			return PrimaAPIProgramObtainer.getInstance().getPrograms(this, SUBDOMAIN, proxy, function);
-		}
-		
-		@Override
-		public List<Episode> getEpisodes(IPrimaEngine engine, Program program, WorkerProxy proxy,
-				CheckedBiFunction<WorkerProxy, Episode, Boolean> function) throws Exception {
-			return DefaultEpisodeObtainer.getInstance().getEpisodes(program, proxy, function);
-		}
-		
-		@Override
-		public List<Media> getMedia(IPrimaEngine engine, String url, WorkerProxy proxy,
-				CheckedBiFunction<WorkerProxy, Media, Boolean> function) throws Exception {
-			return DefaultMediaObtainer.getInstance().getMedia(url, proxy, function, engine);
-		}
-		
-		@Override
-		public boolean isCompatibleSubdomain(String subdomain) {
-			return subdomain.equalsIgnoreCase(SUBDOMAIN);
-		}
-	}
-	
-	private static final class MaxIPrima implements IPrima {
-		
-		private static final String SUBDOMAIN = "max";
-		
-		private MaxIPrima() {}
-		public static final MaxIPrima getInstance() { return _Singleton.getInstance(); }
-		
-		@Override
-		public List<Program> getPrograms(IPrimaEngine engine, WorkerProxy proxy,
-				CheckedBiFunction<WorkerProxy, Program, Boolean> function) throws Exception {
-			return PrimaAPIProgramObtainer.getInstance().getPrograms(this, SUBDOMAIN, proxy, function);
-		}
-		
-		@Override
-		public List<Episode> getEpisodes(IPrimaEngine engine, Program program, WorkerProxy proxy,
-				CheckedBiFunction<WorkerProxy, Episode, Boolean> function) throws Exception {
-			return DefaultEpisodeObtainer.getInstance().getEpisodes(program, proxy, function);
-		}
-		
-		@Override
-		public List<Media> getMedia(IPrimaEngine engine, String url, WorkerProxy proxy,
-				CheckedBiFunction<WorkerProxy, Media, Boolean> function) throws Exception {
-			return DefaultMediaObtainer.getInstance().getMedia(url, proxy, function, engine);
-		}
-		
-		@Override
-		public boolean isCompatibleSubdomain(String subdomain) {
-			return subdomain.equalsIgnoreCase(SUBDOMAIN);
-		}
-	}
-	
+
 	private static final class CNNIPrima implements IPrima {
 		
 		private static final String SUBDOMAIN = "cnn";
@@ -615,105 +336,6 @@ public final class IPrimaEngine implements MediaEngine {
 		@Override
 		public boolean isCompatibleSubdomain(String subdomain) {
 			return subdomain.equalsIgnoreCase(SUBDOMAIN);
-		}
-	}
-	
-	private static final class ProgramWrapper implements Comparable<ProgramWrapper> {
-		
-		private final Program program;
-		
-		public ProgramWrapper(Program program) {
-			this.program = Objects.requireNonNull(program);
-		}
-		
-		@Override
-		public int hashCode() {
-			return Objects.hash(program);
-		}
-		
-		@Override
-		public boolean equals(Object obj) {
-			if(this == obj)
-				return true;
-			if(obj == null)
-				return false;
-			if(getClass() != obj.getClass())
-				return false;
-			ProgramWrapper other = (ProgramWrapper) obj;
-			// Do not compare program data
-			return Objects.equals(program.uri(), other.program.uri())
-						&& Objects.equals(program.title().toLowerCase(), other.program.title().toLowerCase());
-		}
-		
-		@Override
-		public int compareTo(ProgramWrapper w) {
-			if(Objects.requireNonNull(w) == this) return 0;
-			return Comparator.<ProgramWrapper>nullsLast((a, b) ->
-							IPrimaHelper.compareNatural(a.program.title().toLowerCase(),
-							                            b.program.title().toLowerCase()))
-						.thenComparing((e) -> e.program.uri())
-						.compare(this, w);
-		}
-		
-		public Program program() {
-			return program;
-		}
-	}
-	
-	private static abstract class ConcurrentLoop<T> {
-		
-		protected final ExecutorService executor = Threads.Pools.newWorkStealing();
-		protected final AtomicReference<Exception> exception = new AtomicReference<>();
-		protected final CounterLock counter = new CounterLock();
-		
-		protected abstract void iteration(T value) throws Exception;
-		
-		protected final void await() throws Exception {
-			counter.await();
-			
-			executor.shutdownNow();
-			executor.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS);
-			
-			Exception ex;
-			if((ex = exception.get()) != null) {
-				throw ex;
-			}
-		}
-		
-		protected final void submit(T value) {
-			counter.increment();
-			executor.submit(new Iteration(value));
-		}
-		
-		@SuppressWarnings("unchecked")
-		public void iterate(T... values) throws Exception {
-			for(T value : values) {
-				submit(value);
-			}
-			
-			await();
-		}
-		
-		protected class Iteration implements Callable<Void> {
-			
-			protected final T value;
-			
-			public Iteration(T value) {
-				this.value = value;
-			}
-			
-			@Override
-			public Void call() throws Exception {
-				try {
-					iteration(value);
-					return null;
-				} catch(Exception ex) {
-					exception.compareAndSet(null, ex);
-					throw ex; // Propagate
-				} finally {
-					counter.decrement();
-				}
-			}
 		}
 	}
 }
