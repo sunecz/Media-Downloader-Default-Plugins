@@ -166,7 +166,7 @@ public final class IPrimaAuthenticator {
 		return SESSION_DATA;
 	}
 	
-	protected static final class ProfileManager {
+	public static final class ProfileManager {
 		
 		private static final String URL_PROFILE_PAGE = "https://auth.iprima.cz/user/profile-select";
 		
@@ -223,15 +223,16 @@ public final class IPrimaAuthenticator {
 		}
 	}
 	
-	protected static final class DeviceManager {
+	public static final class DeviceManager {
 		
 		private static final String DEVICE_NAME = "Media Downloader";
 		private static final String DEVICE_TYPE = "WEB";
 		
 		private static final String URL_LIST_DEVICES = "https://auth.iprima.cz/user/zarizeni";
 		private static final String URL_ADD_DEVICE = "https://prima.iprima.cz/iprima-api/PlayApiProxy/Proxy/AddNewUserSlot";
+		private static final String URL_REMOVE_DEVICE = "https://auth.iprima.cz/user/zarizeni/removeSlot";
 		
-		private static final String SELECTOR_DEVICES = "#main-content > div:nth-child(2) .table tr td:last-child > button";
+		private static final String SELECTOR_DEVICES = "#main-content > div:nth-child(2) .container table tr td:last-child > button";
 		
 		private static String deviceId; // For caching purposes
 		
@@ -256,7 +257,7 @@ public final class IPrimaAuthenticator {
 			});
 		}
 		
-		private static final Device createDevice(String id, String type, String name) throws Exception {
+		public static final Device createDevice(String id, String type, String name) throws Exception {
 			Map<String, String> params = Map.of("slotType", type, "title", name, "deviceUID", id);
 			Map<String, String> headers = Map.of("Referer", "https://prima.iprima.cz/", "X-Requested-With", "XMLHttpRequest");
 			StringResponse response = Web.request(new PostRequest(Utils.url(URL_ADD_DEVICE), Shared.USER_AGENT, params, null, headers));
@@ -265,6 +266,15 @@ public final class IPrimaAuthenticator {
 			SSDCollection data = JSON.read(response.content);
 			String slotId = data.getDirectString("slotId");
 			return new Device(slotId, type, name);
+		}
+		
+		public static final boolean removeDevice(String id) throws Exception {
+			Map<String, String> params = Map.of("slotType", "WEB", "slotId", id);
+			Map<String, String> headers = Map.of("Referer", "https://prima.iprima.cz/", "X-Requested-With", "XMLHttpRequest");
+			PostRequest request = new PostRequest(Utils.url(URL_REMOVE_DEVICE), Shared.USER_AGENT, params, null, headers);
+			try(StreamResponse response = Web.requestStream(request)) {
+				return response.code == 200;
+			}
 		}
 		
 		private static final Device createDevice() throws Exception {
@@ -287,7 +297,7 @@ public final class IPrimaAuthenticator {
 			return deviceId;
 		}
 		
-		private static final class Device {
+		public static final class Device {
 			
 			private final String slotId;
 			private final String slotType;
