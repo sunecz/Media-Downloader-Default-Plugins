@@ -20,6 +20,8 @@ import org.cef.network.CefCookieManager;
 import io.netty.handler.codec.http.FullHttpRequest;
 import io.netty.handler.codec.http.HttpMethod;
 import sune.app.mediadown.media.Media;
+import sune.app.mediadown.media_engine.iprima.IPrimaAuthenticator;
+import sune.app.mediadown.media_engine.iprima.IPrimaAuthenticator.SessionData;
 import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.Reflection2;
 import sune.app.mediadown.util.Reflection3;
@@ -40,9 +42,8 @@ public class IPrimaDRMEngine implements DRMEngine {
 	IPrimaDRMEngine() {
 	}
 	
-	private static final Object doHeadlessLogin() throws Exception {
-		Class<?> clazz = Class.forName("sune.app.mediadown.media_engine.iprima.IPrimaAuthenticator");
-		return (Object) Reflection3.invokeStatic(clazz, "getSessionData");
+	private static final SessionData doHeadlessLogin() throws Exception {
+		return IPrimaAuthenticator.getSessionData();
 	}
 	
 	private static final CookieManager ensureCookieManager() throws Exception {
@@ -90,13 +91,8 @@ public class IPrimaDRMEngine implements DRMEngine {
 		}
 	}
 	
-	private static final void setCefLocalStorage(CefFrame frame, List<HttpCookie> cookies) {
-		HttpCookie cookieUser = cookies.stream()
-			.filter((c) -> c.getName().equals("prima_current_user"))
-			.findFirst().get();
-		SSDCollection tokenData = JSON.read(Utils.base64Decode(cookieUser.getValue()));
-		String tokenString = tokenData.getCollection("token").toJSON(true);
-		JS.execute(frame, "window.localStorage.setItem('prima_sso_token', '" + tokenString + "');");
+	private static final void setCefLocalStorage(CefFrame frame, String name, String value) {
+		JS.execute(frame, "window.localStorage.setItem('" + name + "', '" + value + "');");
 	}
 	
 	@Override
@@ -128,6 +124,7 @@ public class IPrimaDRMEngine implements DRMEngine {
 		
 		private boolean isLoggedIn;
 		private List<HttpCookie> cookies;
+		private String rawString;
 		
 		public IPrimaDRMResolver(DRMContext context, String url, Path output, Media media) {
 			super(context, url, output, media);
@@ -147,8 +144,8 @@ public class IPrimaDRMEngine implements DRMEngine {
 				Date expires = Date.from(instant.plus(7, ChronoUnit.DAYS));
 				
 				// This cookie value means "Decline all unnecessary cookies".
-				String value = "CPjDWYAPjDWYAAHABBENCrCgAAAAAAAAAATIAAAAAAEkoAMAAQSTDQAYAA"
-						+ "gkmKgAwABBJMpABgACCSY6ADAAEEkyEAGAAIJJhIAMAAQSTGQAYAAgkmIgAwABBJMA"
+				String value = "CPm91oAPm91oAAHABBENC0CgAAAAAAAAAATIAAAAAAEkoAMAAQSbDQAYAA"
+						+ "gk2KgAwABBJspABgACCTY6ADAAEEmyEAGAAIJNhIAMAAQSbGQAYAAgk2IgAwABBJsA"
 						+ ".YAAAAAAAAAAA";
 				
 				for(String name : List.of("euconsent-v2", "eupubconsent-v2")) {
@@ -156,14 +153,17 @@ public class IPrimaDRMEngine implements DRMEngine {
 						false, false, now, now, false, expires));
 				}
 				
+				// Hide the welcome banner on the bottom left
+				setCefLocalStorage(frame, "onboarding_snackbar_hide", "1");
+				
 				JS.Helper.include(frame);
 				JS.Helper.hideVideoElementStyle(frame);
 				JS.Record.include(frame);
-				JS.Record.activate(frame, ".video-js[id^='video-player-'] > video");
+				JS.Record.activate(frame, "#prima-player > video");
 			} else if(frame.getURL().startsWith("https://auth.iprima.cz")) {
 				// For the system to think we are logged in, we must also put some information
 				// to the localStorage, otherwise we would be logged out.
-				setCefLocalStorage(frame, cookies);
+				setCefLocalStorage(frame, "prima_sso_token", rawString);
 			}
 		}
 		
@@ -230,7 +230,8 @@ public class IPrimaDRMEngine implements DRMEngine {
 		public String url() {
 			if(!isLoggedIn) {
 				try {
-					doHeadlessLogin();
+					SessionData sessionData = doHeadlessLogin();
+					rawString = sessionData.rawString();
 					cookies = savedCookies(Utils.uri(url));
 					setCefCookies(url, cookies);
 					isLoggedIn = true;
