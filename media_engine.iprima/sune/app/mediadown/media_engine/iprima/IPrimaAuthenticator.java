@@ -29,7 +29,7 @@ import sune.app.mediadown.util.Web.StreamResponse;
 import sune.app.mediadown.util.Web.StringResponse;
 import sune.util.ssdf2.SSDCollection;
 
-final class IPrimaAuthenticator {
+public final class IPrimaAuthenticator {
 	
 	private static final String URL_OAUTH_LOGIN;
 	private static final String URL_OAUTH_TOKEN;
@@ -136,11 +136,7 @@ final class IPrimaAuthenticator {
 			return false;
 		}
 		
-		Map<String, String> params = Map.of(
-			"auth_token_code", code
-		);
-		
-		URL url = Utils.url(URL_USER_AUTH + '?' + Utils.joinURLParams(params));
+		URL url = Utils.url(Utils.format(URL_USER_AUTH, "code", code));
 		return tryAndClose(Web.requestStream(new GetRequest(url, Shared.USER_AGENT, null, null, false)),
 		                   (response) -> response.code == 302);
 	}
@@ -159,7 +155,7 @@ final class IPrimaAuthenticator {
 			
 			if(success) {
 				SESSION_DATA = new SessionData(
-					tokens.accessToken(),
+					tokens.rawString(), tokens.accessToken(),
 					// The device ID must be obtained AFTER logging in
 					DeviceManager.deviceId(),
 					ProfileManager.profiles().get(0).id()
@@ -327,17 +323,19 @@ final class IPrimaAuthenticator {
 	
 	private static final class SessionTokens {
 		
+		private final String rawString;
 		private final String accessToken;
 		private final String refreshToken;
 		
-		private SessionTokens(String accessToken, String refreshToken) {
+		private SessionTokens(String rawString, String accessToken, String refreshToken) {
+			this.rawString = rawString;
 			this.accessToken = accessToken;
 			this.refreshToken = refreshToken;
 		}
 		
 		public static final SessionTokens parse(SSDCollection json) {
-			return new SessionTokens(json.getDirectString("access_token"),
-			                         json.getDirectString("refresh_token"));
+			return new SessionTokens(json.toJSON(true), json.getDirectString("access_token"),
+				json.getDirectString("refresh_token"));
 		}
 		
 		public final String tokenDataString() {
@@ -347,6 +345,10 @@ final class IPrimaAuthenticator {
 			return Utils.base64URLEncode(data.toJSON(true));
 		}
 		
+		public String rawString() {
+			return rawString;
+		}
+		
 		public final String accessToken() {
 			return accessToken;
 		}
@@ -354,12 +356,14 @@ final class IPrimaAuthenticator {
 	
 	public static final class SessionData {
 		
+		private final String rawString;
 		private final String accessToken;
 		private final String deviceId;
 		private final String profileId;
 		private Map<String, String> requestHeaders;
 		
-		public SessionData(String accessToken, String deviceId, String profileId) {
+		public SessionData(String rawString, String accessToken, String deviceId, String profileId) {
+			this.rawString = rawString;
 			this.accessToken = accessToken;
 			this.deviceId = deviceId;
 			this.profileId = profileId;
@@ -374,6 +378,10 @@ final class IPrimaAuthenticator {
 				);
 			}
 			return requestHeaders;
+		}
+		
+		public String rawString() {
+			return rawString;
 		}
 		
 		public String accessToken() {
