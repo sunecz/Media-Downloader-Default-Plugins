@@ -10,7 +10,17 @@
 					fields: {
 						useDefaultAuthData: "Use default authentication data",
 						authData_email:     "Email",
-						authData_password:  "Password"
+						authData_password:  "Password",
+						profile:            "Profile"
+					},
+					values: {
+						profile: {
+							profile_auto: "Automatically",
+							progress: {
+								log_in:   "Logging in...",
+								profiles: "Obtaining existing profiles..."
+							}
+						}
 					}
 				}
 			}

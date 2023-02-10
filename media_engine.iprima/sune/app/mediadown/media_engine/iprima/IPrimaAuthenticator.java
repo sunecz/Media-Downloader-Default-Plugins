@@ -61,7 +61,7 @@ final class IPrimaAuthenticator {
 		String csrfToken = Utils.parseDocument(response.content).selectFirst("input[name='_csrf_token']").val();
 		Map<String, String> params = Map.of("_email", email, "_password", password, "_csrf_token", csrfToken);
 		response = Web.request(new PostRequest(Utils.url(URL_OAUTH_LOGIN), Shared.USER_AGENT, params));
-		return selectFirstProfile(response);
+		return selectConfiguredProfile(response);
 	}
 	
 	private static final String selectProfile(String profileId) throws Exception {
@@ -78,7 +78,7 @@ final class IPrimaAuthenticator {
 					: ProfileManager.profiles();
 	}
 	
-	private static final String selectFirstProfile(StringResponse response) throws Exception {
+	private static final String selectConfiguredProfile(StringResponse response) throws Exception {
 		List<Profile> profiles = profiles(response);
 		
 		// At least one profile should be automatically available
@@ -86,7 +86,20 @@ final class IPrimaAuthenticator {
 			throw new IllegalStateException("No profile exists");
 		}
 		
-		return selectProfile(profiles.get(0).id());
+		Profile profile = profiles.get(0);
+		
+		Configuration configuration = configuration();
+		String selectedProfileId = configuration.stringValue("profile");
+		
+		if(selectedProfileId != null
+				&& !selectedProfileId.isEmpty()
+				&& !selectedProfileId.equals("auto")) {
+			profile = profiles.stream()
+				.filter((p) -> p.id().equals(selectedProfileId))
+				.findFirst().orElse(profile);
+		}
+		
+		return selectProfile(profile.id());
 	}
 	
 	private static final SessionTokens sessionTokens(String code) throws Exception {
@@ -130,6 +143,10 @@ final class IPrimaAuthenticator {
 		URL url = Utils.url(URL_USER_AUTH + '?' + Utils.joinURLParams(params));
 		return tryAndClose(Web.requestStream(new GetRequest(url, Shared.USER_AGENT, null, null, false)),
 		                   (response) -> response.code == 302);
+	}
+	
+	private static final Configuration configuration() {
+		return IPrimaHelper.configuration();
 	}
 	
 	public static final SessionData getSessionData() throws Exception {
@@ -195,7 +212,7 @@ final class IPrimaAuthenticator {
 			private final String id;
 			private final String name;
 			
-			private Profile(String id, String name) {
+			protected Profile(String id, String name) {
 				this.id = Objects.requireNonNull(id);
 				this.name = Objects.requireNonNull(name);
 			}
@@ -376,10 +393,6 @@ final class IPrimaAuthenticator {
 		
 		// Forbid anyone to create an instance of this class
 		private AuthenticationData() {
-		}
-		
-		private static final Configuration configuration() {
-			return IPrimaHelper.configuration();
 		}
 		
 		private static final <T> T valueOrElse(String propertyName, Supplier<T> orElse) {
