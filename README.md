@@ -4,7 +4,7 @@ Default plugins for Media Downloader.
 ## Supported websites
 - [TV Nova](https://tv.nova.cz/)
 - [iPrima](https://iprima.cz/)
-	- [Prima](https://prima.iprima.cz/), [Zoom](https://zoom.iprima.cz/), [Love](https://love.iprima.cz/), [Cool](https://cool.iprima.cz/), [Show](https://show.iprima.cz/), [Star](https://star.iprima.cz/), [Krimi](https://krimi.iprima.cz/), [Max](https://max.iprima.cz/), [CNN](https://cnn.iprima.cz/), [Pauza](https://pauza.iprima.cz/)
+	- [Prima+](https://www.iprima.cz/), [Zoom](https://zoom.iprima.cz/), [CNN](https://cnn.iprima.cz/), [Pauza](https://pauza.iprima.cz/)
 - [YouTube](https://youtube.com/)
 - [Česká televize](https://ceskatelevize.cz/)
 	- [ČT24](https://ct24.ceskatelevize.cz/), [Sport](https://sport.ceskatelevize.cz/), [iVysílání](https://www.ceskatelevize.cz/ivysilani/), [Pořady](https://www.ceskatelevize.cz/porady/), [Déčko](https://decko.ceskatelevize.cz/), [Art](https://art.ceskatelevize.cz/), [Edu](https://edu.ceskatelevize.cz/)
