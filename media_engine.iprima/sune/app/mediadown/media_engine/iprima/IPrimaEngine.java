@@ -12,6 +12,8 @@ import java.util.stream.Stream;
 import javafx.scene.image.Image;
 import sune.app.mediadown.Episode;
 import sune.app.mediadown.Program;
+import sune.app.mediadown.concurrent.WorkerProxy;
+import sune.app.mediadown.concurrent.WorkerUpdatableTask;
 import sune.app.mediadown.engine.MediaEngine;
 import sune.app.mediadown.media.Media;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper.ConcurrentLoop;
@@ -28,8 +30,6 @@ import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.util.CheckedBiFunction;
 import sune.app.mediadown.util.Utils;
-import sune.app.mediadown.util.WorkerProxy;
-import sune.app.mediadown.util.WorkerUpdatableTask;
 
 public final class IPrimaEngine implements MediaEngine {
 	

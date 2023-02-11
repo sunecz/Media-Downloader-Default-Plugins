@@ -15,6 +15,8 @@ import sune.app.mediadown.MediaGetter;
 import sune.app.mediadown.MediaGetters;
 import sune.app.mediadown.Program;
 import sune.app.mediadown.Shared;
+import sune.app.mediadown.concurrent.WorkerProxy;
+import sune.app.mediadown.concurrent.WorkerUpdatableTask;
 import sune.app.mediadown.engine.MediaEngine;
 import sune.app.mediadown.media.Media;
 import sune.app.mediadown.media.MediaFormat;
@@ -34,8 +36,6 @@ import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Utils.JS;
 import sune.app.mediadown.util.Web;
 import sune.app.mediadown.util.Web.GetRequest;
-import sune.app.mediadown.util.WorkerProxy;
-import sune.app.mediadown.util.WorkerUpdatableTask;
 import sune.util.ssdf2.SSDCollection;
 
 public final class TVPrimaDomaEngine implements MediaEngine {

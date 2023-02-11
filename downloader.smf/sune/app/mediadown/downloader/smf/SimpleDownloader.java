@@ -19,6 +19,8 @@ import sune.app.mediadown.InternalState;
 import sune.app.mediadown.MediaDownloader;
 import sune.app.mediadown.Shared;
 import sune.app.mediadown.TaskStates;
+import sune.app.mediadown.concurrent.SyncObject;
+import sune.app.mediadown.concurrent.Worker;
 import sune.app.mediadown.convert.ConversionMedia;
 import sune.app.mediadown.download.AcceleratedFileDownloader;
 import sune.app.mediadown.download.DownloadConfiguration;
@@ -46,14 +48,12 @@ import sune.app.mediadown.util.Metadata;
 import sune.app.mediadown.util.NIO;
 import sune.app.mediadown.util.Opt;
 import sune.app.mediadown.util.Pair;
-import sune.app.mediadown.util.SyncObject;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Utils.Ignore;
 import sune.app.mediadown.util.VideoUtils;
 import sune.app.mediadown.util.Web;
 import sune.app.mediadown.util.Web.GetRequest;
 import sune.app.mediadown.util.Web.HeadRequest;
-import sune.app.mediadown.util.Worker;
 
 public final class SimpleDownloader implements Download, DownloadResult {
 	

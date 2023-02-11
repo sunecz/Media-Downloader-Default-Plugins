@@ -35,6 +35,8 @@ import sune.app.mediadown.InternalState;
 import sune.app.mediadown.MediaDownloader;
 import sune.app.mediadown.Shared;
 import sune.app.mediadown.TaskStates;
+import sune.app.mediadown.concurrent.SyncObject;
+import sune.app.mediadown.concurrent.Worker;
 import sune.app.mediadown.convert.ConversionMedia;
 import sune.app.mediadown.download.DownloadConfiguration;
 import sune.app.mediadown.download.DownloadResult;
@@ -78,13 +80,11 @@ import sune.app.mediadown.util.Range;
 import sune.app.mediadown.util.Reflection2;
 import sune.app.mediadown.util.Reflection3;
 import sune.app.mediadown.util.Regex;
-import sune.app.mediadown.util.SyncObject;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Utils.Ignore;
 import sune.app.mediadown.util.Web;
 import sune.app.mediadown.util.Web.GetRequest;
 import sune.app.mediadown.util.Web.Response;
-import sune.app.mediadown.util.Worker;
 
 public final class SegmentsDownloader implements Download, DownloadResult {
 	

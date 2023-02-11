@@ -51,6 +51,9 @@ import sune.app.mediadown.MediaGetter;
 import sune.app.mediadown.MediaGetters;
 import sune.app.mediadown.Program;
 import sune.app.mediadown.Shared;
+import sune.app.mediadown.concurrent.Threads;
+import sune.app.mediadown.concurrent.WorkerProxy;
+import sune.app.mediadown.concurrent.WorkerUpdatableTask;
 import sune.app.mediadown.configuration.Configuration.ConfigurationProperty;
 import sune.app.mediadown.engine.MediaEngine;
 import sune.app.mediadown.gui.control.IntegerTextField;
@@ -75,12 +78,9 @@ import sune.app.mediadown.util.JavaScript;
 import sune.app.mediadown.util.Reflection2;
 import sune.app.mediadown.util.Reflection3;
 import sune.app.mediadown.util.Regex;
-import sune.app.mediadown.util.Threads;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Utils.Ignore;
 import sune.app.mediadown.util.Web;
-import sune.app.mediadown.util.WorkerProxy;
-import sune.app.mediadown.util.WorkerUpdatableTask;
 import sune.util.ssdf2.SSDCollection;
 
 public final class TVBarrandovEngine implements MediaEngine {

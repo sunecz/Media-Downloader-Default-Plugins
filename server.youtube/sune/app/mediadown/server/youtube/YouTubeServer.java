@@ -19,6 +19,8 @@ import org.jsoup.select.Elements;
 
 import javafx.scene.image.Image;
 import sune.app.mediadown.Shared;
+import sune.app.mediadown.concurrent.WorkerProxy;
+import sune.app.mediadown.concurrent.WorkerUpdatableTask;
 import sune.app.mediadown.download.segment.FileSegment;
 import sune.app.mediadown.download.segment.FileSegmentsHolder;
 import sune.app.mediadown.download.segment.RemoteFileSegment;
@@ -49,8 +51,6 @@ import sune.app.mediadown.util.Web;
 import sune.app.mediadown.util.Web.GetRequest;
 import sune.app.mediadown.util.Web.HeadRequest;
 import sune.app.mediadown.util.Web.StringResponse;
-import sune.app.mediadown.util.WorkerProxy;
-import sune.app.mediadown.util.WorkerUpdatableTask;
 import sune.util.ssdf2.SSDCollection;
 
 public class YouTubeServer implements Server {
