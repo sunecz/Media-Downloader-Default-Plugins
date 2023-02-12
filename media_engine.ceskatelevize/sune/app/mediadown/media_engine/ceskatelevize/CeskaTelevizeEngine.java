@@ -147,8 +147,12 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 							PlaylistData playlistData = PlaylistDataGetter.get(videoURL, info);
 							Map<String, String> headers = Utils.toMap("X-Requested-With", "XMLHttpRequest");
 							Request request = new GetRequest(Utils.url(playlistData.url), Shared.USER_AGENT, headers);
-							StreamResponse response = Web.requestStream(request);
-							SSDCollection json = SSDF.readJSON(response.stream);
+							
+							SSDCollection json;
+							try(StreamResponse response = Web.requestStream(request)) {
+								json = SSDF.readJSON(response.stream);
+							}
+							
 							SSDCollection playlist = json.getDirectCollection("playlist");
 							List<SSDCollection> mediaItems
 								= StreamSupport.stream(Spliterators.spliterator(playlist.collectionsIterator(),
@@ -734,9 +738,16 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 				"x-addr", "127.0.0.1"
 			);
 			Request request = new PostRequest(Utils.url(endpointURL), Shared.USER_AGENT, params, headers);
-			StreamResponse response = Web.requestStream(request);
-			if(response.code != 200) return null;
-			SSDCollection json = SSDF.readJSON(response.stream);
+			
+			SSDCollection json;
+			try(StreamResponse response = Web.requestStream(request)) {
+				if(response.code != 200) {
+					return null;
+				}
+				
+				json = SSDF.readJSON(response.stream);
+			}
+			
 			PlaylistData data = new PlaylistData();
 			data.streamingProtocol = json.getDirectString("streamingProtocol", null);
 			data.url = json.getDirectString("url", null);

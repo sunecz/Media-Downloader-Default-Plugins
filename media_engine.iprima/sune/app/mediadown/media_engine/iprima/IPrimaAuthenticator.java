@@ -66,9 +66,11 @@ public final class IPrimaAuthenticator {
 	
 	private static final String selectProfile(String profileId) throws Exception {
 		URL url = Utils.url(Utils.format(URL_PROFILE_SELECT, "profile_id", profileId));
-		StreamResponse response = Web.requestStream(new GetRequest(url, Shared.USER_AGENT));
-		String responseUrl = responseUrl(response).toExternalForm();
-		return Utils.urlParams(responseUrl).getOrDefault("code", null);
+		
+		try(StreamResponse response = Web.requestStream(new GetRequest(url, Shared.USER_AGENT))) {
+			String responseUrl = responseUrl(response).toExternalForm();
+			return Utils.urlParams(responseUrl).getOrDefault("code", null);
+		}
 	}
 	
 	private static final List<Profile> profiles(StringResponse response) throws Exception {
