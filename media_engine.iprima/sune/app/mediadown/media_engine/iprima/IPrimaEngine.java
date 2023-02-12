@@ -8,7 +8,6 @@ import java.util.stream.Stream;
 
 import javafx.scene.image.Image;
 import sune.app.mediadown.concurrent.ListTask;
-import sune.app.mediadown.concurrent.ListTask.ListTaskEvent;
 import sune.app.mediadown.entity.Episode;
 import sune.app.mediadown.entity.MediaEngine;
 import sune.app.mediadown.entity.Program;
@@ -25,7 +24,6 @@ import sune.app.mediadown.media_engine.iprima.IPrimaHelper.StaticProgramObtainer
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper._Singleton;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
-import sune.app.mediadown.util.Utils;
 
 public final class IPrimaEngine implements MediaEngine {
 	
@@ -92,7 +90,7 @@ public final class IPrimaEngine implements MediaEngine {
 				@Override
 				protected void iteration(IPrima web) throws Exception {
 					ListTask<Program> t = web.getPrograms(IPrimaEngine.this);
-					t.addEventListener(ListTaskEvent.ADD, (p) -> accumulator.add(new ProgramWrapper(Utils.cast(p.b))));
+					t.forwardAdd(accumulator, ProgramWrapper::new);
 					t.startAndWait();
 				}
 			}).iterate(SUPPORTED_WEBS);

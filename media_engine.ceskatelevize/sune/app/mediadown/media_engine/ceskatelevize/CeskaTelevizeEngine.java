@@ -102,7 +102,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 				@Override
 				protected void iteration(Integer category) throws Exception {
 					ListTask<API.ProgramWrapper> t = API.getPrograms(category);
-					t.forwardAdd(task, API.ProgramWrapper::program);
+					t.forwardAdd(accumulator);
 					t.startAndWait();
 				}
 			}).iterate(API.categories());
