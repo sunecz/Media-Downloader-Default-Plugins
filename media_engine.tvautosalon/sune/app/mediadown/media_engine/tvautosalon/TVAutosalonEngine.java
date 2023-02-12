@@ -13,7 +13,6 @@ import org.jsoup.select.Elements;
 
 import javafx.scene.image.Image;
 import sune.app.mediadown.Shared;
-import sune.app.mediadown.concurrent.ListTask;
 import sune.app.mediadown.entity.Episode;
 import sune.app.mediadown.entity.MediaEngine;
 import sune.app.mediadown.entity.Program;
@@ -28,6 +27,7 @@ import sune.app.mediadown.media.MediaUtils;
 import sune.app.mediadown.media.VideoMedia;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
+import sune.app.mediadown.task.ListTask;
 import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.JavaScript;
 import sune.app.mediadown.util.Pair;

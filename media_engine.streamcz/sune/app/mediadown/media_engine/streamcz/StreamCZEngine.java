@@ -33,7 +33,6 @@ import org.jsoup.nodes.Element;
 
 import javafx.scene.image.Image;
 import sune.app.mediadown.Shared;
-import sune.app.mediadown.concurrent.ListTask;
 import sune.app.mediadown.concurrent.Threads;
 import sune.app.mediadown.download.segment.FileSegmentsHolder;
 import sune.app.mediadown.entity.Episode;
@@ -58,6 +57,7 @@ import sune.app.mediadown.media.VideoMediaContainer;
 import sune.app.mediadown.media_engine.streamcz.M3U_Hotfix.M3UFile;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
+import sune.app.mediadown.task.ListTask;
 import sune.app.mediadown.util.CheckedSupplier;
 import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.JavaScript;

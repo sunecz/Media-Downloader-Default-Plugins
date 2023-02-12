@@ -7,7 +7,6 @@ import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.stream.Stream;
 
 import javafx.scene.image.Image;
-import sune.app.mediadown.concurrent.ListTask;
 import sune.app.mediadown.entity.Episode;
 import sune.app.mediadown.entity.MediaEngine;
 import sune.app.mediadown.entity.Program;
@@ -24,6 +23,7 @@ import sune.app.mediadown.media_engine.iprima.IPrimaHelper.StaticProgramObtainer
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper._Singleton;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
+import sune.app.mediadown.task.ListTask;
 
 public final class IPrimaEngine implements MediaEngine {
 	

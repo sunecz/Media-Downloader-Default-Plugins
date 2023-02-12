@@ -17,7 +17,6 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import sune.app.mediadown.MediaDownloader;
-import sune.app.mediadown.concurrent.ListTask;
 import sune.app.mediadown.concurrent.Threads;
 import sune.app.mediadown.entity.Episode;
 import sune.app.mediadown.entity.Program;
@@ -31,6 +30,7 @@ import sune.app.mediadown.media_engine.iprima.IPrimaHelper.FastWeb;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper.ProgramWrapper;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper.ThreadedSpawnableTaskQueue;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper._Singleton;
+import sune.app.mediadown.task.ListTask;
 import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
