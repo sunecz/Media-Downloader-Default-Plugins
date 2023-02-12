@@ -10,7 +10,7 @@ import sune.app.mediadown.util.Password;
 
 @Plugin(name          = "media_engine.tvbarrandov",
 	    title         = "plugin.media_engine.tvbarrandov.title",
-	    version       = "00.02.08-0003",
+	    version       = "00.02.08-0004",
 	    author        = "Sune",
 	    updateBaseURL = "https://app.sune.tech/mediadown/dat/plugin/0002/media_engine/tvbarrandov/",
 	    updatable     = true,
