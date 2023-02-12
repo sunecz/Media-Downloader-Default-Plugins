@@ -260,12 +260,13 @@ public final class IPrimaAuthenticator {
 		public static final Device createDevice(String id, String type, String name) throws Exception {
 			Map<String, String> params = Map.of("slotType", type, "title", name, "deviceUID", id);
 			Map<String, String> headers = Map.of("Referer", "https://prima.iprima.cz/", "X-Requested-With", "XMLHttpRequest");
-			StringResponse response = Web.request(new PostRequest(Utils.url(URL_ADD_DEVICE), Shared.USER_AGENT, params, null, headers));
-			if(response.code != 200)
-				throw new IllegalStateException("Unable to create a new WEB device. Response: " + response.content);
-			SSDCollection data = JSON.read(response.content);
-			String slotId = data.getDirectString("slotId");
-			return new Device(slotId, type, name);
+			PostRequest request = new PostRequest(Utils.url(URL_ADD_DEVICE), Shared.USER_AGENT, params, null, headers);
+			
+			// It is actually enough to just to call the endpoint even if it returns errors,
+			// so ignore them, if there are any.
+			try(StreamResponse response = Web.requestStream(request)) {
+				return new Device(id, type, name);
+			}
 		}
 		
 		public static final boolean removeDevice(String id) throws Exception {
