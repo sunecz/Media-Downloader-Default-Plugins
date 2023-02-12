@@ -2,7 +2,6 @@ package sune.app.mediadown.media_engine.tvbarrandov;
 
 import java.net.CookieManager;
 import java.net.URI;
-import java.net.URL;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpClient.Redirect;
@@ -17,9 +16,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Objects;
@@ -51,9 +48,8 @@ import sune.app.mediadown.MediaGetter;
 import sune.app.mediadown.MediaGetters;
 import sune.app.mediadown.Program;
 import sune.app.mediadown.Shared;
+import sune.app.mediadown.concurrent.ListTask;
 import sune.app.mediadown.concurrent.Threads;
-import sune.app.mediadown.concurrent.WorkerProxy;
-import sune.app.mediadown.concurrent.WorkerUpdatableTask;
 import sune.app.mediadown.configuration.Configuration.ConfigurationProperty;
 import sune.app.mediadown.engine.MediaEngine;
 import sune.app.mediadown.gui.control.IntegerTextField;
@@ -70,7 +66,6 @@ import sune.app.mediadown.media.VideoMedia;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginConfiguration;
 import sune.app.mediadown.plugin.PluginLoaderContext;
-import sune.app.mediadown.util.CheckedBiFunction;
 import sune.app.mediadown.util.CheckedSupplier;
 import sune.app.mediadown.util.FXUtils;
 import sune.app.mediadown.util.JSON;
@@ -133,366 +128,298 @@ public final class TVBarrandovEngine implements MediaEngine {
 		return title;
 	}
 	
-	private static final boolean parseEpisodesPage(Program program, List<Episode> episodes, Document document,
-			WorkerProxy proxy, CheckedBiFunction<WorkerProxy, Episode, Boolean> function) throws Exception {
+	private static final boolean parseEpisodesPage(ListTask<Episode> task, Program program, Document document)
+			throws Exception {
 		for(Element elEpisode : document.select(SELECTOR_EPISODES)) {
 			String url = elEpisode.selectFirst("a.show-box__container").absUrl("href");
 			String title = maybeImproveEpisodeTitle(program, url, elEpisode.selectFirst(".show-box__timestamp").text());
 			Episode episode = new Episode(program, Utils.uri(url), title);
-			episodes.add(episode);
-			if(!function.apply(proxy, episode))
+			
+			if(!task.add(episode)) {
 				return false; // Do not continue
+			}
 		}
+		
 		return true;
 	}
 	
-	// ----- Internal methods
-	
-	private final WorkerProxy _dwp = WorkerProxy.defaultProxy();
-	
-	private final List<Program> internal_getPrograms() throws Exception {
-		return internal_getPrograms(_dwp, (p, a) -> true);
-	}
-	
-	private final List<Program> internal_getPrograms(WorkerProxy proxy,
-			CheckedBiFunction<WorkerProxy, Program, Boolean> function) throws Exception {
-		List<Program> programs = new ArrayList<>();
-		
-		Document document = FastWeb.document(Utils.uri(URL_PROGRAMS), Map.of());
-		for(Element elProgram : document.select(SELECTOR_PROGRAMS)) {
-			if(elProgram.selectFirst(".show-box") == null) continue;
-			String url = elProgram.selectFirst("a.show-box__container").absUrl("href");
-			String title = elProgram.selectFirst(".show-box__title").text();
-			Program program = new Program(Utils.uri(url), title);
-			programs.add(program);
-			if(!function.apply(proxy, program))
-				return null; // Do not continue
-		}
-		
-		return programs;
-	}
-	
-	private final List<Episode> internal_getEpisodes(Program program) throws Exception {
-		return internal_getEpisodes(program, _dwp, (p, a) -> true);
-	}
-	
-	private final List<Episode> internal_getEpisodes(Program program, WorkerProxy proxy,
-			CheckedBiFunction<WorkerProxy, Episode, Boolean> function) throws Exception {
-		List<Episode> episodes = new ArrayList<>();
-		
-		URI baseURI = program.uri();
-		Document document = FastWeb.document(baseURI.resolve(baseURI.getPath() + "/video?page=1"));
-		EpisodesObtainStrategy strategy;
-		
-		// Obtain the range of available pages
-		int first = 1, last = 1;
-		Element elPagination = document.selectFirst(".pagination__pages");
-		if(elPagination != null) {
-			Element elPageFirst = elPagination.selectFirst("> :nth-child(2)");
-			Element elPageLast  = elPagination.selectFirst("> :nth-last-child(2)");
-			first = Optional.ofNullable(elPageFirst).map(Element::text).map(Integer::valueOf).orElse(-1);
-			last  = Optional.ofNullable(elPageLast) .map(Element::text).map(Integer::valueOf).orElse(-1);
-			if(first < 0) first = 1;
-			if(last  < 0) last  = first;
-		}
-		
-		final int maxNumOfPagesToGetAll = 5;
-		if(last - first >= maxNumOfPagesToGetAll) {
-			final int minPage = first, maxPage = last;
-			strategy = FXUtils.fxTaskValue(() -> (new EpisodesObtainStrategyDialog(program, minPage, maxPage, document))
-			                                         .showAndWait())
-					          .orElse(null);
-		} else {
-			strategy = new PageRangeEpisodesObtainStrategy(program, first + 1, last, document);
-		}
-		
-		// If the strategy chooser dialog was closed, do not continue
-		if(strategy == null) return null;
-		// Run the strategy and obtain all episodes based on the user's selection
-		strategy.obtain(episodes, proxy, function);
-		
-		return episodes;
-	}
-	
-	private final List<Media> internal_getMedia(String url) throws Exception {
-		return internal_getMedia(url, _dwp, (p, a) -> true);
-	}
-	
-	private final List<Media> internal_getMedia(String url, WorkerProxy proxy,
-			CheckedBiFunction<WorkerProxy, Media, Boolean> function) throws Exception {
-		List<Media> sources = new ArrayList<>();
-		
-		// Try to log in to the user's account, if the details are present
-		if(Authenticator.areLoginDetailsPresent() && !Authenticator.authenticate()) {
-			throw new IllegalStateException("Unable to log in to the account");
-		}
-		
-		URI uri = Utils.uri(url);
-		Document document = FastWeb.document(uri);
-		URI uriToProcess = null;
-		
-		// Check whether we've been redirected to the Premium Archive information page
-		if(Utils.uri(document.baseUri()).getPath().startsWith("/premiovy-archiv")) {
-			// Some videos are marked as premium but are actually available on YouTube,
-			// try to search for them on the official YouTube channel.
-			String queryURL = "https://www.youtube.com/c/TelevizeBarrandovOfficial/search?query=%{query}s";
-			String query = null, programName = null, dateString = null;
+	@Override
+	public ListTask<Program> getPrograms() throws Exception {
+		return ListTask.of((task) -> {
+			Document document = FastWeb.document(Utils.uri(URL_PROGRAMS), Map.of());
 			
-			Regex regex = Regex.of("^/video/\\d+((?:-[^-]+)+)-(\\d{1,2})-(\\d{1,2})-(\\d{4})$");
-			Matcher matcher = regex.matcher(uri.getPath());
-			if(matcher.matches()) {
-				programName = Utils.titlize(matcher.group(1).substring(1));
-				int day = Integer.valueOf(matcher.group(2));
-				int month = Integer.valueOf(matcher.group(3));
-				int year = Integer.valueOf(matcher.group(4));
-				dateString = String.format("%02d.%02d.%04d", day, month, year);
-				query = String.format("%s %s", programName, dateString);
+			for(Element elProgram : document.select(SELECTOR_PROGRAMS)) {
+				if(elProgram.selectFirst(".show-box") == null) continue;
+				String url = elProgram.selectFirst("a.show-box__container").absUrl("href");
+				String title = elProgram.selectFirst(".show-box__title").text();
+				Program program = new Program(Utils.uri(url), title);
+				
+				if(!task.add( program)) {
+					return; // Do not continue
+				}
+			}
+		});
+	}
+	
+	@Override
+	public ListTask<Episode> getEpisodes(Program program) throws Exception {
+		return ListTask.of((task) -> {
+			URI baseURI = program.uri();
+			Document document = FastWeb.document(baseURI.resolve(baseURI.getPath() + "/video?page=1"));
+			EpisodesObtainStrategy strategy;
+			
+			// Obtain the range of available pages
+			int first = 1, last = 1;
+			Element elPagination = document.selectFirst(".pagination__pages");
+			if(elPagination != null) {
+				Element elPageFirst = elPagination.selectFirst("> :nth-child(2)");
+				Element elPageLast  = elPagination.selectFirst("> :nth-last-child(2)");
+				first = Optional.ofNullable(elPageFirst).map(Element::text).map(Integer::valueOf).orElse(-1);
+				last  = Optional.ofNullable(elPageLast) .map(Element::text).map(Integer::valueOf).orElse(-1);
+				if(first < 0) first = 1;
+				if(last  < 0) last  = first;
 			}
 			
-			if(query != null) {
-				boolean tryDayBefore = false;
-				do {
-					// Construct the query URL for searching the term
-					URI requestURI = Utils.uri(Utils.format(queryURL, "query", JavaScript.encodeURIComponent(query)));
-					HttpResponse<String> response = FastWeb.getRequest(requestURI, Map.of());
-					Document searchDocument = Utils.parseDocument(response.body(), response.uri());
-					boolean isSearchPage = true;
-					
-					// If a consent page is shown, automatically bypass it
-					if(response.uri().getHost().equals("consent.youtube.com")) {
-						isSearchPage = false;
+			final int maxNumOfPagesToGetAll = 5;
+			if(last - first >= maxNumOfPagesToGetAll) {
+				final int minPage = first, maxPage = last;
+				strategy = FXUtils.fxTaskValue(() -> (new EpisodesObtainStrategyDialog(program, minPage, maxPage, document))
+				                                         .showAndWait())
+						          .orElse(null);
+			} else {
+				strategy = new PageRangeEpisodesObtainStrategy(program, first + 1, last, document);
+			}
+			
+			// If the strategy chooser dialog was closed, do not continue
+			if(strategy == null) {
+				return;
+			}
+			
+			// Run the strategy and obtain all episodes based on the user's selection
+			strategy.obtain(task);
+		});
+	}
+	
+	@Override
+	public ListTask<Media> getMedia(URI uri, Map<String, Object> data) throws Exception {
+		return ListTask.of((task) -> {
+			// Try to log in to the user's account, if the details are present
+			if(Authenticator.areLoginDetailsPresent() && !Authenticator.authenticate()) {
+				throw new IllegalStateException("Unable to log in to the account");
+			}
+			
+			Document document = FastWeb.document(uri);
+			URI uriToProcess = null;
+			
+			// Check whether we've been redirected to the Premium Archive information page
+			if(Utils.uri(document.baseUri()).getPath().startsWith("/premiovy-archiv")) {
+				// Some videos are marked as premium but are actually available on YouTube,
+				// try to search for them on the official YouTube channel.
+				String queryURL = "https://www.youtube.com/c/TelevizeBarrandovOfficial/search?query=%{query}s";
+				String query = null, programName = null, dateString = null;
+				
+				Regex regex = Regex.of("^/video/\\d+((?:-[^-]+)+)-(\\d{1,2})-(\\d{1,2})-(\\d{4})$");
+				Matcher matcher = regex.matcher(uri.getPath());
+				if(matcher.matches()) {
+					programName = Utils.titlize(matcher.group(1).substring(1));
+					int day = Integer.valueOf(matcher.group(2));
+					int month = Integer.valueOf(matcher.group(3));
+					int year = Integer.valueOf(matcher.group(4));
+					dateString = String.format("%02d.%02d.%04d", day, month, year);
+					query = String.format("%s %s", programName, dateString);
+				}
+				
+				if(query != null) {
+					boolean tryDayBefore = false;
+					do {
+						// Construct the query URL for searching the term
+						URI requestURI = Utils.uri(Utils.format(queryURL, "query", JavaScript.encodeURIComponent(query)));
+						HttpResponse<String> response = FastWeb.getRequest(requestURI, Map.of());
+						Document searchDocument = Utils.parseDocument(response.body(), response.uri());
+						boolean isSearchPage = true;
 						
-						Element elMeta = searchDocument.selectFirst("noscript > meta");
-						URI consentURI = Utils.uri(Utils.unquote(elMeta.attr("content").split(";", 2)[1].split("=", 2)[1]));
-						Document consentDocument = FastWeb.document(consentURI, Map.of());
-						Map<String, Object> args = new LinkedHashMap<>();
-						
-						forms:
-						for(Element elForm : consentDocument.select(".saveButtonContainer form")) {
-							boolean eom = false;
+						// If a consent page is shown, automatically bypass it
+						if(response.uri().getHost().equals("consent.youtube.com")) {
+							isSearchPage = false;
 							
-							// Parse all hidden inputs of the form
-							for(Element elInput : elForm.select("input[type='hidden']")) {
-								String name = elInput.attr("name");
-								String value = elInput.attr("value");
-								
-								if(name.equals("set_eom")) {
-									if(!value.equals("true")) {
-	    								// Wrong form, reset
-	    								args.clear();
-	    								continue forms;
-									}
-									eom = true;
-								}
-								
-								args.put(name, value);
-							}
+							Element elMeta = searchDocument.selectFirst("noscript > meta");
+							URI consentURI = Utils.uri(Utils.unquote(elMeta.attr("content").split(";", 2)[1].split("=", 2)[1]));
+							Document consentDocument = FastWeb.document(consentURI, Map.of());
+							Map<String, Object> args = new LinkedHashMap<>();
 							
-							// Found the correct form, exit
-							if(eom) break;
-						}
-						
-						Map<String, String> headers = Map.of(
-							"Content-Type", "application/x-www-form-urlencoded",
-							"Referer", consentURI.toString()
-						);
-						
-						URI postURI = Utils.uri("https://consent.youtube.com/save");
-						response = FastWeb.postRequest(postURI, headers, args);
-						
-						// Retry the previous search request but now with rejecting the consent
-						response = FastWeb.getRequest(requestURI, Map.of());
-						searchDocument = Utils.parseDocument(response.body(), response.uri());
-						isSearchPage = !response.uri().getHost().equals("consent.youtube.com");
-					}
-					
-					if(isSearchPage) {
-						programName = programName.toLowerCase();
-						
-						// Find the initial page data where there are the first search results
-						for(Element elScript : searchDocument.select("script")) {
-							String content = elScript.html();
-							int index;
-							if((index = content.indexOf("ytInitialData = {")) >= 0) {
-								content = Utils.bracketSubstring(content, '{', '}', false, index, content.length());
-								SSDCollection data = JavaScript.readObject(content);
+							forms:
+							for(Element elForm : consentDocument.select(".saveButtonContainer form")) {
+								boolean eom = false;
 								
-								SSDCollection tabs = data.getCollection("contents.twoColumnBrowseResultsRenderer.tabs");
-								SSDCollection searchTab = tabs.getDirectCollection("" + (tabs.length() - 1));
-								SSDCollection searchContent = searchTab.collectionsIterator().next()
-										.getDirectCollection("content").collectionsIterator().next()
-										.getDirectCollection("contents");
-								
-								for(SSDCollection searchItem : searchContent.collectionsIterable()) {
-									SSDCollection itemData = searchItem.collectionsIterator().next()
-										.getCollection("contents.0.videoRenderer", null);
-									if(itemData == null) continue; // Invalid item, skip it
+								// Parse all hidden inputs of the form
+								for(Element elInput : elForm.select("input[type='hidden']")) {
+									String name = elInput.attr("name");
+									String value = elInput.attr("value");
 									
-									String videoId = itemData.getDirectString("videoId");
-									String title = itemData.getString("title.runs.0.text").toLowerCase();
-									// Choose the result we want, it should at least contain the required
-									// words, i.e. program name and the date string.
-									if(Regex.of("(?U)\\b" + Regex.quote(programName) + "\\b").matcher(title).find()
-											&& Regex.of("(?U)\\b" + Regex.quote(dateString) + "\\b").matcher(title).find()) {
-										uriToProcess = Utils.uri("https://www.youtube.com/watch?v=" + videoId);
-										// Video found, do not continue
-										break;
+									if(name.equals("set_eom")) {
+										if(!value.equals("true")) {
+		    								// Wrong form, reset
+		    								args.clear();
+		    								continue forms;
+										}
+										eom = true;
 									}
+									
+									args.put(name, value);
 								}
 								
-								// Obtained the needed initial data, do not continue
-								break;
+								// Found the correct form, exit
+								if(eom) break;
+							}
+							
+							Map<String, String> headers = Map.of(
+								"Content-Type", "application/x-www-form-urlencoded",
+								"Referer", consentURI.toString()
+							);
+							
+							URI postURI = Utils.uri("https://consent.youtube.com/save");
+							response = FastWeb.postRequest(postURI, headers, args);
+							
+							// Retry the previous search request but now with rejecting the consent
+							response = FastWeb.getRequest(requestURI, Map.of());
+							searchDocument = Utils.parseDocument(response.body(), response.uri());
+							isSearchPage = !response.uri().getHost().equals("consent.youtube.com");
+						}
+						
+						if(isSearchPage) {
+							programName = programName.toLowerCase();
+							
+							// Find the initial page data where there are the first search results
+							for(Element elScript : searchDocument.select("script")) {
+								String content = elScript.html();
+								int index;
+								if((index = content.indexOf("ytInitialData = {")) >= 0) {
+									content = Utils.bracketSubstring(content, '{', '}', false, index, content.length());
+									SSDCollection json = JavaScript.readObject(content);
+									
+									SSDCollection tabs = json.getCollection("contents.twoColumnBrowseResultsRenderer.tabs");
+									SSDCollection searchTab = tabs.getDirectCollection("" + (tabs.length() - 1));
+									SSDCollection searchContent = searchTab.collectionsIterator().next()
+											.getDirectCollection("content").collectionsIterator().next()
+											.getDirectCollection("contents");
+									
+									for(SSDCollection searchItem : searchContent.collectionsIterable()) {
+										SSDCollection itemData = searchItem.collectionsIterator().next()
+											.getCollection("contents.0.videoRenderer", null);
+										if(itemData == null) continue; // Invalid item, skip it
+										
+										String videoId = itemData.getDirectString("videoId");
+										String title = itemData.getString("title.runs.0.text").toLowerCase();
+										// Choose the result we want, it should at least contain the required
+										// words, i.e. program name and the date string.
+										if(Regex.of("(?U)\\b" + Regex.quote(programName) + "\\b").matcher(title).find()
+												&& Regex.of("(?U)\\b" + Regex.quote(dateString) + "\\b").matcher(title).find()) {
+											uriToProcess = Utils.uri("https://www.youtube.com/watch?v=" + videoId);
+											// Video found, do not continue
+											break;
+										}
+									}
+									
+									// Obtained the needed initial data, do not continue
+									break;
+								}
 							}
 						}
-					}
-					
-					// Also some videos are actually linked on the website twice, since some of them
-					// are just a replay. Try to get a video from the day before.
-					if(uriToProcess == null && !tryDayBefore) {
-						DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd.MM.yyyy");
-						dateString = LocalDate.parse(dateString, formatter).plusDays(-1L).format(formatter);
-						tryDayBefore = true;
-					} else if(tryDayBefore) {
-						tryDayBefore = false; // Must reset the flag, if set
-					}
-				} while(tryDayBefore);
-			}
-		}
-		
-		MediaSource source = MediaSource.of(this);
-		Element elVideo;
-		
-		if((elVideo = document.selectFirst(".main video")) != null) { // Local video
-			String programName = "";
-			String episodeName = "";
-			double duration = MediaConstants.UNKNOWN_DURATION;
-			
-			// Video metadata are contained in a script tag and variable of name 'metadataObjectContent'
-			for(Element elScript : document.select("script")) {
-				String content = elScript.html();
-				int index = content.indexOf("metadataObjectContent = {");
-				if(index >= 0) {
-					// Extract the content of JavaScript object
-					content = Utils.bracketSubstring(content, '{', '}', false, index, content.length());
-					// JSON cannot be parsed with comments, so remove them
-					content = JSONUtils.removeComments(content);
-					
-					// Parse the content of the JavaScript object
-					SSDCollection json = JSON.read(content);
-					duration = Double.valueOf(json.getDirectString("length", "-1.0"));
-					programName = json.getDirectString("program", "");
-					episodeName = json.getDirectString("title", "");
-					
-					// Some videos can have the exactly same name, we don't want double name in the media title
-					if(programName.equalsIgnoreCase(episodeName))
-						episodeName = "";
-					
-					// Add information about airdate since almost all videos have that
-					String airdate = json.getDirectString("airdate", "");
-					if(!airdate.isEmpty()) {
-						DateTimeFormatter formatterParse = DateTimeFormatter.ofPattern("yyyyMMdd HH:mm:ss");
-						DateTimeFormatter formatterFormat = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm:ss");
-						airdate = formatterFormat.format(formatterParse.parse(airdate));
 						
-						boolean hasEpisodeName = !episodeName.isEmpty();
-						episodeName += (hasEpisodeName ? " (" : "") + airdate + (hasEpisodeName ? ")" : "");
-					}
-					
-					// All data obtained, do no continue
-					break;
+						// Also some videos are actually linked on the website twice, since some of them
+						// are just a replay. Try to get a video from the day before.
+						if(uriToProcess == null && !tryDayBefore) {
+							DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd.MM.yyyy");
+							dateString = LocalDate.parse(dateString, formatter).plusDays(-1L).format(formatter);
+							tryDayBefore = true;
+						} else if(tryDayBefore) {
+							tryDayBefore = false; // Must reset the flag, if set
+						}
+					} while(tryDayBefore);
 				}
 			}
 			
-			// Construct the video media title using user's chosen media title format
-			String mediaTitle = MediaUtils.mediaTitle(programName, -1, -1, episodeName);
-			MediaMetadata metadata = MediaMetadata.builder().sourceURI(url).title(mediaTitle).build();
+			MediaSource source = MediaSource.of(this);
+			Element elVideo;
 			
-			for(Element elSource : elVideo.select("source")) {
-				String src = elSource.absUrl("src");
-				String res = elSource.attr("res") + 'p';
-				String type = elSource.attr("type");
+			if((elVideo = document.selectFirst(".main video")) != null) { // Local video
+				String programName = "";
+				String episodeName = "";
+				double duration = MediaConstants.UNKNOWN_DURATION;
 				
-				Media media = VideoMedia.simple().source(source)
-						.uri(Utils.uri(src))
-						.format(MediaFormat.fromMimeType(type))
-						.quality(MediaQuality.fromString(res, MediaType.VIDEO))
-						.duration(duration)
-						.metadata(metadata)
-						.build();
+				// Video metadata are contained in a script tag and variable of name 'metadataObjectContent'
+				for(Element elScript : document.select("script")) {
+					String content = elScript.html();
+					int index = content.indexOf("metadataObjectContent = {");
+					if(index >= 0) {
+						// Extract the content of JavaScript object
+						content = Utils.bracketSubstring(content, '{', '}', false, index, content.length());
+						// JSON cannot be parsed with comments, so remove them
+						content = JSONUtils.removeComments(content);
+						
+						// Parse the content of the JavaScript object
+						SSDCollection json = JSON.read(content);
+						duration = Double.valueOf(json.getDirectString("length", "-1.0"));
+						programName = json.getDirectString("program", "");
+						episodeName = json.getDirectString("title", "");
+						
+						// Some videos can have the exactly same name, we don't want double name in the media title
+						if(programName.equalsIgnoreCase(episodeName))
+							episodeName = "";
+						
+						// Add information about airdate since almost all videos have that
+						String airdate = json.getDirectString("airdate", "");
+						if(!airdate.isEmpty()) {
+							DateTimeFormatter formatterParse = DateTimeFormatter.ofPattern("yyyyMMdd HH:mm:ss");
+							DateTimeFormatter formatterFormat = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm:ss");
+							airdate = formatterFormat.format(formatterParse.parse(airdate));
+							
+							boolean hasEpisodeName = !episodeName.isEmpty();
+							episodeName += (hasEpisodeName ? " (" : "") + airdate + (hasEpisodeName ? ")" : "");
+						}
+						
+						// All data obtained, do no continue
+						break;
+					}
+				}
 				
-				sources.add(media);
-				if(!function.apply(proxy, media))
-					return null;
+				// Construct the video media title using user's chosen media title format
+				String mediaTitle = MediaUtils.mediaTitle(programName, -1, -1, episodeName);
+				MediaMetadata metadata = MediaMetadata.builder().sourceURI(uri).title(mediaTitle).build();
+				
+				for(Element elSource : elVideo.select("source")) {
+					String src = elSource.absUrl("src");
+					String res = elSource.attr("res") + 'p';
+					String type = elSource.attr("type");
+					
+					Media media = VideoMedia.simple().source(source)
+							.uri(Utils.uri(src))
+							.format(MediaFormat.fromMimeType(type))
+							.quality(MediaQuality.fromString(res, MediaType.VIDEO))
+							.duration(duration)
+							.metadata(metadata)
+							.build();
+					
+					if(!task.add(media)) {
+						return;
+					}
+				}
+			} else if((elVideo = document.selectFirst(".video-responsive > iframe")) != null) { // Embedded video
+				uriToProcess = Utils.uri(elVideo.attr("src"));
 			}
-		} else if((elVideo = document.selectFirst(".video-responsive > iframe")) != null) { // Embedded video
-			uriToProcess = Utils.uri(elVideo.attr("src"));
-		}
-		
-		// Check if any URI needs to be processed (used for embedded and searched videos)
-		if(uriToProcess != null) {
-			// Embedded videos are mostly from YouTube, so if the YouTube plugin is present and active,
-			// this should work.
-			MediaGetter getter;
-			if((getter = MediaGetters.fromURL(uriToProcess.toString())) != null) {
-				WorkerUpdatableTask<CheckedBiFunction<WorkerProxy, Media, Boolean>, Void> task
-					= getter.getMedia(uriToProcess, Map.of(), (p, media) -> sources.add(media) && function.apply(p, media));
-				// Run the task. Must be canceled afterwards, otherwise it will run in the background.
-				try { task.startAndWaitChecked(); } finally { task.cancel(); }
+			
+			// Check if any URI needs to be processed (used for embedded and searched videos)
+			if(uriToProcess != null) {
+				// Embedded videos are mostly from YouTube, so if the YouTube plugin is present and active,
+				// this should work.
+				MediaGetter getter;
+				if((getter = MediaGetters.fromURI(uriToProcess)) != null) {
+					ListTask<Media> t = getter.getMedia(uriToProcess, Map.of());
+					t.forwardAdd(task);
+					t.startAndWait();
+				}
 			}
-		}
-		
-		return sources;
-	}
-	
-	private final List<Media> internal_getMedia(Episode episode) throws Exception {
-		return internal_getMedia(episode, _dwp, (p, a) -> true);
-	}
-	
-	private final List<Media> internal_getMedia(Episode episode, WorkerProxy proxy,
-			CheckedBiFunction<WorkerProxy, Media, Boolean> function) throws Exception {
-		return internal_getMedia(episode.uri().toString(), proxy, function);
-	}
-	
-	// -----
-	
-	@Override
-	public List<Program> getPrograms() throws Exception {
-		return internal_getPrograms();
-	}
-	
-	@Override
-	public List<Episode> getEpisodes(Program program) throws Exception {
-		return internal_getEpisodes(program);
-	}
-	
-	@Override
-	public List<Media> getMedia(Episode episode) throws Exception {
-		return internal_getMedia(episode);
-	}
-	
-	@Override
-	public WorkerUpdatableTask<CheckedBiFunction<WorkerProxy, Program, Boolean>, Void> getPrograms
-			(CheckedBiFunction<WorkerProxy, Program, Boolean> function) {
-		return WorkerUpdatableTask.voidTaskChecked(function, (p, f) -> internal_getPrograms(p, f));
-	}
-	
-	@Override
-	public WorkerUpdatableTask<CheckedBiFunction<WorkerProxy, Episode, Boolean>, Void> getEpisodes
-			(Program program,
-			 CheckedBiFunction<WorkerProxy, Episode, Boolean> function) {
-		return WorkerUpdatableTask.voidTaskChecked(function, (p, f) -> internal_getEpisodes(program, p, f));
-	}
-	
-	@Override
-	public WorkerUpdatableTask<CheckedBiFunction<WorkerProxy, Media, Boolean>, Void> getMedia
-			(Episode episode,
-			 CheckedBiFunction<WorkerProxy, Media, Boolean> function) {
-		return WorkerUpdatableTask.voidTaskChecked(function, (p, c) -> internal_getMedia(episode, p, c));
-	}
-	
-	@Override
-	public List<Media> getMedia(URI uri, Map<String, Object> data) throws Exception {
-		return internal_getMedia(uri.toString());
+		});
 	}
 	
 	@Override
@@ -501,15 +428,14 @@ public final class TVBarrandovEngine implements MediaEngine {
 	}
 	
 	@Override
-	public boolean isCompatibleURL(String url) {
-		URL urlObj = Utils.url(url);
+	public boolean isCompatibleURI(URI uri) {
 		// Check the protocol
-		String protocol = urlObj.getProtocol();
+		String protocol = uri.getScheme();
 		if(!protocol.equals("http") &&
 		   !protocol.equals("https"))
 			return false;
 		// Check the host
-		String host = urlObj.getHost();
+		String host = uri.getHost();
 		if((host.startsWith("www."))) // www prefix
 			host = host.substring(4);
 		if(!host.equals("barrandov.tv"))
@@ -556,8 +482,7 @@ public final class TVBarrandovEngine implements MediaEngine {
 			this.program = Objects.requireNonNull(program);
 		}
 		
-		public abstract void obtain(List<Episode> episodes, WorkerProxy proxy,
-			CheckedBiFunction<WorkerProxy, Episode, Boolean> function) throws Exception;
+		public abstract void obtain(ListTask<Episode> task) throws Exception;
 	}
 	
 	private static final class DateRangeEpisodesObtainStrategy extends EpisodesObtainStrategy {
@@ -572,8 +497,7 @@ public final class TVBarrandovEngine implements MediaEngine {
 		}
 		
 		@Override
-		public void obtain(List<Episode> episodes, WorkerProxy proxy,
-				CheckedBiFunction<WorkerProxy, Episode, Boolean> function) throws Exception {
+		public void obtain(ListTask<Episode> task) throws Exception {
 			URI baseURI = program.uri();
 			
 			for(LocalDateTime i = from.atStartOfDay(), t = to.atStartOfDay();
@@ -581,7 +505,7 @@ public final class TVBarrandovEngine implements MediaEngine {
 					i = i.plusDays(1L)) {
 				long seconds = i.toEpochSecond(ZoneOffset.UTC);
 				Document doc = FastWeb.document(baseURI.resolve(baseURI.getPath() + "/video?showDay=" + seconds));
-				if(!parseEpisodesPage(program, episodes, doc, proxy, function))
+				if(!parseEpisodesPage(task, program, doc))
 					return; // Aborted, do not continue
 			}
 		}
@@ -607,13 +531,12 @@ public final class TVBarrandovEngine implements MediaEngine {
 		}
 		
 		@Override
-		public void obtain(List<Episode> episodes, WorkerProxy proxy,
-				CheckedBiFunction<WorkerProxy, Episode, Boolean> function) throws Exception {
+		public void obtain(ListTask<Episode> task) throws Exception {
 			URI baseURI = program.uri();
 			
 			// Parse the first episodes page, if already obtained
 			if(firstDocument != null
-					&& !parseEpisodesPage(program, episodes, firstDocument, proxy, function))
+					&& !parseEpisodesPage(task, program, firstDocument))
 				return; // Aborted, do not continue
 			
 			// This is probably the fastest way to iterate through all TV Barrandov's episodes pages,
@@ -621,7 +544,7 @@ public final class TVBarrandovEngine implements MediaEngine {
 			// As far as I know, there is no API to return all episodes at once.
 			for(int i = from; i <= to; ++i) {
 				Document doc = FastWeb.document(baseURI.resolve(baseURI.getPath() + "/video?page=" + i));
-				if(!parseEpisodesPage(program, episodes, doc, proxy, function))
+				if(!parseEpisodesPage(task, program, doc))
 					return; // Aborted, do not continue
 			}
 		}

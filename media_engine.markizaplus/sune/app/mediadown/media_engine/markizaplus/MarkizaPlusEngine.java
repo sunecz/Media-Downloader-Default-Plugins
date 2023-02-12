@@ -2,8 +2,6 @@ package sune.app.mediadown.media_engine.markizaplus;
 
 import java.net.SocketTimeoutException;
 import java.net.URI;
-import java.net.URL;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -19,8 +17,7 @@ import javafx.scene.image.Image;
 import sune.app.mediadown.Episode;
 import sune.app.mediadown.Program;
 import sune.app.mediadown.Shared;
-import sune.app.mediadown.concurrent.WorkerProxy;
-import sune.app.mediadown.concurrent.WorkerUpdatableTask;
+import sune.app.mediadown.concurrent.ListTask;
 import sune.app.mediadown.engine.MediaEngine;
 import sune.app.mediadown.media.Media;
 import sune.app.mediadown.media.MediaFormat;
@@ -30,7 +27,6 @@ import sune.app.mediadown.media.MediaSource;
 import sune.app.mediadown.media.MediaUtils;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
-import sune.app.mediadown.util.CheckedBiFunction;
 import sune.app.mediadown.util.JavaScript;
 import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
@@ -74,15 +70,12 @@ public final class MarkizaPlusEngine implements MediaEngine {
 			+ "%{excluded}s";
 	}
 	
-	private final WorkerProxy _dwp = WorkerProxy.defaultProxy();
-	
 	// Allow to create an instance when registering the engine
 	MarkizaPlusEngine() {
 	}
 	
-	private final int parseEpisodeList(Program program, List<Episode> episodes, Elements elItems,
-			boolean onlyFullEpisodes, WorkerProxy proxy,
-			CheckedBiFunction<WorkerProxy, Episode, Boolean> function) throws Exception {
+	private final int parseEpisodeList(ListTask<Episode> task, Program program, Elements elItems,
+			boolean onlyFullEpisodes) throws Exception {
 		int counter = 0;
 		
 		for(Element elItem : elItems) {
@@ -100,9 +93,10 @@ public final class MarkizaPlusEngine implements MediaEngine {
 				String episodeURL = elLink.absUrl("href");
 				String episodeName = elLink.text();
 				Episode episode = new Episode(program, Utils.uri(episodeURL), Utils.validateFileName(episodeName));
-				episodes.add(episode);
-				if(!function.apply(proxy, episode))
+				
+				if(!task.add(episode)) {
 					return 2; // Do not continue
+				}
 			}
 		}
 		
@@ -110,13 +104,12 @@ public final class MarkizaPlusEngine implements MediaEngine {
 		return counter == elItems.size() ? 1 : 0;
 	}
 	
-	private final int parseEpisodesPage(Program program, List<Episode> episodes, Document document,
-			boolean onlyFullEpisodes, WorkerProxy proxy,
-			CheckedBiFunction<WorkerProxy, Episode, Boolean> function) throws Exception {
+	private final int parseEpisodesPage(ListTask<Episode> task, Program program, Document document,
+			boolean onlyFullEpisodes) throws Exception {
 		// Always obtain the first page from the document's content
 		Elements elItems = document.select(SEL_EPISODES);
 		if(elItems != null
-				&& parseEpisodeList(program, episodes, elItems, onlyFullEpisodes, proxy, function) == 2) {
+				&& parseEpisodeList(task, program, elItems, onlyFullEpisodes) == 2) {
 			return 1; // Do not continue
 		}
 		
@@ -184,7 +177,7 @@ public final class MarkizaPlusEngine implements MediaEngine {
 			
 			offset += itemsPerPage;
 		} while(elItems != null
-					&& parseEpisodeList(program, episodes, elItems, onlyFullEpisodes, proxy, function) == 0);
+					&& parseEpisodeList(task, program, elItems, onlyFullEpisodes) == 0);
 		
 		return 0;
 	}
@@ -250,174 +243,106 @@ public final class MarkizaPlusEngine implements MediaEngine {
 		return MediaUtils.mediaTitle(programName, numSeason, numEpisode, episodeName);
 	}
 	
-	// ----- Internal methods
-	
-	private final List<Program> internal_getPrograms() throws Exception {
-		return internal_getPrograms(_dwp, (p, a) -> true);
-	}
-	
-	private final List<Program> internal_getPrograms(WorkerProxy proxy,
-			CheckedBiFunction<WorkerProxy, Program, Boolean> function) throws Exception {
-		List<Program> programs = new ArrayList<>();
-		
-		Document document = Utils.document(URL_PROGRAMS);
-		for(Element elProgram : document.select(SEL_PROGRAMS)) {
-			String programURL = elProgram.absUrl("href");
-			String programTitle = elProgram.selectFirst("h3").text();
-			Program program = new Program(Utils.uri(programURL), programTitle);
+	@Override
+	public ListTask<Program> getPrograms() throws Exception {
+		return ListTask.of((task) -> {
+			Document document = Utils.document(URL_PROGRAMS);
 			
-			programs.add(program);
-			if(!function.apply(proxy, program)) {
-				return null; // Do not continue
+			for(Element elProgram : document.select(SEL_PROGRAMS)) {
+				String programURL = elProgram.absUrl("href");
+				String programTitle = elProgram.selectFirst("h3").text();
+				Program program = new Program(Utils.uri(programURL), programTitle);
+				
+				if(!task.add(program)) {
+					return; // Do not continue
+				}
 			}
-		}
-		
-		return programs;
+		});
 	}
 	
-	private final List<Episode> internal_getEpisodes(Program program) throws Exception {
-		return internal_getEpisodes(program, _dwp, (p, a) -> true);
-	}
-	
-	private final List<Episode> internal_getEpisodes(Program program, WorkerProxy proxy,
-			CheckedBiFunction<WorkerProxy, Episode, Boolean> function) throws Exception {
-		List<Episode> episodes = new ArrayList<>();
-		
-		for(String urlPath : List.of("videa/cele-epizody")) {
-			URI uri = Utils.uri(Utils.urlConcat(program.uri().toString(), urlPath));
-			
-			StringResponse response = Web.request(new GetRequest(Utils.url(uri), Shared.USER_AGENT));
-			if(response.code != 200) continue; // Probably does not exist, ignore
-			
-			Document document = Utils.parseDocument(response.content, uri);
-			if(parseEpisodesPage(program, episodes, document, false, proxy, function) != 0)
-				return null;
-		}
-		
-		// If no episodes were found, try to obtain them from the All videos page.
-		if(episodes.isEmpty()) {
-			URI uri = Utils.uri(Utils.urlConcat(program.uri().toString(), "videa"));
-			StringResponse response = Web.request(new GetRequest(Utils.url(uri), Shared.USER_AGENT));
-			
-			if(response.code == 200) {
+	@Override
+	public ListTask<Episode> getEpisodes(Program program) throws Exception {
+		return ListTask.of((task) -> {
+			for(String urlPath : List.of("videa/cele-epizody")) {
+				URI uri = Utils.uri(Utils.urlConcat(program.uri().toString(), urlPath));
+				
+				StringResponse response = Web.request(new GetRequest(Utils.url(uri), Shared.USER_AGENT));
+				if(response.code != 200) continue; // Probably does not exist, ignore
+				
 				Document document = Utils.parseDocument(response.content, uri);
-				
-				if(parseEpisodesPage(program, episodes, document, true, proxy, function) != 0)
-					return null;
+				if(parseEpisodesPage(task, program, document, false) != 0) {
+					return;
+				}
 			}
-		}
-		
-		return episodes;
-	}
-	
-	private final List<Media> internal_getMedia(String url) throws Exception {
-		return internal_getMedia(url, _dwp, (p, a) -> true);
-	}
-	
-	private final List<Media> internal_getMedia(String url, WorkerProxy proxy,
-			CheckedBiFunction<WorkerProxy, Media, Boolean> function) throws Exception {
-		List<Media> sources = new ArrayList<>();
-		Document document = Utils.document(url);
-		Element iframe = document.selectFirst(SEL_PLAYER_IFRAME);
-		
-		if(iframe == null) {
-			return null;
-		}
-		
-		String iframeUrl = iframe.absUrl("data-src");
-		String content = Web.request(new GetRequest(Utils.url(iframeUrl), Shared.USER_AGENT)).content;
-		
-		if(content != null && !content.isEmpty()) {
-			int begin = content.indexOf(TXT_PLAYER_CONFIG_BEGIN) + TXT_PLAYER_CONFIG_BEGIN.length() - 1;
-			String conScript = Utils.bracketSubstring(content, '(', ')', false, begin, content.length());
-			conScript = Utils.bracketSubstring(conScript, '{', '}', false, conScript.indexOf('{', 1), conScript.length());
 			
-			if(!conScript.isEmpty()) {
-				SSDCollection scriptData = JavaScript.readObject(conScript);
+			// If no episodes were found, try to obtain them from the All videos page.
+			if(task.isEmpty()) {
+				URI uri = Utils.uri(Utils.urlConcat(program.uri().toString(), "videa"));
+				StringResponse response = Web.request(new GetRequest(Utils.url(uri), Shared.USER_AGENT));
 				
-				if(scriptData != null) {
-					SSDCollection tracks = scriptData.getCollection("tracks");
-					URI sourceUri = Utils.uri(url);
-					MediaSource source = MediaSource.of(this);
+				if(response.code == 200) {
+					Document document = Utils.parseDocument(response.content, uri);
 					
-					for(SSDCollection node : tracks.collectionsIterable()) {
-						MediaFormat format = MediaFormat.fromName(node.getName());
+					if(parseEpisodesPage(task, program, document, true) != 0) {
+						return;
+					}
+				}
+			}
+		});
+	}
+	
+	@Override
+	public ListTask<Media> getMedia(URI uri, Map<String, Object> data) throws Exception {
+		return ListTask.of((task) -> {
+			Document document = Utils.document(uri);
+			Element iframe = document.selectFirst(SEL_PLAYER_IFRAME);
+			
+			if(iframe == null) {
+				return;
+			}
+			
+			String iframeUrl = iframe.absUrl("data-src");
+			String content = Web.request(new GetRequest(Utils.url(iframeUrl), Shared.USER_AGENT)).content;
+			
+			if(content != null && !content.isEmpty()) {
+				int begin = content.indexOf(TXT_PLAYER_CONFIG_BEGIN) + TXT_PLAYER_CONFIG_BEGIN.length() - 1;
+				String conScript = Utils.bracketSubstring(content, '(', ')', false, begin, content.length());
+				conScript = Utils.bracketSubstring(conScript, '{', '}', false, conScript.indexOf('{', 1), conScript.length());
+				
+				if(!conScript.isEmpty()) {
+					SSDCollection scriptData = JavaScript.readObject(conScript);
+					
+					if(scriptData != null) {
+						SSDCollection tracks = scriptData.getCollection("tracks");
+						URI sourceUri = uri;
+						MediaSource source = MediaSource.of(this);
 						
-						for(SSDCollection coll : ((SSDCollection) node).collectionsIterable()) {
-							String videoUrl = coll.getDirectString("src");
+						for(SSDCollection node : tracks.collectionsIterable()) {
+							MediaFormat format = MediaFormat.fromName(node.getName());
 							
-							if(format == MediaFormat.UNKNOWN) {
-								format = MediaFormat.fromPath(videoUrl);
-							}
-							
-							MediaLanguage language = MediaLanguage.ofCode(coll.getDirectString("lang"));
-							String title = mediaTitle(scriptData.getCollection("plugins.measuring.streamInfo"), document);
-							List<Media> media = MediaUtils.createMedia(source, Utils.uri(videoUrl), sourceUri,
-								title, language, MediaMetadata.empty());
-							
-							for(Media m : media) {
-								sources.add(m);
-								if(!function.apply(proxy, m))
-									return null; // Do not continue
+							for(SSDCollection coll : ((SSDCollection) node).collectionsIterable()) {
+								String videoUrl = coll.getDirectString("src");
+								
+								if(format == MediaFormat.UNKNOWN) {
+									format = MediaFormat.fromPath(videoUrl);
+								}
+								
+								MediaLanguage language = MediaLanguage.ofCode(coll.getDirectString("lang"));
+								String title = mediaTitle(scriptData.getCollection("plugins.measuring.streamInfo"), document);
+								List<Media> media = MediaUtils.createMedia(source, Utils.uri(videoUrl), sourceUri,
+									title, language, MediaMetadata.empty());
+								
+								for(Media m : media) {
+									if(!task.add(m)) {
+										return; // Do not continue
+									}
+								}
 							}
 						}
 					}
 				}
 			}
-		}
-		
-		return sources;
-	}
-	
-	private final List<Media> internal_getMedia(Episode episode) throws Exception {
-		return internal_getMedia(episode, _dwp, (p, a) -> true);
-	}
-	
-	private final List<Media> internal_getMedia(Episode episode, WorkerProxy proxy,
-			CheckedBiFunction<WorkerProxy, Media, Boolean> function) throws Exception {
-		return internal_getMedia(episode.uri().toString(), proxy, function);
-	}
-	
-	// -----
-	
-	@Override
-	public List<Program> getPrograms() throws Exception {
-		return internal_getPrograms();
-	}
-	
-	@Override
-	public List<Episode> getEpisodes(Program program) throws Exception {
-		return internal_getEpisodes(program);
-	}
-	
-	@Override
-	public List<Media> getMedia(Episode episode) throws Exception {
-		return internal_getMedia(episode);
-	}
-	
-	@Override
-	public WorkerUpdatableTask<CheckedBiFunction<WorkerProxy, Program, Boolean>, Void> getPrograms
-			(CheckedBiFunction<WorkerProxy, Program, Boolean> function) {
-		return WorkerUpdatableTask.voidTaskChecked(function, (p, f) -> internal_getPrograms(p, f));
-	}
-	
-	@Override
-	public WorkerUpdatableTask<CheckedBiFunction<WorkerProxy, Episode, Boolean>, Void> getEpisodes
-			(Program program,
-			 CheckedBiFunction<WorkerProxy, Episode, Boolean> function) {
-		return WorkerUpdatableTask.voidTaskChecked(function, (p, f) -> internal_getEpisodes(program, p, f));
-	}
-	
-	@Override
-	public WorkerUpdatableTask<CheckedBiFunction<WorkerProxy, Media, Boolean>, Void> getMedia
-			(Episode episode,
-			 CheckedBiFunction<WorkerProxy, Media, Boolean> function) {
-		return WorkerUpdatableTask.voidTaskChecked(function, (p, c) -> internal_getMedia(episode, p, c));
-	}
-	
-	@Override
-	public List<Media> getMedia(URI uri, Map<String, Object> data) throws Exception {
-		return internal_getMedia(uri.toString());
+		});
 	}
 	
 	@Override
@@ -426,15 +351,14 @@ public final class MarkizaPlusEngine implements MediaEngine {
 	}
 	
 	@Override
-	public boolean isCompatibleURL(String url) {
-		URL urlObj = Utils.url(url);
+	public boolean isCompatibleURI(URI uri) {
 		// Check the protocol
-		String protocol = urlObj.getProtocol();
+		String protocol = uri.getScheme();
 		if(!protocol.equals("http") &&
 		   !protocol.equals("https"))
 			return false;
 		// Check the host
-		String host = urlObj.getHost();
+		String host = uri.getHost();
 		if((host.startsWith("www."))) // www prefix
 			host = host.substring(4);
 		if(!host.equals("markiza.sk"))

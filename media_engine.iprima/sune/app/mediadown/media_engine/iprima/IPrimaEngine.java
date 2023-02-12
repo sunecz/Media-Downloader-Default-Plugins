@@ -1,9 +1,6 @@
 package sune.app.mediadown.media_engine.iprima;
 
 import java.net.URI;
-import java.net.URL;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentSkipListSet;
@@ -12,8 +9,8 @@ import java.util.stream.Stream;
 import javafx.scene.image.Image;
 import sune.app.mediadown.Episode;
 import sune.app.mediadown.Program;
-import sune.app.mediadown.concurrent.WorkerProxy;
-import sune.app.mediadown.concurrent.WorkerUpdatableTask;
+import sune.app.mediadown.concurrent.ListTask;
+import sune.app.mediadown.concurrent.ListTask.ListTaskEvent;
 import sune.app.mediadown.engine.MediaEngine;
 import sune.app.mediadown.media.Media;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper.ConcurrentLoop;
@@ -28,7 +25,6 @@ import sune.app.mediadown.media_engine.iprima.IPrimaHelper.StaticProgramObtainer
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper._Singleton;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
-import sune.app.mediadown.util.CheckedBiFunction;
 import sune.app.mediadown.util.Utils;
 
 public final class IPrimaEngine implements MediaEngine {
@@ -52,15 +48,14 @@ public final class IPrimaEngine implements MediaEngine {
 	IPrimaEngine() {
 	}
 	
-	private static final String subdomainOrNullIfIncompatible(String url) {
-		URL urlObj = Utils.url(url);
+	private static final String subdomainOrNullIfIncompatible(URI uri) {
 		// Check the protocol
-		String protocol = urlObj.getProtocol();
+		String protocol = uri.getScheme();
 		if(!protocol.equals("http") &&
 		   !protocol.equals("https"))
 			return null;
 		// Check the host
-		String[] hostParts = urlObj.getHost().split("\\.", 2);
+		String[] hostParts = uri.getHost().split("\\.", 2);
 		if(hostParts.length < 2
 				// Check only the second and top level domain names,
 				// since there are many subdomains, and there may be
@@ -72,125 +67,64 @@ public final class IPrimaEngine implements MediaEngine {
 		return hostParts[0];
 	}
 	
-	private static final IPrima sourceFromURL(String url) {
+	private static final IPrima sourceFromURL(URI uri) {
 		String subdomain;
-		if((subdomain = subdomainOrNullIfIncompatible(url)) == null)
+		if((subdomain = subdomainOrNullIfIncompatible(uri)) == null) {
 			return null;
+		}
 		
 		return Stream.of(SUPPORTED_WEBS)
 					.filter((w) -> w.isCompatibleSubdomain(subdomain))
 					.findFirst().orElse(null);
 	}
 	
-	// ----- Internal methods
-	
-	private final WorkerProxy _dwp = WorkerProxy.defaultProxy();
-	
-	private final List<Program> internal_getPrograms(WorkerProxy proxy,
-			CheckedBiFunction<WorkerProxy, Program, Boolean> function) throws Exception {
-		List<Program> programs = new ArrayList<>();
-		Set<ProgramWrapper> accumulator = new ConcurrentSkipListSet<>();
-		
-		CheckedBiFunction<WorkerProxy, Program, Boolean> f = ((p, program) -> {
-			return (accumulator.add(new ProgramWrapper(program)) && function.apply(p, program)) || true;
-		});
-		
-		(new ConcurrentLoop<IPrima>() {
-			
-			@Override
-			protected void iteration(IPrima web) throws Exception {
-				web.getPrograms(IPrimaEngine.this, proxy, f);
-			}
-		}).iterate(SUPPORTED_WEBS);
-		
-		accumulator.stream()
-			.map(ProgramWrapper::program)
-			.forEachOrdered(programs::add);
-		
-		return programs;
-	}
-	
-	private final List<Episode> internal_getEpisodes(Program program, WorkerProxy proxy,
-			CheckedBiFunction<WorkerProxy, Episode, Boolean> function) throws Exception {
-		IPrima iprima = program.get("source");
-		if(iprima == null)
-			throw new IllegalStateException("Invalid program, no source found");
-		return iprima.getEpisodes(this, program, proxy, function);
-	}
-	
-	private final List<Media> internal_getMedia(String url, WorkerProxy proxy,
-			CheckedBiFunction<WorkerProxy, Media, Boolean> function) throws Exception {
-		IPrima iprima = sourceFromURL(url);
-		if(iprima == null)
-			throw new IllegalStateException("Cannot obtain source from the URL");
-		return iprima.getMedia(this, url, proxy, function);
-	}
-	
 	private final boolean isCompatibleSubdomain(String subdomain) {
 		return Stream.of(SUPPORTED_WEBS).anyMatch((w) -> w.isCompatibleSubdomain(subdomain));
 	}
 	
-	private final List<Program> internal_getPrograms() throws Exception {
-		return internal_getPrograms(_dwp, (p, a) -> true);
-	}
-	
-	private final List<Episode> internal_getEpisodes(Program program) throws Exception {
-		return internal_getEpisodes(program, _dwp, (p, a) -> true);
-	}
-	
-	private final List<Media> internal_getMedia(Episode episode) throws Exception {
-		return internal_getMedia(episode, _dwp, (p, a) -> true);
-	}
-	
-	private final List<Media> internal_getMedia(Episode episode, WorkerProxy proxy,
-			CheckedBiFunction<WorkerProxy, Media, Boolean> function) throws Exception {
-		return internal_getMedia(episode.uri().toString(), proxy, function);
-	}
-	
-	private final List<Media> internal_getMedia(String url) throws Exception {
-		return internal_getMedia(url, _dwp, (p, a) -> true);
-	}
-	
-	// ----- Public methods
-	
 	@Override
-	public List<Program> getPrograms() throws Exception {
-		return internal_getPrograms();
+	public ListTask<Program> getPrograms() throws Exception {
+		return ListTask.of((task) -> {
+			Set<ProgramWrapper> accumulator = new ConcurrentSkipListSet<>();
+			
+			(new ConcurrentLoop<IPrima>() {
+				
+				@Override
+				protected void iteration(IPrima web) throws Exception {
+					ListTask<Program> t = web.getPrograms(IPrimaEngine.this);
+					t.addEventListener(ListTaskEvent.ITEM_ADDED, (p) -> accumulator.add(new ProgramWrapper(Utils.cast(p.b))));
+					t.startAndWait();
+				}
+			}).iterate(SUPPORTED_WEBS);
+			
+			for(ProgramWrapper wrapper : accumulator) {
+				if(!task.add(wrapper.program())) {
+					return;
+				}
+			}
+		});
 	}
 	
 	@Override
-	public List<Episode> getEpisodes(Program program) throws Exception {
-		return internal_getEpisodes(program);
+	public ListTask<Episode> getEpisodes(Program program) throws Exception {
+		IPrima iprima = program.get("source");
+		
+		if(iprima == null) {
+			throw new IllegalStateException("Invalid program, no source found");
+		}
+		
+		return iprima.getEpisodes(this, program);
 	}
 	
 	@Override
-	public List<Media> getMedia(Episode episode) throws Exception {
-		return internal_getMedia(episode);
-	}
-	
-	@Override
-	public WorkerUpdatableTask<CheckedBiFunction<WorkerProxy, Program, Boolean>, Void> getPrograms
-			(CheckedBiFunction<WorkerProxy, Program, Boolean> function) {
-		return WorkerUpdatableTask.voidTaskChecked(function, (p, f) -> internal_getPrograms(p, f));
-	}
-	
-	@Override
-	public WorkerUpdatableTask<CheckedBiFunction<WorkerProxy, Episode, Boolean>, Void> getEpisodes
-			(Program program,
-			 CheckedBiFunction<WorkerProxy, Episode, Boolean> function) {
-		return WorkerUpdatableTask.voidTaskChecked(function, (p, f) -> internal_getEpisodes(program, p, f));
-	}
-	
-	@Override
-	public WorkerUpdatableTask<CheckedBiFunction<WorkerProxy, Media, Boolean>, Void> getMedia
-			(Episode episode,
-			 CheckedBiFunction<WorkerProxy, Media, Boolean> function) {
-		return WorkerUpdatableTask.voidTaskChecked(function, (p, c) -> internal_getMedia(episode, p, c));
-	}
-	
-	@Override
-	public List<Media> getMedia(URI uri, Map<String, Object> data) throws Exception {
-		return internal_getMedia(uri.toString());
+	public ListTask<Media> getMedia(URI uri, Map<String, Object> data) throws Exception {
+		IPrima iprima = sourceFromURL(uri);
+		
+		if(iprima == null) {
+			throw new IllegalStateException("Cannot obtain source from the URL");
+		}
+		
+		return iprima.getMedia(this, uri);
 	}
 	
 	@Override
@@ -199,9 +133,10 @@ public final class IPrimaEngine implements MediaEngine {
 	}
 	
 	@Override
-	public boolean isCompatibleURL(String url) {
+	public boolean isCompatibleURI(URI uri) {
 		String subdomain;
-		return (subdomain = subdomainOrNullIfIncompatible(url)) != null && isCompatibleSubdomain(subdomain);
+		return (subdomain = subdomainOrNullIfIncompatible(uri)) != null
+					&& isCompatibleSubdomain(subdomain);
 	}
 	
 	@Override
@@ -236,12 +171,9 @@ public final class IPrimaEngine implements MediaEngine {
 	
 	protected static interface IPrima {
 		
-		List<Program> getPrograms(IPrimaEngine engine, WorkerProxy proxy,
-				CheckedBiFunction<WorkerProxy, Program, Boolean> function) throws Exception;
-		List<Episode> getEpisodes(IPrimaEngine engine, Program program, WorkerProxy proxy,
-				CheckedBiFunction<WorkerProxy, Episode, Boolean> function) throws Exception;
-		List<Media> getMedia(IPrimaEngine engine, String url, WorkerProxy proxy,
-				CheckedBiFunction<WorkerProxy, Media, Boolean> function) throws Exception;
+		ListTask<Program> getPrograms(IPrimaEngine engine) throws Exception;
+		ListTask<Episode> getEpisodes(IPrimaEngine engine, Program program) throws Exception;
+		ListTask<Media> getMedia(IPrimaEngine engine, URI uri) throws Exception;
 		boolean isCompatibleSubdomain(String subdomain);
 	}
 	
@@ -253,21 +185,18 @@ public final class IPrimaEngine implements MediaEngine {
 		public static final ZoomIPrima getInstance() { return _Singleton.getInstance(); }
 		
 		@Override
-		public List<Program> getPrograms(IPrimaEngine engine, WorkerProxy proxy,
-				CheckedBiFunction<WorkerProxy, Program, Boolean> function) throws Exception {
-			return PrimaAPIProgramObtainer.getInstance().getPrograms(this, SUBDOMAIN, proxy, function);
+		public ListTask<Program> getPrograms(IPrimaEngine engine) throws Exception {
+			return PrimaAPIProgramObtainer.getInstance().getPrograms(this, SUBDOMAIN);
 		}
 		
 		@Override
-		public List<Episode> getEpisodes(IPrimaEngine engine, Program program, WorkerProxy proxy,
-				CheckedBiFunction<WorkerProxy, Episode, Boolean> function) throws Exception {
-			return DefaultEpisodeObtainer.getInstance().getEpisodes(program, proxy, function);
+		public ListTask<Episode> getEpisodes(IPrimaEngine engine, Program program) throws Exception {
+			return DefaultEpisodeObtainer.getInstance().getEpisodes(program);
 		}
 		
 		@Override
-		public List<Media> getMedia(IPrimaEngine engine, String url, WorkerProxy proxy,
-				CheckedBiFunction<WorkerProxy, Media, Boolean> function) throws Exception {
-			return DefaultMediaObtainerNewURL.getInstance().getMedia(url, proxy, function, engine);
+		public ListTask<Media> getMedia(IPrimaEngine engine, URI uri) throws Exception {
+			return DefaultMediaObtainerNewURL.getInstance().getMedia(uri, engine);
 		}
 		
 		@Override
@@ -285,21 +214,18 @@ public final class IPrimaEngine implements MediaEngine {
 		public static final CNNIPrima getInstance() { return _Singleton.getInstance(); }
 		
 		@Override
-		public List<Program> getPrograms(IPrimaEngine engine, WorkerProxy proxy,
-				CheckedBiFunction<WorkerProxy, Program, Boolean> function) throws Exception {
-			return StaticProgramObtainer.getInstance().getPrograms(this, URL_PROGRAMS, proxy, function);
+		public ListTask<Program> getPrograms(IPrimaEngine engine) throws Exception {
+			return StaticProgramObtainer.getInstance().getPrograms(this, URL_PROGRAMS);
 		}
 		
 		@Override
-		public List<Episode> getEpisodes(IPrimaEngine engine, Program program, WorkerProxy proxy,
-				CheckedBiFunction<WorkerProxy, Episode, Boolean> function) throws Exception {
-			return SnippetEpisodeObtainer.getInstance().getEpisodes(program, proxy, function);
+		public ListTask<Episode> getEpisodes(IPrimaEngine engine, Program program) throws Exception {
+			return SnippetEpisodeObtainer.getInstance().getEpisodes(program);
 		}
 		
 		@Override
-		public List<Media> getMedia(IPrimaEngine engine, String url, WorkerProxy proxy,
-				CheckedBiFunction<WorkerProxy, Media, Boolean> function) throws Exception {
-			return PlayIDsMediaObtainer.getInstance().getMedia(url, proxy, function, engine);
+		public ListTask<Media> getMedia(IPrimaEngine engine, URI uri) throws Exception {
+			return PlayIDsMediaObtainer.getInstance().getMedia(uri, engine);
 		}
 		
 		@Override
@@ -316,21 +242,18 @@ public final class IPrimaEngine implements MediaEngine {
 		public static final PauzaIPrima getInstance() { return _Singleton.getInstance(); }
 		
 		@Override
-		public List<Program> getPrograms(IPrimaEngine engine, WorkerProxy proxy,
-				CheckedBiFunction<WorkerProxy, Program, Boolean> function) throws Exception {
-			return PrimaAPIProgramObtainer.getInstance().getPrograms(this, SUBDOMAIN, proxy, function);
+		public ListTask<Program> getPrograms(IPrimaEngine engine) throws Exception {
+			return PrimaAPIProgramObtainer.getInstance().getPrograms(this, SUBDOMAIN);
 		}
 		
 		@Override
-		public List<Episode> getEpisodes(IPrimaEngine engine, Program program, WorkerProxy proxy,
-				CheckedBiFunction<WorkerProxy, Episode, Boolean> function) throws Exception {
-			return DefaultEpisodeObtainer.getInstance().getEpisodes(program, proxy, function);
+		public ListTask<Episode> getEpisodes(IPrimaEngine engine, Program program) throws Exception {
+			return DefaultEpisodeObtainer.getInstance().getEpisodes(program);
 		}
 		
 		@Override
-		public List<Media> getMedia(IPrimaEngine engine, String url, WorkerProxy proxy,
-				CheckedBiFunction<WorkerProxy, Media, Boolean> function) throws Exception {
-			return DefaultMediaObtainer.getInstance().getMedia(url, proxy, function, engine);
+		public ListTask<Media> getMedia(IPrimaEngine engine, URI uri) throws Exception {
+			return DefaultMediaObtainer.getInstance().getMedia(uri, engine);
 		}
 		
 		@Override

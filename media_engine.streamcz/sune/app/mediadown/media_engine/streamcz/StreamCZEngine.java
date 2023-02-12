@@ -5,7 +5,6 @@ import java.lang.invoke.MethodHandles;
 import java.lang.reflect.Method;
 import java.net.CookieManager;
 import java.net.URI;
-import java.net.URL;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpClient.Redirect;
@@ -36,9 +35,8 @@ import javafx.scene.image.Image;
 import sune.app.mediadown.Episode;
 import sune.app.mediadown.Program;
 import sune.app.mediadown.Shared;
+import sune.app.mediadown.concurrent.ListTask;
 import sune.app.mediadown.concurrent.Threads;
-import sune.app.mediadown.concurrent.WorkerProxy;
-import sune.app.mediadown.concurrent.WorkerUpdatableTask;
 import sune.app.mediadown.download.segment.FileSegmentsHolder;
 import sune.app.mediadown.engine.MediaEngine;
 import sune.app.mediadown.media.AudioMedia;
@@ -60,7 +58,6 @@ import sune.app.mediadown.media.VideoMediaContainer;
 import sune.app.mediadown.media_engine.streamcz.M3U_Hotfix.M3UFile;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
-import sune.app.mediadown.util.CheckedBiFunction;
 import sune.app.mediadown.util.CheckedSupplier;
 import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.JavaScript;
@@ -98,351 +95,275 @@ public final class StreamCZEngine implements MediaEngine {
 	StreamCZEngine() {
 	}
 	
-	// ----- Internal methods
-	
-	private final WorkerProxy _dwp = WorkerProxy.defaultProxy();
-	
-	private final List<Program> internal_getPrograms() throws Exception {
-		return internal_getPrograms(_dwp, (p, a) -> true);
-	}
-	
-	private final List<Program> internal_getPrograms(WorkerProxy proxy,
-			CheckedBiFunction<WorkerProxy, Program, Boolean> function) throws Exception {
-		List<Program> programs = new ArrayList<>();
-		URI baseUri = Utils.uri("https://www.stream.cz/");
-		ConcurrentLoop<API.Node> loop;
-		
-		(loop = new ConcurrentLoop<>() {
+	@Override
+	public ListTask<Program> getPrograms() throws Exception {
+		return ListTask.of((task) -> {
+			URI baseUri = Utils.uri("https://www.stream.cz/");
 			
-			@Override
-			protected void iteration(API.Node category) throws Exception {
-				for(API.Node item : API.programs(category.id())) {
-					URI uri = baseUri.resolve(item.urlName());
-					Program program = new Program(uri, item.name(), "id", item.id());
-					
-					programs.add(program);
-					if(!function.apply(proxy, program)) {
-						terminate();
-						break; // Do not continue
+			(new ConcurrentLoop<API.Node>() {
+				
+				@Override
+				protected void iteration(API.Node category) throws Exception {
+					for(API.Node item : API.programs(category.id())) {
+						URI uri = baseUri.resolve(item.urlName());
+						Program program = new Program(uri, item.name(), "id", item.id());
+						
+						if(!task.add(program)) {
+							terminate();
+							break; // Do not continue
+						}
 					}
 				}
-			}
-		}).iterate(API.categories());
-		
-		// Do not return partial results, if terminated
-		if(loop.isTerminated()) return null;
-		
-		return programs;
+			}).iterate(API.categories());
+		});
 	}
 	
-	private final List<Episode> internal_getEpisodes(Program program) throws Exception {
-		return internal_getEpisodes(program, _dwp, (p, a) -> true);
-	}
-	
-	private final List<Episode> internal_getEpisodes(Program program, WorkerProxy proxy,
-			CheckedBiFunction<WorkerProxy, Episode, Boolean> function) throws Exception {
-		List<Episode> episodes = new ArrayList<>();
-		String programId = program.get("id");
-		
-		if(programId == null) {
-			Document document = FastWeb.document(program.uri());
-			SSDCollection state = API.appServerState(document);
-			programId = state.getString("fetchable.tag.show.data.id");
+	@Override
+	public ListTask<Episode> getEpisodes(Program program) throws Exception {
+		return ListTask.of((task) -> {
+			String programId = program.get("id");
 			
 			if(programId == null) {
-				throw new IllegalStateException("Program ID is null");
+				Document document = FastWeb.document(program.uri());
+				SSDCollection state = API.appServerState(document);
+				programId = state.getString("fetchable.tag.show.data.id");
+				
+				if(programId == null) {
+					throw new IllegalStateException("Program ID is null");
+				}
 			}
-		}
-		
-		for(API.Node item : API.episodes(programId)) {
-			URI uri = Utils.uri(Utils.urlConcat(program.uri().toString(), item.urlName()));
-			Episode episode = new Episode(program, uri, item.name(), "id", item.id());
 			
-			episodes.add(episode);
-			if(!function.apply(proxy, episode)) {
-				return null; // Do not continue
+			for(API.Node item : API.episodes(programId)) {
+				URI uri = Utils.uri(Utils.urlConcat(program.uri().toString(), item.urlName()));
+				Episode episode = new Episode(program, uri, item.name(), "id", item.id());
+				
+				if(!task.add(episode)) {
+					return; // Do not continue
+				}
 			}
-		}
-		
-		return episodes;
+		});
 	}
 	
-	private final List<Media> internal_getMedia(String url) throws Exception {
-		return internal_getMedia(url, _dwp, (p, a) -> true);
-	}
-	
-	private final List<Media> internal_getMedia(String url, WorkerProxy proxy,
-			CheckedBiFunction<WorkerProxy, Media, Boolean> function) throws Exception {
-		List<Media> sources = new ArrayList<>();
-		URI sourceURI = Utils.uri(url);
-		MediaSource source = MediaSource.of(this);
-		
-		Document document = FastWeb.document(sourceURI);
-		SSDCollection state = API.appServerState(document);
-		SSDCollection videoData = state.getCollection("fetchable.episode.videoDetail.data");
-		String splBaseUrl = videoData.getDirectString("spl");
-		String splUrl = String.format("%s%s,%d,%s", splBaseUrl, "spl2", 3, "VOD").replace("|", "%7C");
-		URI splUri = Utils.uri(splUrl);
-		SSDCollection data = JSON.read(FastWeb.getRequest(splUri, Map.of()).body());
-		
-		String programName = videoData.getDirectString("name", null);
-		String numSeason = null;
-		String numEpisode = null;
-		String episodeName = "";
-		
-		// The video should always have a name, but if not, use the document's title
-		if(programName == null) {
-			programName = document.title();
+	@Override
+	public ListTask<Media> getMedia(URI uri, Map<String, Object> data) throws Exception {
+		return ListTask.of((task) -> {
+			URI sourceURI = uri;
+			MediaSource source = MediaSource.of(this);
 			
-			// Remove unnecessary text from the title, such as the website's title
-			int index;
-			if((index = programName.indexOf('|')) >= 0) {
-				programName = programName.substring(0, index);
-			}
-		}
-		
-		// Also check for the video's origin (i.e. the program for episodes)
-		String originId = videoData.getString("originTag.id", null);
-		String originName = videoData.getString("originTag.name", null);
-		if(originName != null && !originName.equalsIgnoreCase(programName)) {
-			episodeName = programName;
-			programName = originName;
-		}
-		
-		String seasonUrlName = null;
-		SSDCollection tags = videoData.getDirectCollection("allParentTags", null);
-		if(tags != null) {
-			for(SSDCollection tag : tags.collectionsIterable()) {
-				String category = tag.getDirectString("category");
-				String name = tag.getDirectString("name");
-				
-				if(category.equalsIgnoreCase("season")) {
-					Matcher matcher = REGEX_SEASON.matcher(name);
-					seasonUrlName = tag.getDirectString("urlName");
-					numSeason = matcher.matches() ? matcher.group(1) : name;
-				}
-			}
-		}
-		
-		// If the current media is not a movie, i.e. has more than one episode
-		if(!episodeName.isEmpty()) {
-			// Obtain the episode number manually from the list of episodes
-			String episodeId = videoData.getDirectString("id");
-			List<API.Node> episodes = null;
+			Document document = FastWeb.document(sourceURI);
+			SSDCollection state = API.appServerState(document);
+			SSDCollection videoData = state.getCollection("fetchable.episode.videoDetail.data");
+			String splBaseUrl = videoData.getDirectString("spl");
+			String splUrl = String.format("%s%s,%d,%s", splBaseUrl, "spl2", 3, "VOD").replace("|", "%7C");
+			URI splUri = Utils.uri(splUrl);
+			SSDCollection json = JSON.read(FastWeb.getRequest(splUri, Map.of()).body());
 			
-			// Check whether a season was found. A season is actually just a tab on the program's page.
-			if(seasonUrlName != null) {
-				// Fix the season, if necessary
-				if(numSeason == null || numSeason.isEmpty()) {
-					numSeason = "1";
-				}
+			String programName = videoData.getDirectString("name", null);
+			String numSeason = null;
+			String numEpisode = null;
+			String episodeName = "";
+			
+			// The video should always have a name, but if not, use the document's title
+			if(programName == null) {
+				programName = document.title();
 				
-				episodes = API.seasonEpisodes(seasonUrlName);
-			} else {
-				numSeason = null; // No season found, unset it
-				
-				if(originId != null) {
-					episodes = API.episodes(originId);
+				// Remove unnecessary text from the title, such as the website's title
+				int index;
+				if((index = programName.indexOf('|')) >= 0) {
+					programName = programName.substring(0, index);
 				}
 			}
 			
-			if(episodes != null) {
-				// Episodes are already in the reverse order (the latest is first),
-				// so we can just iterate over them normally.
-				for(int i = 0, l = episodes.size(); i < l; ++i) {
-					API.Node episode = episodes.get(i);
+			// Also check for the video's origin (i.e. the program for episodes)
+			String originId = videoData.getString("originTag.id", null);
+			String originName = videoData.getString("originTag.name", null);
+			if(originName != null && !originName.equalsIgnoreCase(programName)) {
+				episodeName = programName;
+				programName = originName;
+			}
+			
+			String seasonUrlName = null;
+			SSDCollection tags = videoData.getDirectCollection("allParentTags", null);
+			if(tags != null) {
+				for(SSDCollection tag : tags.collectionsIterable()) {
+					String category = tag.getDirectString("category");
+					String name = tag.getDirectString("name");
 					
-					if(episode.id().equals(episodeId)) {
-						numEpisode = Integer.toString(l - i);
-						break;
+					if(category.equalsIgnoreCase("season")) {
+						Matcher matcher = REGEX_SEASON.matcher(name);
+						seasonUrlName = tag.getDirectString("urlName");
+						numSeason = matcher.matches() ? matcher.group(1) : name;
 					}
 				}
 			}
-		}
-		
-		// Non-integer non-empty season (such as Bonuses, Videos, etc.) is better appended to the program's name
-		if(numSeason != null && !numSeason.isEmpty() && !Utils.isInteger(numSeason)) {
-			// Ignore the season (tab/category) of all episodes
-			if(!numSeason.equalsIgnoreCase("epizody")) {
-				programName += " - " + Utils.titlize(numSeason);
-			}
 			
-			numSeason = null; // Unset the season
-		}
-		
-		boolean splitSeasonAndEpisode = !Utils.isInteger(numEpisode);
-		String title = MediaUtils.mediaTitle(programName, numSeason, numEpisode, episodeName, splitSeasonAndEpisode);
-		
-		// Check, if the media has some additional subtitles
-		List<SubtitlesMedia.Builder<?, ?>> subtitlesMedia = new ArrayList<>();
-		SSDCollection subtitlesArray;
-		if((subtitlesArray = data.getCollection("data.subtitles", null)) != null) {
-			// Parse the subtitles and add them to all obtained media
-			for(SSDCollection subtitlesItem : subtitlesArray.collectionsIterable()) {
-				MediaLanguage subtitleLanguage = MediaLanguage.ofCode(subtitlesItem.getDirectString("language"));
+			// If the current media is not a movie, i.e. has more than one episode
+			if(!episodeName.isEmpty()) {
+				// Obtain the episode number manually from the list of episodes
+				String episodeId = videoData.getDirectString("id");
+				List<API.Node> episodes = null;
 				
-				loop:
-				for(SSDObject subtitleUrlObj : subtitlesItem.getDirectCollection("urls").objectsIterable()) {
-					String subtitleUrl = subtitleUrlObj.stringValue();
-					URI uri = Utils.isRelativeURL(subtitleUrl) ? splUri.resolve(subtitleUrl) : Utils.uri(subtitleUrl);
-					MediaFormat subtitleFormat = MediaFormat.UNKNOWN;
-					
-					switch(subtitleUrlObj.getName()) {
-						case "srt":    subtitleFormat = MediaFormat.SRT; break;
-						case "webvtt": subtitleFormat = MediaFormat.VTT; break;
-						default: continue loop; // Skip the subtitles
+				// Check whether a season was found. A season is actually just a tab on the program's page.
+				if(seasonUrlName != null) {
+					// Fix the season, if necessary
+					if(numSeason == null || numSeason.isEmpty()) {
+						numSeason = "1";
 					}
 					
-					SubtitlesMedia.Builder<?, ?> subtitles = SubtitlesMedia.simple().source(source)
-						.uri(uri).format(subtitleFormat).language(subtitleLanguage);
+					episodes = API.seasonEpisodes(seasonUrlName);
+				} else {
+					numSeason = null; // No season found, unset it
 					
-					subtitlesMedia.add(subtitles);
+					if(originId != null) {
+						episodes = API.episodes(originId);
+					}
+				}
+				
+				if(episodes != null) {
+					// Episodes are already in the reverse order (the latest is first),
+					// so we can just iterate over them normally.
+					for(int i = 0, l = episodes.size(); i < l; ++i) {
+						API.Node episode = episodes.get(i);
+						
+						if(episode.id().equals(episodeId)) {
+							numEpisode = Integer.toString(l - i);
+							break;
+						}
+					}
 				}
 			}
-		}
-		
-		SSDCollection filesMP4 = data.getCollection("data.mp4", null);
-		if(filesMP4 != null) {
-			for(SSDCollection item : filesMP4.collectionsIterable()) {
-				String strQuality = item.getName();
-				MediaQuality quality = MediaQuality.fromString(strQuality, MediaType.VIDEO);
-				int bandwidth = item.getDirectInt("bandwidth", -1);
-				String codec = item.getDirectString("codec", null);
-				double duration = item.getDirectDouble("duration", MediaConstants.UNKNOWN_DURATION * 1000.0) / 1000.0;
-				MediaResolution resolution = Opt.of(item.getDirectCollection("resolution", null))
-				   .ifTrue(Objects::nonNull).map((v) -> new MediaResolution(v.getInt(0), v.getInt(1)))
-				   .orElse(MediaResolution.UNKNOWN);
-				MediaFormat format = MediaFormat.MP4;
-				String strUrl = item.getDirectString("url").replace("|", "%7C");
-				URI uri = Utils.isRelativeURL(strUrl) ? splUri.resolve(strUrl) : Utils.uri(strUrl);
-				MediaMetadata metadata = MediaMetadata.builder().sourceURI(sourceURI).title(title).build();
-				List<String> codecs = List.of(codec);
+			
+			// Non-integer non-empty season (such as Bonuses, Videos, etc.) is better appended to the program's name
+			if(numSeason != null && !numSeason.isEmpty() && !Utils.isInteger(numSeason)) {
+				// Ignore the season (tab/category) of all episodes
+				if(!numSeason.equalsIgnoreCase("epizody")) {
+					programName += " - " + Utils.titlize(numSeason);
+				}
 				
-				Media.Builder<?, ?> media = VideoMedia.simple().source(source)
-					.uri(uri).format(format).quality(quality).resolution(resolution)
-					.bandwidth(bandwidth).codecs(codecs).duration(duration)
-					.metadata(metadata);
+				numSeason = null; // Unset the season
+			}
+			
+			boolean splitSeasonAndEpisode = !Utils.isInteger(numEpisode);
+			String title = MediaUtils.mediaTitle(programName, numSeason, numEpisode, episodeName, splitSeasonAndEpisode);
+			
+			// Check, if the media has some additional subtitles
+			List<SubtitlesMedia.Builder<?, ?>> subtitlesMedia = new ArrayList<>();
+			SSDCollection subtitlesArray;
+			if((subtitlesArray = json.getCollection("data.subtitles", null)) != null) {
+				// Parse the subtitles and add them to all obtained media
+				for(SSDCollection subtitlesItem : subtitlesArray.collectionsIterable()) {
+					MediaLanguage subtitleLanguage = MediaLanguage.ofCode(subtitlesItem.getDirectString("language"));
+					
+					loop:
+					for(SSDObject subtitleUrlObj : subtitlesItem.getDirectCollection("urls").objectsIterable()) {
+						String subtitleUrl = subtitleUrlObj.stringValue();
+						URI subtitleUri = Utils.isRelativeURL(subtitleUrl) ? splUri.resolve(subtitleUrl) : Utils.uri(subtitleUrl);
+						MediaFormat subtitleFormat = MediaFormat.UNKNOWN;
+						
+						switch(subtitleUrlObj.getName()) {
+							case "srt":    subtitleFormat = MediaFormat.SRT; break;
+							case "webvtt": subtitleFormat = MediaFormat.VTT; break;
+							default: continue loop; // Skip the subtitles
+						}
+						
+						SubtitlesMedia.Builder<?, ?> subtitles = SubtitlesMedia.simple().source(source)
+							.uri(subtitleUri).format(subtitleFormat).language(subtitleLanguage);
+						
+						subtitlesMedia.add(subtitles);
+					}
+				}
+			}
+			
+			SSDCollection filesMP4 = json.getCollection("data.mp4", null);
+			if(filesMP4 != null) {
+				for(SSDCollection item : filesMP4.collectionsIterable()) {
+					String strQuality = item.getName();
+					MediaQuality quality = MediaQuality.fromString(strQuality, MediaType.VIDEO);
+					int bandwidth = item.getDirectInt("bandwidth", -1);
+					String codec = item.getDirectString("codec", null);
+					double duration = item.getDirectDouble("duration", MediaConstants.UNKNOWN_DURATION * 1000.0) / 1000.0;
+					MediaResolution resolution = Opt.of(item.getDirectCollection("resolution", null))
+					   .ifTrue(Objects::nonNull).map((v) -> new MediaResolution(v.getInt(0), v.getInt(1)))
+					   .orElse(MediaResolution.UNKNOWN);
+					MediaFormat format = MediaFormat.MP4;
+					String strUrl = item.getDirectString("url").replace("|", "%7C");
+					URI mediaUri = Utils.isRelativeURL(strUrl) ? splUri.resolve(strUrl) : Utils.uri(strUrl);
+					MediaMetadata metadata = MediaMetadata.builder().sourceURI(sourceURI).title(title).build();
+					List<String> codecs = List.of(codec);
+					
+					Media.Builder<?, ?> media = VideoMedia.simple().source(source)
+						.uri(mediaUri).format(format).quality(quality).resolution(resolution)
+						.bandwidth(bandwidth).codecs(codecs).duration(duration)
+						.metadata(metadata);
+					
+					// Add additional subtitles, if any
+					if(!subtitlesMedia.isEmpty()) {
+						Media.Builder<?, ?> audio = AudioMedia.simple().source(source)
+							.uri(mediaUri).format(MediaFormat.M4A)
+							.quality(MediaQuality.UNKNOWN)
+							.language(MediaLanguage.UNKNOWN).duration(duration)
+							.metadata(metadata);
+						
+						MediaContainer.Builder<?, ?> container = VideoMediaContainer.combined()
+							.source(source).uri(mediaUri).format(format).quality(quality).resolution(resolution)
+							.bandwidth(bandwidth).codecs(codecs).duration(duration).metadata(metadata)
+							.media(media, audio);
+						
+						MediaContainer.Builder<?, ?> wrapper = VideoMediaContainer.separated()
+							.source(source).uri(mediaUri).format(format).quality(quality).resolution(resolution)
+							.bandwidth(bandwidth).codecs(codecs).duration(duration).metadata(metadata)
+							.media(Stream.concat(Stream.of(container), subtitlesMedia.stream()).collect(Collectors.toList()));
+						
+						media = wrapper;
+					}
+					
+					Media built = media.build();
+					if(!task.add(built)) {
+						return; // Do not continue
+					}
+				}
+			}
+			
+			for(String collectionName : List.of("pls.hls")) {
+				SSDCollection file = json.getCollection(collectionName, null);
+				
+				// If the collection does not exist, just skip it
+				if(file == null) continue;
+				
+				String strUrl = file.getDirectString("url").replace("|", "%7C");
+				URI mediaUri = Utils.isRelativeURL(strUrl) ? splUri.resolve(strUrl) : Utils.uri(strUrl);
+				MediaLanguage language = MediaLanguage.UNKNOWN;
+				MediaMetadata metadata = MediaMetadata.empty();
+				List<Media.Builder<?, ?>> media = Hotfix.createMediaBuilders(source, mediaUri, sourceURI, title, language, metadata);
 				
 				// Add additional subtitles, if any
 				if(!subtitlesMedia.isEmpty()) {
-					Media.Builder<?, ?> audio = AudioMedia.simple().source(source)
-						.uri(uri).format(MediaFormat.M4A)
-						.quality(MediaQuality.UNKNOWN)
-						.language(MediaLanguage.UNKNOWN).duration(duration)
-						.metadata(metadata);
+					List<Media.Builder<?, ?>> wrappedMedia = new ArrayList<>(media.size());
 					
-					MediaContainer.Builder<?, ?> container = VideoMediaContainer.combined()
-						.source(source).uri(uri).format(format).quality(quality).resolution(resolution)
-						.bandwidth(bandwidth).codecs(codecs).duration(duration).metadata(metadata)
-						.media(media, audio);
+					for(Media.Builder<?, ?> m : media) {
+						VideoMedia.Builder<?, ?> video = Utils.cast(((MediaContainer.Builder<?, ?>) m).media().stream()
+							.filter((a) -> a.type().is(MediaType.VIDEO)).findFirst().get());
+						
+						MediaContainer.Builder<?, ?> wrapper = VideoMediaContainer.separated().source(video.source())
+							.uri(video.uri()).size(video.size()).quality(video.quality()).metadata(video.metadata())
+							.resolution(video.resolution()).duration(video.duration()).codecs(video.codecs())
+							.bandwidth(video.bandwidth()).frameRate(video.frameRate())
+							.media(Stream.concat(Stream.of(m), subtitlesMedia.stream()).collect(Collectors.toList()));
+						
+						wrappedMedia.add(wrapper);
+					}
 					
-					MediaContainer.Builder<?, ?> wrapper = VideoMediaContainer.separated()
-						.source(source).uri(uri).format(format).quality(quality).resolution(resolution)
-						.bandwidth(bandwidth).codecs(codecs).duration(duration).metadata(metadata)
-						.media(Stream.concat(Stream.of(container), subtitlesMedia.stream()).collect(Collectors.toList()));
-					
-					media = wrapper;
+					media = wrappedMedia;
 				}
 				
-				Media built = media.build();
-				sources.add(built);
-				if(!function.apply(proxy, built))
-					return null; // Do not continue
-			}
-		}
-		
-		for(String collectionName : List.of("pls.hls")) {
-			SSDCollection file = data.getCollection(collectionName, null);
-			
-			// If the collection does not exist, just skip it
-			if(file == null) continue;
-			
-			String strUrl = file.getDirectString("url").replace("|", "%7C");
-			URI uri = Utils.isRelativeURL(strUrl) ? splUri.resolve(strUrl) : Utils.uri(strUrl);
-			MediaLanguage language = MediaLanguage.UNKNOWN;
-			MediaMetadata metadata = MediaMetadata.empty();
-			List<Media.Builder<?, ?>> media = Hotfix.createMediaBuilders(source, uri, sourceURI, title, language, metadata);
-			
-			// Add additional subtitles, if any
-			if(!subtitlesMedia.isEmpty()) {
-				List<Media.Builder<?, ?>> wrappedMedia = new ArrayList<>(media.size());
-				
-				for(Media.Builder<?, ?> m : media) {
-					VideoMedia.Builder<?, ?> video = Utils.cast(((MediaContainer.Builder<?, ?>) m).media().stream()
-						.filter((a) -> a.type().is(MediaType.VIDEO)).findFirst().get());
-					
-					MediaContainer.Builder<?, ?> wrapper = VideoMediaContainer.separated().source(video.source())
-						.uri(video.uri()).size(video.size()).quality(video.quality()).metadata(video.metadata())
-						.resolution(video.resolution()).duration(video.duration()).codecs(video.codecs())
-						.bandwidth(video.bandwidth()).frameRate(video.frameRate())
-						.media(Stream.concat(Stream.of(m), subtitlesMedia.stream()).collect(Collectors.toList()));
-					
-					wrappedMedia.add(wrapper);
+				// Finally, add all the media
+				for(Media s : Utils.iterable(media.stream().map(Media.Builder::build).iterator())) {
+					if(!task.add(s)) {
+						return; // Do not continue
+					}
 				}
-				
-				media = wrappedMedia;
 			}
-			
-			// Finally, add all the media
-			for(Media s : Utils.iterable(media.stream().map(Media.Builder::build).iterator())) {
-				sources.add(s);
-				if(!function.apply(proxy, s))
-					return null; // Do not continue
-			}
-		}
-		
-		return sources;
-	}
-	
-	private final List<Media> internal_getMedia(Episode episode) throws Exception {
-		return internal_getMedia(episode, _dwp, (p, a) -> true);
-	}
-	
-	private final List<Media> internal_getMedia(Episode episode, WorkerProxy proxy,
-			CheckedBiFunction<WorkerProxy, Media, Boolean> function) throws Exception {
-		return internal_getMedia(episode.uri().toString(), proxy, function);
-	}
-	
-	// -----
-	
-	@Override
-	public List<Program> getPrograms() throws Exception {
-		return internal_getPrograms();
-	}
-	
-	@Override
-	public List<Episode> getEpisodes(Program program) throws Exception {
-		return internal_getEpisodes(program);
-	}
-	
-	@Override
-	public List<Media> getMedia(Episode episode) throws Exception {
-		return internal_getMedia(episode);
-	}
-	
-	@Override
-	public WorkerUpdatableTask<CheckedBiFunction<WorkerProxy, Program, Boolean>, Void> getPrograms
-			(CheckedBiFunction<WorkerProxy, Program, Boolean> function) {
-		return WorkerUpdatableTask.voidTaskChecked(function, (p, f) -> internal_getPrograms(p, f));
-	}
-	
-	@Override
-	public WorkerUpdatableTask<CheckedBiFunction<WorkerProxy, Episode, Boolean>, Void> getEpisodes
-			(Program program,
-			 CheckedBiFunction<WorkerProxy, Episode, Boolean> function) {
-		return WorkerUpdatableTask.voidTaskChecked(function, (p, f) -> internal_getEpisodes(program, p, f));
-	}
-	
-	@Override
-	public WorkerUpdatableTask<CheckedBiFunction<WorkerProxy, Media, Boolean>, Void> getMedia
-			(Episode episode,
-			 CheckedBiFunction<WorkerProxy, Media, Boolean> function) {
-		return WorkerUpdatableTask.voidTaskChecked(function, (p, c) -> internal_getMedia(episode, p, c));
-	}
-	
-	@Override
-	public List<Media> getMedia(URI uri, Map<String, Object> data) throws Exception {
-		return internal_getMedia(uri.toString());
+		});
 	}
 	
 	@Override
@@ -451,15 +372,14 @@ public final class StreamCZEngine implements MediaEngine {
 	}
 	
 	@Override
-	public boolean isCompatibleURL(String url) {
-		URL urlObj = Utils.url(url);
+	public boolean isCompatibleURI(URI uri) {
 		// Check the protocol
-		String protocol = urlObj.getProtocol();
+		String protocol = uri.getScheme();
 		if(!protocol.equals("http") &&
 		   !protocol.equals("https"))
 			return false;
 		// Check the host
-		String host = urlObj.getHost();
+		String host = uri.getHost();
 		if((host.startsWith("www."))) // www prefix
 			host = host.substring(4);
 		if(!host.equals("stream.cz"))
@@ -855,10 +775,6 @@ public final class StreamCZEngine implements MediaEngine {
 				return;
 			
 			executor.shutdownNow();
-		}
-		
-		public boolean isTerminated() {
-			return terminated.get();
 		}
 	}
 	

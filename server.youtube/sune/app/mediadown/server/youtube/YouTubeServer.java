@@ -1,7 +1,6 @@
 package sune.app.mediadown.server.youtube;
 
 import java.net.URI;
-import java.net.URL;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -19,8 +18,7 @@ import org.jsoup.select.Elements;
 
 import javafx.scene.image.Image;
 import sune.app.mediadown.Shared;
-import sune.app.mediadown.concurrent.WorkerProxy;
-import sune.app.mediadown.concurrent.WorkerUpdatableTask;
+import sune.app.mediadown.concurrent.ListTask;
 import sune.app.mediadown.download.segment.FileSegment;
 import sune.app.mediadown.download.segment.FileSegmentsHolder;
 import sune.app.mediadown.download.segment.RemoteFileSegment;
@@ -65,8 +63,6 @@ public class YouTubeServer implements Server {
 	
 	private static Regex REGEX_EMBED_URL;
 	
-	private final WorkerProxy _dwp = WorkerProxy.defaultProxy();
-	
 	// Allow to create an instance when registering the server
 	YouTubeServer() {
 	}
@@ -81,19 +77,24 @@ public class YouTubeServer implements Server {
 					: url;
 	}
 	
-	private final List<Media> getMedia(URI uri, Map<String, Object> data, WorkerProxy proxy,
-			CheckedBiFunction<WorkerProxy, Media, Boolean> function) throws Exception {
-		List<Media> sources = new ArrayList<>();
-		String url = maybeTransformEmbedURL(uri.toString());
-		StringResponse response = Web.request(new GetRequest(Utils.url(url), Shared.USER_AGENT));
-		Document document = Utils.parseDocument(response.content, url);
-		Signature.Context ctx = Signature.Extractor.extract(document);
-		Elements scripts = document.getElementsByTag("script");
-		Regex patternConfigVariable = Regex.of("var ytInitialPlayerResponse\\s+=\\s+\\{");
-		for(Element script : scripts) {
-			String scriptHTML = script.html();
-			Matcher matcher = patternConfigVariable.matcher(scriptHTML);
-			if(matcher.find()) {
+	@Override
+	public ListTask<Media> getMedia(URI uri, Map<String, Object> data) throws Exception {
+		return ListTask.of((task) -> {
+			String url = maybeTransformEmbedURL(uri.toString());
+			StringResponse response = Web.request(new GetRequest(Utils.url(url), Shared.USER_AGENT));
+			Document document = Utils.parseDocument(response.content, url);
+			Signature.Context ctx = Signature.Extractor.extract(document);
+			Elements scripts = document.getElementsByTag("script");
+			Regex patternConfigVariable = Regex.of("var ytInitialPlayerResponse\\s+=\\s+\\{");
+			
+			for(Element script : scripts) {
+				String scriptHTML = script.html();
+				Matcher matcher = patternConfigVariable.matcher(scriptHTML);
+				
+				if(!matcher.find()) {
+					continue;
+				}
+
 				String playerConfig = Utils.bracketSubstring(scriptHTML, '{', '}', false, matcher.end() - 1, scriptHTML.length());
 				SSDCollection dataConfig = JavaScript.readObject(playerConfig);
 				String title = dataConfig.getString("videoDetails.title");
@@ -101,12 +102,14 @@ public class YouTubeServer implements Server {
 				List<Tuple> videos = new ArrayList<>();
 				List<Tuple> audios = new ArrayList<>();
 				MediaFormat objFormat; MediaQuality objQuality; List<Tuple> list;
+				
 				// Parse the formats and obtains information about them
 				for(SSDCollection format : formatsConfig.collectionsIterable()) {
 					MediaMimeType mimeType = MediaMimeType.fromString(format.getDirectString("mimeType"));
 					String type = mimeType.type();
 					String typeAndSubtype = mimeType.typeAndSubtype();
 					double duration = Double.valueOf(format.getDirectString("approxDurationMs", "0.0")) / 1000.0;
+					
 					if(type.startsWith("audio")) {
 						// Parse the audio's format
 						MediaFormat audioFormat = MediaFormat.fromMimeType(typeAndSubtype);
@@ -130,6 +133,7 @@ public class YouTubeServer implements Server {
 						// Set to which list this item should be added
 						list = videos;
 					}
+					
 					// Obtain the video/audio's URL
 					String videoURL = null;
 					// Video's URL does not need to be signed
@@ -156,8 +160,10 @@ public class YouTubeServer implements Server {
 					// Add the tuple with all information to the respective list
 					list.add(new Tuple(videoURL, objFormat, objQuality, size, mimeType.codecs(), duration));
 				}
+				
 				MediaSource source = MediaSource.of(this);
 				MediaMetadata metadata = MediaMetadata.builder().title(title).build();
+				
 				// Combine the video and audio sources into final video sources
 				for(Tuple videoData : videos) {
 					String urlVideo = videoData.get(0);
@@ -166,6 +172,7 @@ public class YouTubeServer implements Server {
 					long videoSize = videoData.get(3);
 					List<String> videoCodecs = videoData.get(4);
 					double videoDuration = videoData.get(5);
+					
 					for(Tuple audioData : audios) {
 						String urlAudio = audioData.get(0);
 						MediaFormat audioFormat = audioData.get(1);
@@ -195,38 +202,24 @@ public class YouTubeServer implements Server {
 								.bandwidth(aqv.bandwidth()).sampleRate(aqv.sampleRate())
 						).build();
 						
-						sources.add(media);
-						if(!function.apply(proxy, media))
-							return null; // Do not continue
+						if(!task.add(media)) {
+							return; // Do not continue
+						}
 					}
 				}
 			}
-		}
-		return sources;
+		});
 	}
 	
 	@Override
-	public List<Media> getMedia(URI uri, Map<String, Object> data) throws Exception {
-		return getMedia(uri, data, _dwp, (p, a) -> true);
-	}
-	
-	@Override
-	public WorkerUpdatableTask<CheckedBiFunction<WorkerProxy, Media, Boolean>, Void> getMedia
-			(URI uri, Map<String, Object> data,
-			 CheckedBiFunction<WorkerProxy, Media, Boolean> function) {
-		return WorkerUpdatableTask.voidTaskChecked(function, (p, c) -> getMedia(uri, data, p, c));
-	}
-	
-	@Override
-	public boolean isCompatibleURL(String url) {
-		URL urlObj = Utils.url(url);
+	public boolean isCompatibleURI(URI uri) {
 		// Check the protocol
-		String protocol = urlObj.getProtocol();
+		String protocol = uri.getScheme();
 		if(!protocol.equals("http") &&
 		   !protocol.equals("https"))
 			return false;
 		// Check the host
-		String host = urlObj.getHost();
+		String host = uri.getHost();
 		if(host.startsWith("www.")) // www prefix
 			host = host.substring(4);
 		if(host.startsWith("m."))   // mobile

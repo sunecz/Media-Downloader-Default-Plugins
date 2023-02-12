@@ -1,7 +1,6 @@
 package sune.app.mediadown.media_engine.tvprimadoma;
 
 import java.net.URI;
-import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -15,8 +14,7 @@ import sune.app.mediadown.MediaGetter;
 import sune.app.mediadown.MediaGetters;
 import sune.app.mediadown.Program;
 import sune.app.mediadown.Shared;
-import sune.app.mediadown.concurrent.WorkerProxy;
-import sune.app.mediadown.concurrent.WorkerUpdatableTask;
+import sune.app.mediadown.concurrent.ListTask;
 import sune.app.mediadown.engine.MediaEngine;
 import sune.app.mediadown.media.Media;
 import sune.app.mediadown.media.MediaFormat;
@@ -29,7 +27,6 @@ import sune.app.mediadown.media.MediaUtils;
 import sune.app.mediadown.media.VideoMedia;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
-import sune.app.mediadown.util.CheckedBiFunction;
 import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.JavaScript;
 import sune.app.mediadown.util.Utils;
@@ -62,8 +59,7 @@ public final class TVPrimaDomaEngine implements MediaEngine {
 	TVPrimaDomaEngine() {
 	}
 	
-	private final boolean parseEpisodesList(List<Episode> episodes, Element elContainer, Program program,
-			WorkerProxy proxy, CheckedBiFunction<WorkerProxy, Episode, Boolean> function)
+	private final boolean parseEpisodesList(ListTask<Episode> task, Element elContainer, Program program)
 			throws Exception {
 		// All episodes are shown, just obtain them
 		for(Element elEpisode : elContainer.select(SELECTOR_EPISODES)) {
@@ -72,8 +68,7 @@ public final class TVPrimaDomaEngine implements MediaEngine {
 			String title = elTitle.text();
 			Episode episode = new Episode(program, Utils.uri(url), title);
 			
-			episodes.add(episode);
-			if(!function.apply(proxy, episode)) {
+			if(!task.add(episode)) {
 				return false; // Do not continue
 			}
 		}
@@ -82,233 +77,160 @@ public final class TVPrimaDomaEngine implements MediaEngine {
 		return true;
 	}
 	
-	// ----- Internal methods
-	
-	private final WorkerProxy _dwp = WorkerProxy.defaultProxy();
-	
-	private final List<Program> internal_getPrograms() throws Exception {
-		return internal_getPrograms(_dwp, (p, a) -> true);
-	}
-	
-	private final List<Program> internal_getPrograms(WorkerProxy proxy,
-			CheckedBiFunction<WorkerProxy, Program, Boolean> function) throws Exception {
-		List<Program> programs = new ArrayList<>();
-		Document document = Utils.document(Utils.url(URL_PROGRAMS));
-		
-		for(Element elProgram : document.select(SELECTOR_PROGRAMS)) {
-			Element elTitle = elProgram.selectFirst("h3");
-			String url = elProgram.absUrl("href");
-			String title = elTitle.text();
-			Program program = new Program(Utils.uri(url), title);
+	@Override
+	public ListTask<Program> getPrograms() throws Exception {
+		return ListTask.of((task) -> {
+			Document document = Utils.document(Utils.url(URL_PROGRAMS));
 			
-			programs.add(program);
-			if(!function.apply(proxy, program))
-				return null; // Do not continue
-		}
-		
-		return programs;
-	}
-	
-	private final List<Episode> internal_getEpisodes(Program program) throws Exception {
-		return internal_getEpisodes(program, _dwp, (p, a) -> true);
-	}
-	
-	private final List<Episode> internal_getEpisodes(Program program, WorkerProxy proxy,
-			CheckedBiFunction<WorkerProxy, Episode, Boolean> function) throws Exception {
-		List<Episode> episodes = new ArrayList<>();
-		Document document = Utils.document(program.uri());
-		
-		for(Element elContainer : document.select(SELECTOR_EPISODES_CONTAINERS)) {
-			Element elContainerTitle = elContainer.selectFirst("h2");
-			
-			if(elContainerTitle != null) {
-				String text = elContainerTitle.text();
+			for(Element elProgram : document.select(SELECTOR_PROGRAMS)) {
+				Element elTitle = elProgram.selectFirst("h3");
+				String url = elProgram.absUrl("href");
+				String title = elTitle.text();
+				Program program = new Program(Utils.uri(url), title);
 				
-				// Ignore the most watched videos, since they will be present
-				// somewhere in the list anyway.
-				if(text.toLowerCase().contains("nejsledovanější")) {
-					continue;
+				if(!task.add(program)) {
+					return; // Do not continue
 				}
 			}
-			
-			// Always parse the existing items
-			if(!parseEpisodesList(episodes, elContainer, program, proxy, function)) {
-				return null;
-			}
-		}
-		
-		// Check whether all episodes are actually shown
-		Element elPagination = document.selectFirst(SELECTOR_EPISODES_PAGINATION);
-		if(elPagination != null) {
-			final int maxPage = Integer.valueOf(elPagination.children().last().previousElementSibling().text());
-			String urlBase = elPagination.selectFirst("[aria-current]").nextElementSibling().selectFirst("a")
-				.absUrl("href").replaceFirst("\\?page=\\d+", "?page=%{page}d");
-			
-			for(int page = 2; page <= maxPage; ++page) {
-				Document pageDocument = Utils.document(Utils.format(urlBase, "page", page));
-				Element elContainer = pageDocument.selectFirst(SELECTOR_EPISODES_CONTAINERS);
-				
-				if(!parseEpisodesList(episodes, elContainer, program, proxy, function)) {
-					return null;
-				}
-			}
-		}
-		
-		return episodes;
+		});
 	}
 	
-	private final List<Media> internal_getMedia(String url) throws Exception {
-		return internal_getMedia(url, _dwp, (p, a) -> true);
-	}
-	
-	private final List<Media> internal_getMedia(String url, WorkerProxy proxy,
-			CheckedBiFunction<WorkerProxy, Media, Boolean> function) throws Exception {
-		List<Media> sources = new ArrayList<>();
-		Document document = Utils.document(url);
-		
-		// The video can be embedded from Stream.cz
-		Element elIframe = document.selectFirst(".container div > iframe");
-		if(elIframe != null) {
-			String iframeSrc = elIframe.absUrl("src");
+	@Override
+	public ListTask<Episode> getEpisodes(Program program) throws Exception {
+		return ListTask.of((task) -> {
+			Document document = Utils.document(program.uri());
 			
-			// The video can also be embedded from Stream.cz
-			if(iframeSrc.startsWith("https://www.stream.cz")) {
-				// Must transform the URL first to the canonical (one visited directly from Stream.cz)
-				Document iframeDocument = Utils.document(iframeSrc);
-				String canonicalUrl = iframeDocument.selectFirst("link[rel='canonical']").absUrl("href");
+			for(Element elContainer : document.select(SELECTOR_EPISODES_CONTAINERS)) {
+				Element elContainerTitle = elContainer.selectFirst("h2");
 				
-				MediaGetter getter;
-				if((getter = MediaGetters.fromURL(canonicalUrl)) != null) {
-					WorkerUpdatableTask<CheckedBiFunction<WorkerProxy, Media, Boolean>, Void> task
-						= getter.getMedia(Utils.uri(canonicalUrl), Map.of(),
-						                  (p, media) -> sources.add(media) && function.apply(p, media));
+				if(elContainerTitle != null) {
+					String text = elContainerTitle.text();
 					
-					// Run the task. Must be canceled afterwards, otherwise it will run in the background.
-					try { task.startAndWaitChecked(); } finally { task.cancel(); }
-					
-					return sources; // Sources obtained, do not continue
+					// Ignore the most watched videos, since they will be present
+					// somewhere in the list anyway.
+					if(text.toLowerCase().contains("nejsledovanější")) {
+						continue;
+					}
+				}
+				
+				// Always parse the existing items
+				if(!parseEpisodesList(task, elContainer, program)) {
+					return;
 				}
 			}
-		}
-		
-		Element elScript = document.selectFirst(".container div > script");
-		
-		// Unable to obtain the embedding script
-		if(elScript == null) {
-			return null;
-		}
-		
-		String scriptSrc = elScript.absUrl("src");
-		SSDCollection videoList = OnNetwork.videoList(scriptSrc);
-		
-		// Unable to obtain the player settings
-		if(videoList == null) {
-			return null;
-		}
-		
-		// Gather as much information as possible and construct the title
-		String programName = "";
-		String numSeason = null;
-		String numEpisode = null;
-		String episodeName = "";
-		
-		// Obtain the program name from logos, since there is no other stable
-		// place where it can be found.
-		Element elLogo = document.selectFirst(".container > .row > .col > div + div + .d-md-flex > div:first-child > a");
-		if(elLogo != null) {
-			programName = elLogo.attr("title");
-		}
-		
-		// Obtain the episode name from the episode title
-		Element elTitle = document.selectFirst(".container > .row > .col > div + div h1");
-		if(elTitle != null) {
-			episodeName = elTitle.text();
-		}
-		
-		String title = MediaUtils.mediaTitle(programName, numSeason, numEpisode, episodeName, true, false, false);
-		MediaSource source = MediaSource.of(this);
-		URI sourceURI = Utils.uri(url);
-		MediaLanguage language = MediaLanguage.UNKNOWN;
-		MediaMetadata metadata = MediaMetadata.builder().title(title).build();
-		
-		// Add all available media that are found in the player settings
-		SSDCollection emptyArray = SSDCollection.emptyArray();
-		for(SSDCollection video : videoList.collectionsIterable()) {
-			SSDCollection additionalURLs = video.getDirectCollection("urls", emptyArray);
-			String videoURL = video.getDirectString("url");
 			
-			List<Media> media = new ArrayList<>();
-			media.addAll(MediaUtils.createMedia(source, Utils.uri(videoURL), sourceURI, title, language, metadata));
+			// Check whether all episodes are actually shown
+			Element elPagination = document.selectFirst(SELECTOR_EPISODES_PAGINATION);
+			if(elPagination != null) {
+				final int maxPage = Integer.valueOf(elPagination.children().last().previousElementSibling().text());
+				String urlBase = elPagination.selectFirst("[aria-current]").nextElementSibling().selectFirst("a")
+					.absUrl("href").replaceFirst("\\?page=\\d+", "?page=%{page}d");
+				
+				for(int page = 2; page <= maxPage; ++page) {
+					Document pageDocument = Utils.document(Utils.format(urlBase, "page", page));
+					Element elContainer = pageDocument.selectFirst(SELECTOR_EPISODES_CONTAINERS);
+					
+					if(!parseEpisodesList(task, elContainer, program)) {
+						return;
+					}
+				}
+			}
+		});
+	}
+	
+	@Override
+	public ListTask<Media> getMedia(URI uri, Map<String, Object> data) throws Exception {
+		return ListTask.of((task) -> {
+			Document document = Utils.document(uri);
 			
-			for(SSDCollection additionalVideo : additionalURLs.collectionsIterable()) {
-				String additionalVideoURL = additionalVideo.getDirectString("url");
-				media.add(VideoMedia.simple().source(source)
-				          	.uri(Utils.uri(additionalVideoURL))
-				          	.quality(MediaQuality.fromString(additionalVideo.getDirectString("name"), MediaType.VIDEO))
-				          	.format(MediaFormat.fromPath(additionalVideoURL))
-				          	.metadata(metadata)
-				          	.build());
+			// The video can be embedded from Stream.cz
+			Element elIframe = document.selectFirst(".container div > iframe");
+			if(elIframe != null) {
+				String iframeSrc = elIframe.absUrl("src");
+				
+				// The video can also be embedded from Stream.cz
+				if(iframeSrc.startsWith("https://www.stream.cz")) {
+					// Must transform the URL first to the canonical (one visited directly from Stream.cz)
+					Document iframeDocument = Utils.document(iframeSrc);
+					String canonicalUrl = iframeDocument.selectFirst("link[rel='canonical']").absUrl("href");
+					URI canonicalUri = Utils.uri(canonicalUrl);
+					
+					MediaGetter getter;
+					if((getter = MediaGetters.fromURI(canonicalUri)) != null) {
+						ListTask<Media> t = getter.getMedia(canonicalUri, Map.of());
+						t.forwardAdd(task);
+						t.startAndWait();
+						return; // Sources obtained, do not continue
+					}
+				}
 			}
 			
-			for(Media m : media) {
-				sources.add(m);
-				if(!function.apply(proxy, m))
-					return null; // Do not continue
+			Element elScript = document.selectFirst(".container div > script");
+			
+			// Unable to obtain the embedding script
+			if(elScript == null) {
+				return;
 			}
-		}
-		
-		return sources;
-	}
-	
-	private final List<Media> internal_getMedia(Episode episode) throws Exception {
-		return internal_getMedia(episode, _dwp, (p, a) -> true);
-	}
-	
-	private final List<Media> internal_getMedia(Episode episode, WorkerProxy proxy,
-			CheckedBiFunction<WorkerProxy, Media, Boolean> function) throws Exception {
-		return internal_getMedia(episode.uri().toString(), proxy, function);
-	}
-	
-	// -----
-	
-	@Override
-	public List<Program> getPrograms() throws Exception {
-		return internal_getPrograms();
-	}
-	
-	@Override
-	public List<Episode> getEpisodes(Program program) throws Exception {
-		return internal_getEpisodes(program);
-	}
-	
-	@Override
-	public List<Media> getMedia(Episode episode) throws Exception {
-		return internal_getMedia(episode);
-	}
-	
-	@Override
-	public WorkerUpdatableTask<CheckedBiFunction<WorkerProxy, Program, Boolean>, Void> getPrograms
-			(CheckedBiFunction<WorkerProxy, Program, Boolean> function) {
-		return WorkerUpdatableTask.voidTaskChecked(function, (p, f) -> internal_getPrograms(p, f));
-	}
-	
-	@Override
-	public WorkerUpdatableTask<CheckedBiFunction<WorkerProxy, Episode, Boolean>, Void> getEpisodes
-			(Program program,
-			 CheckedBiFunction<WorkerProxy, Episode, Boolean> function) {
-		return WorkerUpdatableTask.voidTaskChecked(function, (p, f) -> internal_getEpisodes(program, p, f));
-	}
-	
-	@Override
-	public WorkerUpdatableTask<CheckedBiFunction<WorkerProxy, Media, Boolean>, Void> getMedia
-			(Episode episode,
-			 CheckedBiFunction<WorkerProxy, Media, Boolean> function) {
-		return WorkerUpdatableTask.voidTaskChecked(function, (p, c) -> internal_getMedia(episode, p, c));
-	}
-	
-	@Override
-	public List<Media> getMedia(URI uri, Map<String, Object> data) throws Exception {
-		return internal_getMedia(uri.toString());
+			
+			String scriptSrc = elScript.absUrl("src");
+			SSDCollection videoList = OnNetwork.videoList(scriptSrc);
+			
+			// Unable to obtain the player settings
+			if(videoList == null) {
+				return;
+			}
+			
+			// Gather as much information as possible and construct the title
+			String programName = "";
+			String numSeason = null;
+			String numEpisode = null;
+			String episodeName = "";
+			
+			// Obtain the program name from logos, since there is no other stable
+			// place where it can be found.
+			Element elLogo = document.selectFirst(".container > .row > .col > div + div + .d-md-flex > div:first-child > a");
+			if(elLogo != null) {
+				programName = elLogo.attr("title");
+			}
+			
+			// Obtain the episode name from the episode title
+			Element elTitle = document.selectFirst(".container > .row > .col > div + div h1");
+			if(elTitle != null) {
+				episodeName = elTitle.text();
+			}
+			
+			String title = MediaUtils.mediaTitle(programName, numSeason, numEpisode, episodeName, true, false, false);
+			MediaSource source = MediaSource.of(this);
+			URI sourceURI = uri;
+			MediaLanguage language = MediaLanguage.UNKNOWN;
+			MediaMetadata metadata = MediaMetadata.builder().title(title).build();
+			
+			// Add all available media that are found in the player settings
+			SSDCollection emptyArray = SSDCollection.emptyArray();
+			for(SSDCollection video : videoList.collectionsIterable()) {
+				SSDCollection additionalURLs = video.getDirectCollection("urls", emptyArray);
+				String videoURL = video.getDirectString("url");
+				
+				List<Media> media = new ArrayList<>();
+				media.addAll(MediaUtils.createMedia(source, Utils.uri(videoURL), sourceURI, title, language, metadata));
+				
+				for(SSDCollection additionalVideo : additionalURLs.collectionsIterable()) {
+					String additionalVideoURL = additionalVideo.getDirectString("url");
+					media.add(VideoMedia.simple().source(source)
+					          	.uri(Utils.uri(additionalVideoURL))
+					          	.quality(MediaQuality.fromString(additionalVideo.getDirectString("name"), MediaType.VIDEO))
+					          	.format(MediaFormat.fromPath(additionalVideoURL))
+					          	.metadata(metadata)
+					          	.build());
+				}
+				
+				for(Media m : media) {
+					if(!task.add(m)) {
+						return; // Do not continue
+					}
+				}
+			}
+		});
 	}
 	
 	@Override
@@ -317,15 +239,14 @@ public final class TVPrimaDomaEngine implements MediaEngine {
 	}
 	
 	@Override
-	public boolean isCompatibleURL(String url) {
-		URL urlObj = Utils.url(url);
+	public boolean isCompatibleURI(URI uri) {
 		// Check the protocol
-		String protocol = urlObj.getProtocol();
+		String protocol = uri.getScheme();
 		if(!protocol.equals("http") &&
 		   !protocol.equals("https"))
 			return false;
 		// Check the host
-		String host = urlObj.getHost();
+		String host = uri.getHost();
 		if((host.startsWith("www."))) // www prefix
 			host = host.substring(4);
 		if(!host.equals("primadoma.tv"))

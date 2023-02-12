@@ -19,8 +19,8 @@ import java.util.stream.Collectors;
 import sune.app.mediadown.Episode;
 import sune.app.mediadown.MediaDownloader;
 import sune.app.mediadown.Program;
+import sune.app.mediadown.concurrent.ListTask;
 import sune.app.mediadown.concurrent.Threads;
-import sune.app.mediadown.concurrent.WorkerProxy;
 import sune.app.mediadown.media.Media;
 import sune.app.mediadown.media.MediaLanguage;
 import sune.app.mediadown.media.MediaMetadata;
@@ -31,7 +31,6 @@ import sune.app.mediadown.media_engine.iprima.IPrimaHelper.FastWeb;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper.ProgramWrapper;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper.ThreadedSpawnableTaskQueue;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper._Singleton;
-import sune.app.mediadown.util.CheckedBiFunction;
 import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
@@ -58,21 +57,18 @@ final class PrimaPlus implements IPrima {
 	}
 	
 	@Override
-	public List<Program> getPrograms(IPrimaEngine engine, WorkerProxy proxy,
-			CheckedBiFunction<WorkerProxy, Program, Boolean> function) throws Exception {
-		return api().getPrograms(engine, proxy, function);
+	public ListTask<Program> getPrograms(IPrimaEngine engine) throws Exception {
+		return api().getPrograms(engine);
 	}
 	
 	@Override
-	public List<Episode> getEpisodes(IPrimaEngine engine, Program program, WorkerProxy proxy,
-			CheckedBiFunction<WorkerProxy, Episode, Boolean> function) throws Exception {
-		return api().getEpisodes(engine, program, proxy, function);
+	public ListTask<Episode> getEpisodes(IPrimaEngine engine, Program program) throws Exception {
+		return api().getEpisodes(engine, program);
 	}
 	
 	@Override
-	public List<Media> getMedia(IPrimaEngine engine, String url, WorkerProxy proxy,
-			CheckedBiFunction<WorkerProxy, Media, Boolean> function) throws Exception {
-		return api().getMedia(engine, url, proxy, function);
+	public ListTask<Media> getMedia(IPrimaEngine engine, URI uri) throws Exception {
+		return api().getMedia(engine, uri);
 	}
 	
 	@Override
@@ -155,14 +151,13 @@ final class PrimaPlus implements IPrima {
 			return result.getDirectCollection("data");
 		}
 		
-		private final <T, P> int parseItems(SSDCollection items, Collection<T> list,
-				Function<SSDCollection, T> transformer, Function<T, P> unwrapper, WorkerProxy proxy,
-				CheckedBiFunction<WorkerProxy, P, Boolean> function) throws Exception {
+		private final <T, P> int parseItems(ListTask<P> task, SSDCollection items, Collection<T> list,
+				Function<SSDCollection, T> transformer, Function<T, P> unwrapper) throws Exception {
 			for(SSDCollection item : items.collectionsIterable()) {
 				T value = transformer.apply(item);
 				
 				list.add(value);
-				if(!function.apply(proxy, unwrapper.apply(value))) {
+				if(!task.add(unwrapper.apply(value))) {
 					return EXIT_CALLBACK; // Do not continue
 				}
 			}
@@ -194,267 +189,258 @@ final class PrimaPlus implements IPrima {
 			return new ProgramWrapper(stripItemToProgram(item));
 		}
 		
-		public final List<Program> getPrograms(IPrimaEngine engine, WorkerProxy proxy,
-				CheckedBiFunction<WorkerProxy, Program, Boolean> function) throws Exception {
-			final String method = "strip.strip.bulkItems.vdm";
-			final String deviceType = "WEB";
-			
-			Set<ProgramWrapper> programs = new ConcurrentSkipListSet<>();
-			
-			final List<String> stripsMovies = List.of(
-				"8138baa8-c933-4015-b7ea-17ac7a679da4", // Movies (Recommended)
-				"8ab51da8-1890-4e78-8770-cbee59a3976a", // Movies (For you)
-				"7d92a9fa-a958-4d62-9ae9-2e2726c5a348", // Movies (Most watched)
-				"7fe91a63-682b-4c19-a472-5431d528e8ff"  // Movies (From TV)
-			);
-			
-			final List<String> stripsTVShows = List.of(
-  				"bbe97653-dcff-4599-bf6d-5459e8d6eef4", // TV shows
-				"82bee2e2-32ef-4323-ab1e-5f973bf5f0a6"  // TV shows (For you)
-  			);
-			
-			List<StripGroup> stripGroups = new ArrayList<>();
-			
-			// Must separate movies to genres since there is an offset limit that
-			// is otherwise reached.
-			for(String genre : listGenres()) {
-				stripGroups.add(new StripGroup(stripsMovies, List.of(new Filter("genre", genre))));
-			}
-			
-			stripGroups.add(new StripGroup(stripsTVShows, List.of()));
-			
-			final int numMaxProcessors = Math.max(1, Runtime.getRuntime().availableProcessors() / 2);
-			final int perPage = 64;
-			
-			ThreadedSpawnableTaskQueue<NextItemsTaskArgs, Integer> queue = (new ThreadedSpawnableTaskQueue<>(numMaxProcessors) {
+		public final ListTask<Program> getPrograms(IPrimaEngine engine) throws Exception {
+			return ListTask.of((task) -> {
+				final String method = "strip.strip.bulkItems.vdm";
+				final String deviceType = "WEB";
 				
-				@Override
-				protected Integer runTask(NextItemsTaskArgs args) throws Exception {
-					SSDCollection strip = listNextItems(args.stripId(), args.recommId(), args.offset(), perPage);
-					SSDCollection items = strip.getDirectCollection("items");
+				Set<ProgramWrapper> programs = new ConcurrentSkipListSet<>();
+				
+				final List<String> stripsMovies = List.of(
+					"8138baa8-c933-4015-b7ea-17ac7a679da4", // Movies (Recommended)
+					"8ab51da8-1890-4e78-8770-cbee59a3976a", // Movies (For you)
+					"7d92a9fa-a958-4d62-9ae9-2e2726c5a348", // Movies (Most watched)
+					"7fe91a63-682b-4c19-a472-5431d528e8ff"  // Movies (From TV)
+				);
+				
+				final List<String> stripsTVShows = List.of(
+	  				"bbe97653-dcff-4599-bf6d-5459e8d6eef4", // TV shows
+					"82bee2e2-32ef-4323-ab1e-5f973bf5f0a6"  // TV shows (For you)
+	  			);
+				
+				List<StripGroup> stripGroups = new ArrayList<>();
+				
+				// Must separate movies to genres since there is an offset limit that
+				// is otherwise reached.
+				for(String genre : listGenres()) {
+					stripGroups.add(new StripGroup(stripsMovies, List.of(new Filter("genre", genre))));
+				}
+				
+				stripGroups.add(new StripGroup(stripsTVShows, List.of()));
+				
+				final int numMaxProcessors = Math.max(1, Runtime.getRuntime().availableProcessors() / 2);
+				final int perPage = 64;
+				
+				ThreadedSpawnableTaskQueue<NextItemsTaskArgs, Integer> queue
+						= (new ThreadedSpawnableTaskQueue<>(numMaxProcessors) {
 					
-					int result;
-					if((result = parseItems(items, programs, API.this::stripItemToProgramWrapper,
-							ProgramWrapper::program, proxy, function)) != EXIT_SUCCESS) {
+					@Override
+					protected Integer runTask(NextItemsTaskArgs args) throws Exception {
+						SSDCollection strip = listNextItems(args.stripId(), args.recommId(), args.offset(), perPage);
+						SSDCollection items = strip.getDirectCollection("items");
+						
+						int result;
+						if((result = parseItems(task, items, programs, API.this::stripItemToProgramWrapper,
+								ProgramWrapper::program)) != EXIT_SUCCESS) {
+							return result;
+						}
+						
+						boolean hasNextItems = strip.getDirectBoolean("isNextItems");
+						
+						if(!shouldShutdown(result) && hasNextItems) {
+							int nextOffset = args.offset() + perPage;
+							
+							if(nextOffset < MAX_OFFSET) {
+								addTask(new NextItemsTaskArgs(args.stripId(), args.recommId(), nextOffset));
+							}
+						}
+						
 						return result;
 					}
 					
-					boolean hasNextItems = strip.getDirectBoolean("isNextItems");
-					
-					if(!shouldShutdown(result) && hasNextItems) {
-						int nextOffset = args.offset() + perPage;
-						
-						if(nextOffset < MAX_OFFSET) {
-							addTask(new NextItemsTaskArgs(args.stripId(), args.recommId(), nextOffset));
-						}
+					@Override
+					protected boolean shouldShutdown(Integer val) {
+						return val != EXIT_SUCCESS;
 					}
-					
-					return result;
+				});
+				
+				ExecutorService executor = Threads.Pools.newFixed(Math.min(stripGroups.size(), numMaxProcessors));
+				
+				for(StripGroup stripGroup : stripGroups) {
+					executor.submit(Utils.callable(() -> {
+						SSDCollection result = doRequest(
+							method,
+							"deviceType", deviceType,
+							"stripIds", stripGroup.stripIds(),
+							"limit", perPage,
+							"filter", stripGroup.filter()
+						);
+						
+						for(SSDCollection strip : result.getDirectCollection("data").collectionsIterable()) {
+							String stripId = strip.getName();
+							String recommId = strip.getDirectString("recommId");
+							boolean hasNextItems = strip.getDirectBoolean("isNextItems");
+							SSDCollection items = strip.getDirectCollection("items");
+							
+							parseItems(task, items, programs, this::stripItemToProgramWrapper, ProgramWrapper::program);
+							
+							if(hasNextItems) {
+								queue.addTask(new NextItemsTaskArgs(stripId, recommId, perPage));
+							}
+						}
+					}));
 				}
 				
-				@Override
-				protected boolean shouldShutdown(Integer val) {
-					return val != EXIT_SUCCESS;
+				executor.shutdown();
+				executor.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS);
+				queue.await();
+				
+				for(ProgramWrapper wrapper : programs) {
+					if(!task.add(wrapper.program())) {
+						return;
+					}
 				}
 			});
-			
-			ExecutorService executor = Threads.Pools.newFixed(Math.min(stripGroups.size(), numMaxProcessors));
-			
-			for(StripGroup stripGroup : stripGroups) {
-				executor.submit(Utils.callable(() -> {
-					SSDCollection result = doRequest(
-						method,
-						"deviceType", deviceType,
-						"stripIds", stripGroup.stripIds(),
-						"limit", perPage,
-						"filter", stripGroup.filter()
-					);
+		}
+		
+		public final ListTask<Episode> getEpisodes(IPrimaEngine engine, Program program) throws Exception {
+			return ListTask.of((task) -> {
+				// Handle movies separately since they do not have any episodes
+				String type;
+				if((type = program.get("type")) != null && type.equals("movie")) {
+					Episode episode = new Episode(program, program.uri(), program.title());
+					task.add(episode);
+					return; // Do not continue
+				}
+				
+				String html = FastWeb.get(program.uri(), Map.of());
+				Nuxt nuxt = Nuxt.extract(html);
+				
+				if(nuxt == null) {
+					throw new IllegalStateException("Unable to extract information about episodes");
+				}
+				
+				String dataName = Utils.stream(nuxt.data().collectionsIterable())
+					.filter((c) -> c.hasCollection("title"))
+					.findFirst().get().getName();
+				
+				SSDCollection seasons = nuxt.getCollection(dataName + ".title.seasons");
+				String programTitle = program.title();
+				
+				Regex regexEpisodeName = Regex.of("Epizoda\\s+\\d+|^" + Regex.quote(programTitle) + "\\s+\\(\\d+\\)$");
+				
+				List<SSDCollection> collSeasons = List.copyOf(seasons.collections());
+				
+				int numSeason = collSeasons.size();
+				for(ListIterator<SSDCollection> itSeason = collSeasons.listIterator(numSeason);
+						itSeason.hasPrevious(); --numSeason) {
+					SSDCollection seasonData = itSeason.previous();
+					List<SSDCollection> collEpisodes = List.copyOf(seasonData.getDirectCollection("episodes").collections());
 					
-					for(SSDCollection strip : result.getDirectCollection("data").collectionsIterable()) {
-						String stripId = strip.getName();
-						String recommId = strip.getDirectString("recommId");
-						boolean hasNextItems = strip.getDirectBoolean("isNextItems");
-						SSDCollection items = strip.getDirectCollection("items");
+					int numEpisode = collEpisodes.size();
+					for(ListIterator<SSDCollection> itEpisode = collEpisodes.listIterator(numEpisode);
+							itEpisode.hasPrevious(); --numEpisode) {
+						SSDCollection episodeData = itEpisode.previous();
+						String title = nuxt.resolve(episodeData.getDirectString("title"));
+						String uri = nuxt.resolve(episodeData.getString("additionals.webUrl"));
 						
-						parseItems(items, programs, this::stripItemToProgramWrapper, ProgramWrapper::program,
-							proxy, function);
+						title = Utils.replaceUnicodeEscapeSequences(title);
+						uri = Utils.replaceUnicodeEscapeSequences(uri);
 						
-						if(hasNextItems) {
-							queue.addTask(new NextItemsTaskArgs(stripId, recommId, perPage));
+						StringBuilder fullTitle = new StringBuilder();
+						fullTitle.append(programTitle);
+						fullTitle.append(" (").append(numSeason).append(". sezóna)");
+						fullTitle.append(" - ").append(numEpisode).append(". epizoda");
+						
+						if(!regexEpisodeName.matcher(title).matches()) {
+							fullTitle.append(" - ").append(title);
+						}
+						
+						Episode episode = new Episode(program, Utils.uri(uri), fullTitle.toString());
+						
+						if(!task.add(episode)) {
+							return; // Do not continue
 						}
 					}
-				}));
-			}
-			
-			executor.shutdown();
-			executor.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS);
-			queue.await();
-			
-			return programs.stream().map(ProgramWrapper::program).collect(Collectors.toList());
+				}
+			});
 		}
 		
-		public final List<Episode> getEpisodes(IPrimaEngine engine, Program program, WorkerProxy proxy,
-				CheckedBiFunction<WorkerProxy, Episode, Boolean> function) throws Exception {
-			List<Episode> episodes = new ArrayList<>();
-			
-			// Handle movies separately since they do not have any episodes
-			String type;
-			if((type = program.get("type")) != null && type.equals("movie")) {
-				Episode episode = new Episode(program, program.uri(), program.title());
+		public final ListTask<Media> getMedia(IPrimaEngine engine, URI uri) throws Exception {
+			return ListTask.of((task) -> {
+				String html = FastWeb.get(uri, Map.of());
+				Nuxt nuxt = Nuxt.extract(html);
 				
-				episodes.add(episode);
-				if(!function.apply(proxy, episode)) {
-					return null; // Do not continue
+				if(nuxt == null) {
+					throw new IllegalStateException("Unable to extract information about media content");
 				}
 				
-				return episodes;
-			}
-			
-			String html = FastWeb.get(program.uri(), Map.of());
-			Nuxt nuxt = Nuxt.extract(html);
-			
-			if(nuxt == null) {
-				throw new IllegalStateException("Unable to extract information about episodes");
-			}
-			
-			String dataName = Utils.stream(nuxt.data().collectionsIterable())
-				.filter((c) -> c.hasCollection("title"))
-				.findFirst().get().getName();
-			
-			SSDCollection seasons = nuxt.getCollection(dataName + ".title.seasons");
-			String programTitle = program.title();
-			
-			Regex regexEpisodeName = Regex.of("Epizoda\\s+\\d+|^" + Regex.quote(programTitle) + "\\s+\\(\\d+\\)$");
-			
-			List<SSDCollection> collSeasons = List.copyOf(seasons.collections());
-			
-			int numSeason = collSeasons.size();
-			for(ListIterator<SSDCollection> itSeason = collSeasons.listIterator(numSeason);
-					itSeason.hasPrevious(); --numSeason) {
-				SSDCollection seasonData = itSeason.previous();
-				List<SSDCollection> collEpisodes = List.copyOf(seasonData.getDirectCollection("episodes").collections());
+				String dataName = Utils.stream(nuxt.data().collectionsIterable())
+					.filter((c) -> c.hasCollection("content"))
+					.findFirst().get().getName();
+				String videoPlayId = nuxt.getResolved(dataName + ".content.additionals.videoPlayId");
 				
-				int numEpisode = collEpisodes.size();
-				for(ListIterator<SSDCollection> itEpisode = collEpisodes.listIterator(numEpisode);
-						itEpisode.hasPrevious(); --numEpisode) {
-					SSDCollection episodeData = itEpisode.previous();
-					String title = nuxt.resolve(episodeData.getDirectString("title"));
-					String uri = nuxt.resolve(episodeData.getString("additionals.webUrl"));
-					
-					title = Utils.replaceUnicodeEscapeSequences(title);
-					uri = Utils.replaceUnicodeEscapeSequences(uri);
-					
-					StringBuilder fullTitle = new StringBuilder();
-					fullTitle.append(programTitle);
-					fullTitle.append(" (").append(numSeason).append(". sezóna)");
-					fullTitle.append(" - ").append(numEpisode).append(". epizoda");
-					
-					if(!regexEpisodeName.matcher(title).matches()) {
-						fullTitle.append(" - ").append(title);
-					}
-					
-					Episode episode = new Episode(program, Utils.uri(uri), fullTitle.toString());
-					
-					episodes.add(episode);
-					if(!function.apply(proxy, episode)) {
-						return null; // Do not continue
-					}
+				if(videoPlayId == null) {
+					throw new IllegalStateException("Unable to extract video play ID");
 				}
-			}
-			
-			return episodes;
-		}
-		
-		public final List<Media> getMedia(IPrimaEngine engine, String url, WorkerProxy proxy,
-				CheckedBiFunction<WorkerProxy, Media, Boolean> function) throws Exception {
-			List<Media> sources = new ArrayList<>();
-			
-			String html = FastWeb.get(Utils.uri(url), Map.of());
-			Nuxt nuxt = Nuxt.extract(html);
-			
-			if(nuxt == null) {
-				throw new IllegalStateException("Unable to extract information about media content");
-			}
-			
-			String dataName = Utils.stream(nuxt.data().collectionsIterable())
-				.filter((c) -> c.hasCollection("content"))
-				.findFirst().get().getName();
-			String videoPlayId = nuxt.getResolved(dataName + ".content.additionals.videoPlayId");
-			
-			if(videoPlayId == null) {
-				throw new IllegalStateException("Unable to extract video play ID");
-			}
-			
-			// It is important to specify the referer, otherwise the response code is 403.
-			Map<String, String> requestHeaders = Utils.toMap("Referer", "https://www.iprima.cz/");
-			try {
-				// Try to log in to the iPrima website using the internal account to have HD sources available.
-				IPrimaAuthenticator.SessionData sessionData = IPrimaAuthenticator.getSessionData();
-				Utils.merge(requestHeaders, sessionData.requestHeaders());
-			} catch(Exception ex) {
-				// Notify the user that the HD sources may not be available due to inability to log in.
-				MediaDownloader.error(new IllegalStateException("Unable to log in to the iPrima website.", ex));
-			}
-			
-			URI configUri = Utils.uri(Utils.format(URL_API_PLAY, "play_id", videoPlayId));
-			String content = FastWeb.get(configUri, requestHeaders);
-			
-			if(content == null || content.isEmpty()) {
-				throw new IllegalStateException("Empty play configuration content");
-			}
-			
-			SSDCollection configData = JSON.read(content);
-			
-			// Get information for the media title
-			String programName = nuxt.getResolved(dataName + ".content.additionals.programTitle", "");
-			String numSeason = nuxt.getResolved(dataName + ".content.additionals.seasonNumber", null);
-			String numEpisode = nuxt.getResolved(dataName + ".content.additionals.episodeNumber", null);
-			String episodeName = nuxt.getResolved(dataName + ".content.title", "");
-			
-			if(programName.isEmpty()) {
-				programName = episodeName;
-				episodeName = "";
-			}
-			
-			Regex regexEpisodeName = Regex.of("Epizoda\\s+\\d+|^" + Regex.quote(programName) + "\\s+\\(\\d+\\)$");
-			
-			if(!episodeName.isEmpty()
-					&& regexEpisodeName.matcher(episodeName).matches()) {
-				episodeName = "";
-			}
-			
-			if(numSeason != null && numSeason.isEmpty()) numSeason = null;
-			if(numEpisode != null && numEpisode.isEmpty()) numEpisode = null;
-			
-			String title = MediaUtils.mediaTitle(programName, numSeason, numEpisode, episodeName, false);
-			
-			// Collect all available stream infos
-			SSDCollection streamInfos = SSDCollection.emptyArray();
-			for(SSDCollection configItem : configData.collectionsIterable()) {
-				for(SSDCollection streamInfo : configItem.getDirectCollection("streamInfos").collectionsIterable()) {
-					streamInfos.add(streamInfo);
-				}
-			}
-			
-			URI sourceURI = Utils.uri(url);
-			MediaSource source = MediaSource.of(engine);
-			
-			for(SSDCollection streamInfo : streamInfos.collectionsIterable()) {
-				String src = streamInfo.getDirectString("url");
-				MediaLanguage language = MediaLanguage.ofCode(streamInfo.getString("lang.key"));
-				List<Media> media = MediaUtils.createMedia(source, Utils.uri(src), sourceURI, title,
-					language, MediaMetadata.empty());
 				
-				for(Media m : media) {
-					sources.add(m);
-					
-					if(!function.apply(proxy, m)) {
-						return null; // Do not continue
+				// It is important to specify the referer, otherwise the response code is 403.
+				Map<String, String> requestHeaders = Utils.toMap("Referer", "https://www.iprima.cz/");
+				try {
+					// Try to log in to the iPrima website using the internal account to have HD sources available.
+					IPrimaAuthenticator.SessionData sessionData = IPrimaAuthenticator.getSessionData();
+					Utils.merge(requestHeaders, sessionData.requestHeaders());
+				} catch(Exception ex) {
+					// Notify the user that the HD sources may not be available due to inability to log in.
+					MediaDownloader.error(new IllegalStateException("Unable to log in to the iPrima website.", ex));
+				}
+				
+				URI configUri = Utils.uri(Utils.format(URL_API_PLAY, "play_id", videoPlayId));
+				String content = FastWeb.get(configUri, requestHeaders);
+				
+				if(content == null || content.isEmpty()) {
+					throw new IllegalStateException("Empty play configuration content");
+				}
+				
+				SSDCollection configData = JSON.read(content);
+				
+				// Get information for the media title
+				String programName = nuxt.getResolved(dataName + ".content.additionals.programTitle", "");
+				String numSeason = nuxt.getResolved(dataName + ".content.additionals.seasonNumber", null);
+				String numEpisode = nuxt.getResolved(dataName + ".content.additionals.episodeNumber", null);
+				String episodeName = nuxt.getResolved(dataName + ".content.title", "");
+				
+				if(programName.isEmpty()) {
+					programName = episodeName;
+					episodeName = "";
+				}
+				
+				Regex regexEpisodeName = Regex.of("Epizoda\\s+\\d+|^" + Regex.quote(programName) + "\\s+\\(\\d+\\)$");
+				
+				if(!episodeName.isEmpty()
+						&& regexEpisodeName.matcher(episodeName).matches()) {
+					episodeName = "";
+				}
+				
+				if(numSeason != null && numSeason.isEmpty()) numSeason = null;
+				if(numEpisode != null && numEpisode.isEmpty()) numEpisode = null;
+				
+				String title = MediaUtils.mediaTitle(programName, numSeason, numEpisode, episodeName, false);
+				
+				// Collect all available stream infos
+				SSDCollection streamInfos = SSDCollection.emptyArray();
+				for(SSDCollection configItem : configData.collectionsIterable()) {
+					for(SSDCollection streamInfo : configItem.getDirectCollection("streamInfos").collectionsIterable()) {
+						streamInfos.add(streamInfo);
 					}
 				}
-			}
-			
-			return sources;
+				
+				URI sourceURI = uri;
+				MediaSource source = MediaSource.of(engine);
+				
+				for(SSDCollection streamInfo : streamInfos.collectionsIterable()) {
+					String src = streamInfo.getDirectString("url");
+					MediaLanguage language = MediaLanguage.ofCode(streamInfo.getString("lang.key"));
+					List<Media> media = MediaUtils.createMedia(source, Utils.uri(src), sourceURI, title,
+						language, MediaMetadata.empty());
+					
+					for(Media m : media) {
+						if(!task.add(m)) {
+							return; // Do not continue
+						}
+					}
+				}
+			});
 		}
 		
 		private static interface JSONSerializable {

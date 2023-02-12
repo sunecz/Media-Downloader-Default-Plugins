@@ -9,7 +9,6 @@ import java.net.URI;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -34,9 +33,8 @@ import javafx.scene.image.Image;
 import sune.app.mediadown.Episode;
 import sune.app.mediadown.Program;
 import sune.app.mediadown.Shared;
+import sune.app.mediadown.concurrent.ListTask;
 import sune.app.mediadown.concurrent.Threads;
-import sune.app.mediadown.concurrent.WorkerProxy;
-import sune.app.mediadown.concurrent.WorkerUpdatableTask;
 import sune.app.mediadown.engine.MediaEngine;
 import sune.app.mediadown.media.Media;
 import sune.app.mediadown.media.MediaContainer;
@@ -48,7 +46,6 @@ import sune.app.mediadown.media.MediaUtils;
 import sune.app.mediadown.media.SubtitlesMedia;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
-import sune.app.mediadown.util.CheckedBiFunction;
 import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.JavaScript;
 import sune.app.mediadown.util.Opt;
@@ -76,198 +73,142 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 	public static final String URL     = PLUGIN.getURL();
 	public static final Image  ICON    = PLUGIN.getIcon();
 	
-	private static final CT[] SUPPORTED_WEBS = Utils.array(
-		CT_iVysilani.getInstance(), CT_Porady.getInstance(), CT_Decko.getInstance(),
-		CT_24.getInstance(), CT_Sport.getInstance(), CT_Art.getInstance(), CT_Edu.getInstance()
-	);
+	private static final CT[] SUPPORTED_WEBS = {
+		CT_iVysilani.getInstance(),
+		CT_Porady.getInstance(),
+		CT_Decko.getInstance(),
+		CT_24.getInstance(),
+		CT_Sport.getInstance(),
+		CT_Art.getInstance(),
+		CT_Edu.getInstance(),
+	};
 	
 	// Allow to create an instance when registering the engine
 	CeskaTelevizeEngine() {
 	}
 	
-	private static final boolean checkURLSubdomain(URL url, String required) {
-		String[] hostParts = url.getHost().split("\\.", 2);
+	private static final boolean checkURLSubdomain(URI uri, String required) {
+		String[] hostParts = uri.getHost().split("\\.", 2);
 		return hostParts.length > 1 && hostParts[0].equalsIgnoreCase(required);
 	}
 	
-	// ----- Internal methods
-	
-	private final WorkerProxy _dwp = WorkerProxy.defaultProxy();
-	
-	private final List<Program> internal_getPrograms() throws Exception {
-		return internal_getPrograms(_dwp, (p, a) -> true);
-	}
-	
-	private final List<Program> internal_getPrograms(WorkerProxy proxy,
-			CheckedBiFunction<WorkerProxy, Program, Boolean> function) throws Exception {
-		List<Program> programs = new ArrayList<>();
-		Set<CT_API.ProgramWrapper> accumulator = new ConcurrentSkipListSet<>();
-		
-		(new IntConcurrentLoop() {
+	@Override
+	public ListTask<Program> getPrograms() throws Exception {
+		return ListTask.of((task) -> {
+			Set<API.ProgramWrapper> accumulator = new ConcurrentSkipListSet<>();
 			
-			@Override
-			protected void iteration(Integer category) throws Exception {
-				CT_API.getPrograms(accumulator, category, proxy, function);
+			(new IntConcurrentLoop() {
+				
+				@Override
+				protected void iteration(Integer category) throws Exception {
+					ListTask<API.ProgramWrapper> t = API.getPrograms(category);
+					t.forwardAdd(task, API.ProgramWrapper::program);
+					t.startAndWait();
+				}
+			}).iterate(API.categories());
+			
+			for(API.ProgramWrapper wrapper : accumulator) {
+				if(!task.add(wrapper.program())) {
+					return; // Do not continue
+				}
 			}
-		}).iterate(CT_API.categories());
-		
-		accumulator.stream()
-			.map(CT_API.ProgramWrapper::program)
-			.forEachOrdered(programs::add);
-		
-		return programs;
+		});
 	}
 	
-	private final List<Episode> internal_getEpisodes(Program program) throws Exception {
-		return internal_getEpisodes(program, _dwp, (p, a) -> true);
+	@Override
+	public ListTask<Episode> getEpisodes(Program program) throws Exception {
+		return ListTask.of((task) -> {
+			// We need to get the IDEC of the given program first
+			Document document = Utils.document(program.uri());
+			WebMediaMetadata metadata = WebMediaMetadataExtractor.extract(document);
+			API.getEpisodes(task, program, metadata.IDEC());
+		});
 	}
 	
-	private final List<Episode> internal_getEpisodes(Program program, WorkerProxy proxy,
-			CheckedBiFunction<WorkerProxy, Episode, Boolean> function) throws Exception {
-		List<Episode> episodes = new ArrayList<>();
-		// We need to get the IDEC of the given program first
-		Document document = Utils.document(program.uri());
-		WebMediaMetadata metadata = WebMediaMetadataExtractor.extract(document);
-		CT_API.getEpisodes(episodes, program, metadata.IDEC(), proxy, function);
-		return episodes;
-	}
-	
-	private final List<Media> internal_getMedia(String url, Map<String, Object> data) throws Exception {
-		return internal_getMedia(url, data, _dwp, (p, a) -> true);
-	}
-	
-	private final List<Media> internal_getMedia(String url, WorkerProxy proxy,
-			CheckedBiFunction<WorkerProxy, Media, Boolean> function) throws Exception {
-		return internal_getMedia(url, Map.of(), proxy, function);
-	}
-	
-	private final List<Media> internal_getMedia(Episode episode) throws Exception {
-		return internal_getMedia(episode, _dwp, (p, a) -> true);
-	}
-	
-	private final List<Media> internal_getMedia(Episode episode, WorkerProxy proxy,
-			CheckedBiFunction<WorkerProxy, Media, Boolean> function) throws Exception {
-		return internal_getMedia(episode.uri().toString(), proxy, function);
-	}
-	
-	private final List<Media> internal_getMedia(String url, Map<String, Object> data, WorkerProxy proxy,
-			CheckedBiFunction<WorkerProxy, Media, Boolean> function) throws Exception {
-		List<Media> sources = new ArrayList<>();
-		List<ExtractJob> jobs = new ArrayList<>();
-		URL urlObj = Utils.url(url);
-		CT ct = Arrays.stream(SUPPORTED_WEBS).filter((c) -> c.isCompatible(urlObj)).findFirst().orElse(null);
-		if(ct != null) ct.getExtractJobs(Utils.document(url), jobs);
-		MediaSource source = MediaSource.of(this);
-		for(ExtractJob job : jobs) {
-			String videoURL = job.url;
-			switch(job.method) {
-				case SOURCE_INFO: {
-					SourceInfo info = SourceInfoExtractor.acquire(videoURL);
-					if(info != null) {
-						PlaylistData playlistData = PlaylistDataGetter.get(videoURL, info);
-						Map<String, String> headers = Utils.toMap("X-Requested-With", "XMLHttpRequest");
-						Request request = new GetRequest(Utils.url(playlistData.url), Shared.USER_AGENT, headers);
-						StreamResponse response = Web.requestStream(request);
-						SSDCollection json = SSDF.readJSON(response.stream);
-						SSDCollection playlist = json.getDirectCollection("playlist");
-						List<SSDCollection> mediaItems
-							= StreamSupport.stream(Spliterators.spliterator(playlist.collectionsIterator(),
-																			playlist.length(),
-																			Spliterator.ORDERED),
-												   false)
-										   .filter((item) -> !item.getString("type").equalsIgnoreCase("TRAILER"))
-										   .collect(Collectors.toList());
-						for(SSDCollection mediaItem : mediaItems) {
-							String streamURL = mediaItem.getString("streamUrls.main", null);
-							if(streamURL != null) {
-								List<Media.Builder<?, ?>> media = MediaUtils.createMediaBuilders(source,
-									Utils.uri(streamURL), Utils.uri(url), job.title, MediaLanguage.UNKNOWN,
-									MediaMetadata.empty());
+	@Override
+	public ListTask<Media> getMedia(URI uri, Map<String, Object> data) throws Exception {
+		return ListTask.of((task) -> {
+			List<ExtractJob> jobs = new ArrayList<>();
+			MediaSource source = MediaSource.of(this);
+			CT ct = Arrays.stream(SUPPORTED_WEBS).filter((c) -> c.isCompatible(uri)).findFirst().orElse(null);
+			
+			if(ct != null) {
+				ct.getExtractJobs(Utils.document(uri), jobs);
+			}
+			
+			for(ExtractJob job : jobs) {
+				String videoURL = job.url;
+				
+				switch(job.method) {
+					case SOURCE_INFO: {
+						SourceInfo info = SourceInfoExtractor.acquire(videoURL);
+						
+						if(info != null) {
+							PlaylistData playlistData = PlaylistDataGetter.get(videoURL, info);
+							Map<String, String> headers = Utils.toMap("X-Requested-With", "XMLHttpRequest");
+							Request request = new GetRequest(Utils.url(playlistData.url), Shared.USER_AGENT, headers);
+							StreamResponse response = Web.requestStream(request);
+							SSDCollection json = SSDF.readJSON(response.stream);
+							SSDCollection playlist = json.getDirectCollection("playlist");
+							List<SSDCollection> mediaItems
+								= StreamSupport.stream(Spliterators.spliterator(playlist.collectionsIterator(),
+																				playlist.length(),
+																				Spliterator.ORDERED),
+													   false)
+											   .filter((item) -> !item.getString("type").equalsIgnoreCase("TRAILER"))
+											   .collect(Collectors.toList());
+							
+							for(SSDCollection mediaItem : mediaItems) {
+								String streamURL = mediaItem.getString("streamUrls.main", null);
 								
-								// Check, if the media has some additional subtitles
-								SSDCollection subtitlesArray;
-								if((subtitlesArray = Opt.of(mediaItem.getDirectCollection("subtitles", null))
-										.ifTrue(Objects::nonNull)
-										.orElseGet(SSDCollection::emptyArray)).length() > 0) {
-									// Parse the subtitles and add them to all obtained media
-									for(SSDCollection mediaSubtitles : subtitlesArray.collectionsIterable()) {
-										MediaLanguage subLanguage = MediaLanguage.ofCode(mediaSubtitles.getDirectString("code"));
-										String subURL = mediaSubtitles.getDirectString("url");
-										MediaFormat subFormat = MediaFormat.fromPath(subURL);
-										SubtitlesMedia.Builder<?, ?> subtitles = SubtitlesMedia.simple().source(source)
-												.uri(Utils.uri(subURL)).format(subFormat).language(subLanguage);
-										media.forEach((m) -> MediaUtils.appendMedia((MediaContainer.Builder<?, ?>) m, subtitles));
+								if(streamURL != null) {
+									List<Media.Builder<?, ?>> media = MediaUtils.createMediaBuilders(source,
+										Utils.uri(streamURL), uri, job.title, MediaLanguage.UNKNOWN,
+										MediaMetadata.empty());
+									
+									// Check, if the media has some additional subtitles
+									SSDCollection subtitlesArray;
+									if((subtitlesArray = Opt.of(mediaItem.getDirectCollection("subtitles", null))
+											.ifTrue(Objects::nonNull)
+											.orElseGet(SSDCollection::emptyArray)).length() > 0) {
+										// Parse the subtitles and add them to all obtained media
+										for(SSDCollection mediaSubtitles : subtitlesArray.collectionsIterable()) {
+											MediaLanguage subLanguage = MediaLanguage.ofCode(mediaSubtitles.getDirectString("code"));
+											String subURL = mediaSubtitles.getDirectString("url");
+											MediaFormat subFormat = MediaFormat.fromPath(subURL);
+											SubtitlesMedia.Builder<?, ?> subtitles = SubtitlesMedia.simple().source(source)
+													.uri(Utils.uri(subURL)).format(subFormat).language(subLanguage);
+											media.forEach((m) -> MediaUtils.appendMedia((MediaContainer.Builder<?, ?>) m, subtitles));
+										}
 									}
-								}
-								
-								// Finally, add all the media
-								for(Media s : Utils.iterable(media.stream().map(Media.Builder::build).iterator())) {
-									sources.add(s);
-									if(!function.apply(proxy, s))
-										return null; // Do not continue
+									
+									// Finally, add all the media
+									for(Media s : Utils.iterable(media.stream().map(Media.Builder::build).iterator())) {
+										if(!task.add(s)) {
+											return; // Do not continue
+										}
+									}
 								}
 							}
 						}
+						break;
 					}
-					break;
-				}
-				case NONE: {
-					if(videoURL != null) {
-						List<Media> media = MediaUtils.createMedia(source, Utils.uri(videoURL), Utils.uri(url),
-							job.title, MediaLanguage.UNKNOWN, MediaMetadata.empty());
-						for(Media s : media) {
-							sources.add(s);
-							if(!function.apply(proxy, s))
-								return null; // Do not continue
+					case NONE: {
+						if(videoURL != null) {
+							List<Media> media = MediaUtils.createMedia(source, Utils.uri(videoURL), uri,
+								job.title, MediaLanguage.UNKNOWN, MediaMetadata.empty());
+							
+							for(Media s : media) {
+								if(!task.add(s)) {
+									return; // Do not continue
+								}
+							}
 						}
+						break;
 					}
-					break;
 				}
 			}
-		}
-		return sources;
-	}
-	
-	// -----
-	
-	@Override
-	public List<Program> getPrograms() throws Exception {
-		return internal_getPrograms();
-	}
-	
-	@Override
-	public List<Episode> getEpisodes(Program program) throws Exception {
-		return internal_getEpisodes(program);
-	}
-	
-	@Override
-	public List<Media> getMedia(Episode episode) throws Exception {
-		return internal_getMedia(episode);
-	}
-	
-	@Override
-	public WorkerUpdatableTask<CheckedBiFunction<WorkerProxy, Program, Boolean>, Void> getPrograms
-			(CheckedBiFunction<WorkerProxy, Program, Boolean> function) {
-		return WorkerUpdatableTask.voidTaskChecked(function, (p, f) -> internal_getPrograms(p, f));
-	}
-	
-	@Override
-	public WorkerUpdatableTask<CheckedBiFunction<WorkerProxy, Episode, Boolean>, Void> getEpisodes
-			(Program program,
-			 CheckedBiFunction<WorkerProxy, Episode, Boolean> function) {
-		return WorkerUpdatableTask.voidTaskChecked(function, (p, f) -> internal_getEpisodes(program, p, f));
-	}
-	
-	@Override
-	public WorkerUpdatableTask<CheckedBiFunction<WorkerProxy, Media, Boolean>, Void> getMedia
-			(Episode episode,
-			 CheckedBiFunction<WorkerProxy, Media, Boolean> function) {
-		return WorkerUpdatableTask.voidTaskChecked(function, (p, c) -> internal_getMedia(episode, p, c));
-	}
-	
-	@Override
-	public List<Media> getMedia(URI uri, Map<String, Object> data) throws Exception {
-		return internal_getMedia(uri.toString(), data);
+		});
 	}
 	
 	@Override
@@ -276,15 +217,14 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 	}
 	
 	@Override
-	public boolean isCompatibleURL(String url) {
-		URL urlObj = Utils.url(url);
+	public boolean isCompatibleURI(URI uri) {
 		// Check the protocol
-		String protocol = urlObj.getProtocol();
+		String protocol = uri.getScheme();
 		if(!protocol.equals("http") &&
 		   !protocol.equals("https"))
 			return false;
 		// Check the host
-		String[] hostParts = urlObj.getHost().split("\\.", 2);
+		String[] hostParts = uri.getHost().split("\\.", 2);
 		if(hostParts.length < 2
 				// Check only the second and top level domain names,
 				// since there are many subdomains, and there may be
@@ -325,7 +265,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		return TITLE;
 	}
 	
-	private static final class CT_API {
+	private static final class API {
 		
 		private static final String URL = "https://api.ceskatelevize.cz/graphql/";
 		private static final String REFERER = "https://www.ceskatelevize.cz/";
@@ -519,50 +459,64 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			return new CollectionAPIResult(items, total);
 		}
 		
-		public static final void getPrograms(Collection<ProgramWrapper> programs, int categoryId, WorkerProxy proxy,
-				CheckedBiFunction<WorkerProxy, Program, Boolean> function) throws Exception {
-			int offset = 0, total = -1;
-			CollectionAPIResult result;
-			loop:
-			do {
-				result = getProgramsWithCategory(categoryId, offset, MAX_ITEMS_PER_PAGE);
-				for(SSDCollection item : result.items().collectionsIterable()) {
-					Program program = parseProgram(item);
-					programs.add(new ProgramWrapper(program));
-					if(!function.apply(proxy, program))
-						break loop;
-				}
-				if(total < 0)
-					total = result.total();
-				offset += MAX_ITEMS_PER_PAGE;
-			} while(offset < total);
+		public static final ListTask<ProgramWrapper> getPrograms(int categoryId) throws Exception {
+			return ListTask.of((task) -> {
+				int offset = 0, total = -1;
+				CollectionAPIResult result;
+				
+				loop:
+				do {
+					result = getProgramsWithCategory(categoryId, offset, MAX_ITEMS_PER_PAGE);
+					
+					for(SSDCollection item : result.items().collectionsIterable()) {
+						Program program = parseProgram(item);
+						
+						if(!task.add(new ProgramWrapper(program))) {
+							break loop;
+						}
+					}
+					
+					if(total < 0) {
+						total = result.total();
+					}
+					
+					offset += MAX_ITEMS_PER_PAGE;
+				} while(offset < total);
+			});
 		}
 		
-		public static final void getEpisodes(Collection<Episode> episodes, Program program, String idec, WorkerProxy proxy,
-				CheckedBiFunction<WorkerProxy, Episode, Boolean> function) throws Exception {
+		public static final void getEpisodes(ListTask<Episode> task, Program program, String idec) throws Exception {
 			int offset = 0, total = -1;
 			CollectionAPIResult result;
+			
 			loop:
 			do {
 				result = getEpisodes(idec, offset, MAX_ITEMS_PER_PAGE);
+				
 				for(SSDCollection item : result.items().collectionsIterable()) {
 					Episode episode = parseEpisode(program, item);
-					episodes.add(episode);
-					if(!function.apply(proxy, episode))
+					
+					if(!task.add(episode)) {
 						break loop;
+					}
 				}
-				if(total < 0)
+				
+				if(total < 0) {
 					total = result.total();
+				}
+				
 				offset += MAX_ITEMS_PER_PAGE;
 			} while(offset < total);
 		}
 		
 		public static final CollectionAPIResult searchShows(String text, int offset, int limit) throws Exception {
-			SSDCollection json = doOperation("SearchShows", QUERY_SEARCH_SHOWS,
+			SSDCollection json = doOperation(
+				"SearchShows", QUERY_SEARCH_SHOWS,
 				"limit", limit,
 				"offset", offset,
 				"search", text,
-				"onlyPlayable", false);
+				"onlyPlayable", false
+			);
 			SSDCollection items = json.getCollection("data.searchShows.items");
 			int total = json.getInt("data.searchShows.totalCount");
 			return new CollectionAPIResult(items, total);
@@ -1019,9 +973,9 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			}
 			
 			// Iteratively get as many episodes as needed in chunks and find the needed one
-			CT_API.CollectionAPIResult result;
+			API.CollectionAPIResult result;
 			do {
-				result = CT_API.getEpisodes(programIDEC, offset, CT_API.MAX_ITEMS_PER_PAGE, seasonId);
+				result = API.getEpisodes(programIDEC, offset, API.MAX_ITEMS_PER_PAGE, seasonId);
 				for(SSDCollection item : result.items().collectionsIterable()) {
 					String id = item.getDirectString("id", "");
 					episodes.add(id); // Put to the cache
@@ -1030,7 +984,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 				}
 				if(total < 0)
 					total = result.total();
-				offset += CT_API.MAX_ITEMS_PER_PAGE;
+				offset += API.MAX_ITEMS_PER_PAGE;
 			} while(index < 0 && offset < total);
 			
 			return index;
@@ -1040,7 +994,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 	private static interface CT {
 		
 		void getExtractJobs(Document document, List<ExtractJob> jobs) throws Exception;
-		boolean isCompatible(URL url);
+		boolean isCompatible(URI uri);
 	}
 	
 	// Context-dependant Singleton instantiator
@@ -1105,8 +1059,8 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		}
 		
 		@Override
-		public final boolean isCompatible(URL url) {
-			return checkURLSubdomain(url, SUBDOMAIN) && url.getPath().startsWith(PATH_PREFIX);
+		public final boolean isCompatible(URI uri) {
+			return checkURLSubdomain(uri, SUBDOMAIN) && uri.getPath().startsWith(PATH_PREFIX);
 		}
 	}
 	
@@ -1132,8 +1086,8 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		}
 		
 		@Override
-		public final boolean isCompatible(URL url) {
-			return checkURLSubdomain(url, SUBDOMAIN) && url.getPath().startsWith(PATH_PREFIX);
+		public final boolean isCompatible(URI uri) {
+			return checkURLSubdomain(uri, SUBDOMAIN) && uri.getPath().startsWith(PATH_PREFIX);
 		}
 	}
 	
@@ -1165,23 +1119,26 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			if(!matcherURL.matches()) return; // Cannot obtain the show code
 			
 			String showCode = matcherURL.group(1);
-			String showId = CT_API.getShowId(showCode);
+			String showId = API.getShowId(showCode);
 			String showURL = Utils.format(FORMAT_SHOW_URL, "show_id", showId, "show_code", showCode);
 			Program program = new Program(Utils.uri(showURL), showCode);
 			
 			// Obtain all the episodes to extract media sources from
-			List<Episode> episodes = new ArrayList<>();
-			CT_API.getEpisodes(episodes, program,
-			                   WebMediaMetadataExtractor.extract(Utils.document(program.uri())).IDEC(),
-			                   WorkerProxy.defaultProxy(), (p, e) -> true);
+			ListTask<Episode> task = ListTask.of((t) -> {
+				API.getEpisodes(t, program, WebMediaMetadataExtractor.extract(Utils.document(program.uri())).IDEC());
+			});
+			
+			task.startAndWait();
 			
 			CT_Porady ctInstance = CT_Porady.getInstance();
-			for(Episode episode : episodes) ctInstance.getExtractJobs(Utils.document(episode.uri()), jobs);
+			for(Episode episode : task.list()) {
+				ctInstance.getExtractJobs(Utils.document(episode.uri()), jobs);
+			}
 		}
 		
 		@Override
-		public final boolean isCompatible(URL url) {
-			return checkURLSubdomain(url, SUBDOMAIN);
+		public final boolean isCompatible(URI uri) {
+			return checkURLSubdomain(uri, SUBDOMAIN);
 		}
 	}
 	
@@ -1226,8 +1183,8 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		}
 		
 		@Override
-		public final boolean isCompatible(URL url) {
-			return checkURLSubdomain(url, SUBDOMAIN);
+		public final boolean isCompatible(URI uri) {
+			return checkURLSubdomain(uri, SUBDOMAIN);
 		}
 	}
 	
@@ -1306,8 +1263,8 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		}
 		
 		@Override
-		public final boolean isCompatible(URL url) {
-			return checkURLSubdomain(url, SUBDOMAIN);
+		public final boolean isCompatible(URI uri) {
+			return checkURLSubdomain(uri, SUBDOMAIN);
 		}
 	}
 	
@@ -1335,8 +1292,8 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		}
 		
 		@Override
-		public final boolean isCompatible(URL url) {
-			return checkURLSubdomain(url, SUBDOMAIN);
+		public final boolean isCompatible(URI uri) {
+			return checkURLSubdomain(uri, SUBDOMAIN);
 		}
 	}
 	
@@ -1375,8 +1332,8 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		}
 		
 		@Override
-		public final boolean isCompatible(URL url) {
-			return checkURLSubdomain(url, SUBDOMAIN);
+		public final boolean isCompatible(URI uri) {
+			return checkURLSubdomain(uri, SUBDOMAIN);
 		}
 	}
 }

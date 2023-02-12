@@ -1,8 +1,6 @@
 package sune.app.mediadown.media_engine.tncz;
 
 import java.net.URI;
-import java.net.URL;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -16,8 +14,7 @@ import javafx.scene.image.Image;
 import sune.app.mediadown.Episode;
 import sune.app.mediadown.Program;
 import sune.app.mediadown.Shared;
-import sune.app.mediadown.concurrent.WorkerProxy;
-import sune.app.mediadown.concurrent.WorkerUpdatableTask;
+import sune.app.mediadown.concurrent.ListTask;
 import sune.app.mediadown.engine.MediaEngine;
 import sune.app.mediadown.media.Media;
 import sune.app.mediadown.media.MediaLanguage;
@@ -26,7 +23,6 @@ import sune.app.mediadown.media.MediaSource;
 import sune.app.mediadown.media.MediaUtils;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
-import sune.app.mediadown.util.CheckedBiFunction;
 import sune.app.mediadown.util.JavaScript;
 import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
@@ -71,13 +67,9 @@ public final class TNCZEngine implements MediaEngine {
 			+ "&content=%{content}d";
 	}
 	
-	private final WorkerProxy _dwp = WorkerProxy.defaultProxy();
-	
 	// Allow to create an instance when registering the engine
 	TNCZEngine() {
 	}
-	
-	// ----- Internal methods
 	
 	private static final String mediaTitle(SSDCollection streamInfo) {
 		// TV Nova has weird naming, this is actually correct
@@ -99,31 +91,8 @@ public final class TNCZEngine implements MediaEngine {
 		return MediaUtils.mediaTitle(programName, numSeason, numEpisode, episodeName);
 	}
 	
-	private final List<Program> internal_getPrograms() throws Exception {
-		return internal_getPrograms(_dwp, (p, a) -> true);
-	}
-	
-	private final List<Program> internal_getPrograms(WorkerProxy proxy,
-			CheckedBiFunction<WorkerProxy, Program, Boolean> function) throws Exception {
-		List<Program> programs = new ArrayList<>();
-		Document document = Utils.document(URL_PROGRAMS);
-		
-		for(Element elProgram : document.select(SEL_PROGRAMS)) {
-			String programURL = elProgram.absUrl("href");
-			String programTitle = elProgram.selectFirst(".title").text();
-			Program program = new Program(Utils.uri(programURL), programTitle);
-			
-			programs.add(program);
-			if(!function.apply(proxy, program)) {
-				return null; // Do not continue
-			}
-		}
-		
-		return programs;
-	}
-	
-	private final boolean parseEpisodeList(Program program, List<Episode> episodes, Document document,
-			WorkerProxy proxy, CheckedBiFunction<WorkerProxy, Episode, Boolean> function) throws Exception {
+	private final boolean parseEpisodeList(ListTask<Episode> task, Program program, Document document)
+			throws Exception {
 		Elements elItems = document.select(SEL_EPISODES);
 		
 		for(Element elItem : elItems) {
@@ -145,8 +114,7 @@ public final class TNCZEngine implements MediaEngine {
 			
 			Episode episode = new Episode(program, Utils.uri(episodeURL), Utils.validateFileName(episodeName));
 			
-			episodes.add(episode);
-			if(!function.apply(proxy, episode)) {
+			if(!task.add(episode)) {
 				return false; // Do not continue
 			}
 		}
@@ -154,164 +122,118 @@ public final class TNCZEngine implements MediaEngine {
 		return true;
 	}
 	
-	private final List<Episode> internal_getEpisodes(Program program) throws Exception {
-		return internal_getEpisodes(program, _dwp, (p, a) -> true);
+	@Override
+	public ListTask<Program> getPrograms() throws Exception {
+		return ListTask.of((task) -> {
+			Document document = Utils.document(URL_PROGRAMS);
+			
+			for(Element elProgram : document.select(SEL_PROGRAMS)) {
+				String programURL = elProgram.absUrl("href");
+				String programTitle = elProgram.selectFirst(".title").text();
+				Program program = new Program(Utils.uri(programURL), programTitle);
+				
+				if(!task.add(program)) {
+					return; // Do not continue
+				}
+			}
+		});
 	}
 	
-	private final List<Episode> internal_getEpisodes(Program program, WorkerProxy proxy,
-			CheckedBiFunction<WorkerProxy, Episode, Boolean> function) throws Exception {
-		List<Episode> episodes = new ArrayList<>();
-		Document document = Utils.document(program.uri());
-		
-		// Always parse the episodes page itself
-		if(!parseEpisodeList(program, episodes, document, proxy, function)) {
-			return null; // Do not continue
-		}
-		
-		// Check for more episodes
-		Element elButtonMore;
-		if((elButtonMore = document.selectFirst(SEL_EPISODES_LOAD_MORE)) != null) {
-			Map<String, String> urlArgs = Utils.urlParams(elButtonMore.attr("data-href"));
+	@Override
+	public ListTask<Episode> getEpisodes(Program program) throws Exception {
+		return ListTask.of((task) -> {
+			Document document = Utils.document(program.uri());
 			
-			int channel = Integer.valueOf(urlArgs.get("channel"));
-			int content = Integer.valueOf(urlArgs.get("content"));
-			String strFilter = urlArgs.get("filter");
-			
-			Matcher matcherFilter;
-			if(!(matcherFilter = REGEX_SHOW_ID.matcher(strFilter)).find()) {
-				throw new IllegalStateException("Cannot match the filter argument");
+			// Always parse the episodes page itself
+			if(!parseEpisodeList(task, program, document)) {
+				return; // Do not continue
 			}
 			
-			int show = Integer.valueOf(matcherFilter.group(1));
-			int page = 2, limit = 20;
-			
-			do {
-				String url = Utils.format(
-					URL_EPISODE_LIST,
-					"channel", channel,
-					"limit", limit,
-					"page", page,
-					"show", show,
-					"content", content
-				);
+			// Check for more episodes
+			Element elButtonMore;
+			if((elButtonMore = document.selectFirst(SEL_EPISODES_LOAD_MORE)) != null) {
+				Map<String, String> urlArgs = Utils.urlParams(elButtonMore.attr("data-href"));
 				
-				StringResponse response = Web.request(new GetRequest(Utils.url(url), Shared.USER_AGENT));
-				document = Utils.parseDocument(response.content, url);
+				int channel = Integer.valueOf(urlArgs.get("channel"));
+				int content = Integer.valueOf(urlArgs.get("content"));
+				String strFilter = urlArgs.get("filter");
 				
-				if(!parseEpisodeList(program, episodes, document, proxy, function)) {
-					return null; // Do not continue
+				Matcher matcherFilter;
+				if(!(matcherFilter = REGEX_SHOW_ID.matcher(strFilter)).find()) {
+					throw new IllegalStateException("Cannot match the filter argument");
 				}
 				
-				++page;
-			} while(document.selectFirst(SEL_EPISODES_LOAD_MORE) != null);
-		}
-		
-		return episodes;
-	}
-	
-	private final List<Media> internal_getMedia(String url) throws Exception {
-		return internal_getMedia(url, _dwp, (p, a) -> true);
-	}
-	
-	private final List<Media> internal_getMedia(String url, WorkerProxy proxy,
-			CheckedBiFunction<WorkerProxy, Media, Boolean> function) throws Exception {
-		List<Media> sources = new ArrayList<>();
-		
-		Document document = Utils.document(url);
-		Element iframe = document.selectFirst(SEL_PLAYER_IFRAME);
-		
-		if(iframe == null) {
-			return null;
-		}
-		
-		String iframeURL = iframe.absUrl("src");
-		String content = Web.request(new GetRequest(Utils.url(iframeURL), Shared.USER_AGENT)).content;
-		
-		if(content != null && !content.isEmpty()) {
-			int begin = content.indexOf(TXT_PLAYER_CONFIG_BEGIN) + TXT_PLAYER_CONFIG_BEGIN.length() - 1;
-			String conScript = Utils.bracketSubstring(content, '(', ')', false, begin, content.length());
-			conScript = Utils.bracketSubstring(conScript, '{', '}', false, conScript.indexOf('{', 1), conScript.length());
-			
-			if(!conScript.isEmpty()) {
-				SSDCollection scriptData = JavaScript.readObject(conScript);
+				int show = Integer.valueOf(matcherFilter.group(1));
+				int page = 2, limit = 20;
 				
-				if(scriptData != null) {
-					SSDCollection tracks = scriptData.getCollection("tracks");
-					String title = mediaTitle(scriptData.getCollection("plugins.measuring.streamInfo"));
-					URI sourceURI = Utils.uri(url);
-					MediaSource source = MediaSource.of(this);
+				do {
+					String url = Utils.format(
+						URL_EPISODE_LIST,
+						"channel", channel,
+						"limit", limit,
+						"page", page,
+						"show", show,
+						"content", content
+					);
 					
-					for(SSDCollection node : tracks.collectionsIterable()) {
-						for(SSDCollection coll : ((SSDCollection) node).collectionsIterable()) {
-							String videoURL = coll.getDirectString("src");
-							MediaLanguage language = MediaLanguage.ofCode(coll.getDirectString("lang"));
-							List<Media> media = MediaUtils.createMedia(source, Utils.uri(videoURL), sourceURI,
-								title, language, MediaMetadata.empty());
-							
-							for(Media s : media) {
-								sources.add(s);
-								if(!function.apply(proxy, s)) {
-									return null; // Do not continue
+					StringResponse response = Web.request(new GetRequest(Utils.url(url), Shared.USER_AGENT));
+					document = Utils.parseDocument(response.content, url);
+					
+					if(!parseEpisodeList(task, program, document)) {
+						return; // Do not continue
+					}
+					
+					++page;
+				} while(document.selectFirst(SEL_EPISODES_LOAD_MORE) != null);
+			}
+		});
+	}
+	
+	@Override
+	public ListTask<Media> getMedia(URI uri, Map<String, Object> data) throws Exception {
+		return ListTask.of((task) -> {
+			Document document = Utils.document(uri);
+			Element iframe = document.selectFirst(SEL_PLAYER_IFRAME);
+			
+			if(iframe == null) {
+				return;
+			}
+			
+			String iframeURL = iframe.absUrl("src");
+			String content = Web.request(new GetRequest(Utils.url(iframeURL), Shared.USER_AGENT)).content;
+			
+			if(content != null && !content.isEmpty()) {
+				int begin = content.indexOf(TXT_PLAYER_CONFIG_BEGIN) + TXT_PLAYER_CONFIG_BEGIN.length() - 1;
+				String conScript = Utils.bracketSubstring(content, '(', ')', false, begin, content.length());
+				conScript = Utils.bracketSubstring(conScript, '{', '}', false, conScript.indexOf('{', 1), conScript.length());
+				
+				if(!conScript.isEmpty()) {
+					SSDCollection scriptData = JavaScript.readObject(conScript);
+					
+					if(scriptData != null) {
+						SSDCollection tracks = scriptData.getCollection("tracks");
+						String title = mediaTitle(scriptData.getCollection("plugins.measuring.streamInfo"));
+						URI sourceURI = uri;
+						MediaSource source = MediaSource.of(this);
+						
+						for(SSDCollection node : tracks.collectionsIterable()) {
+							for(SSDCollection coll : ((SSDCollection) node).collectionsIterable()) {
+								String videoURL = coll.getDirectString("src");
+								MediaLanguage language = MediaLanguage.ofCode(coll.getDirectString("lang"));
+								List<Media> media = MediaUtils.createMedia(source, Utils.uri(videoURL), sourceURI,
+									title, language, MediaMetadata.empty());
+								
+								for(Media s : media) {
+									if(!task.add(s)) {
+										return; // Do not continue
+									}
 								}
 							}
 						}
 					}
 				}
 			}
-		}
-		
-		return sources;
-	}
-	
-	private final List<Media> internal_getMedia(Episode episode) throws Exception {
-		return internal_getMedia(episode, _dwp, (p, a) -> true);
-	}
-	
-	private final List<Media> internal_getMedia(Episode episode, WorkerProxy proxy,
-			CheckedBiFunction<WorkerProxy, Media, Boolean> function) throws Exception {
-		return internal_getMedia(episode.uri().toString(), proxy, function);
-	}
-	
-	// -----
-	
-	@Override
-	public List<Program> getPrograms() throws Exception {
-		return internal_getPrograms();
-	}
-	
-	@Override
-	public List<Episode> getEpisodes(Program program) throws Exception {
-		return internal_getEpisodes(program);
-	}
-	
-	@Override
-	public List<Media> getMedia(Episode episode) throws Exception {
-		return internal_getMedia(episode);
-	}
-	
-	@Override
-	public WorkerUpdatableTask<CheckedBiFunction<WorkerProxy, Program, Boolean>, Void> getPrograms
-			(CheckedBiFunction<WorkerProxy, Program, Boolean> function) {
-		return WorkerUpdatableTask.voidTaskChecked(function, (p, f) -> internal_getPrograms(p, f));
-	}
-	
-	@Override
-	public WorkerUpdatableTask<CheckedBiFunction<WorkerProxy, Episode, Boolean>, Void> getEpisodes
-			(Program program,
-			 CheckedBiFunction<WorkerProxy, Episode, Boolean> function) {
-		return WorkerUpdatableTask.voidTaskChecked(function, (p, f) -> internal_getEpisodes(program, p, f));
-	}
-	
-	@Override
-	public WorkerUpdatableTask<CheckedBiFunction<WorkerProxy, Media, Boolean>, Void> getMedia
-			(Episode episode,
-			 CheckedBiFunction<WorkerProxy, Media, Boolean> function) {
-		return WorkerUpdatableTask.voidTaskChecked(function, (p, c) -> internal_getMedia(episode, p, c));
-	}
-	
-	@Override
-	public List<Media> getMedia(URI uri, Map<String, Object> data) throws Exception {
-		return internal_getMedia(uri.toString());
+		});
 	}
 	
 	@Override
@@ -320,15 +242,14 @@ public final class TNCZEngine implements MediaEngine {
 	}
 	
 	@Override
-	public boolean isCompatibleURL(String url) {
-		URL urlObj = Utils.url(url);
+	public boolean isCompatibleURI(URI uri) {
 		// Check the protocol
-		String protocol = urlObj.getProtocol();
+		String protocol = uri.getScheme();
 		if(!protocol.equals("http") &&
 		   !protocol.equals("https"))
 			return false;
 		// Check the host
-		String host = urlObj.getHost();
+		String host = uri.getHost();
 		if((host.startsWith("www."))) // www prefix
 			host = host.substring(4);
 		if(!host.equals("tn.nova.cz"))

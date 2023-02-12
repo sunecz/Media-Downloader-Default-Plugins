@@ -4,7 +4,6 @@ import java.net.CookieManager;
 import java.net.CookieStore;
 import java.net.HttpCookie;
 import java.net.URI;
-import java.net.URL;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpClient.Redirect;
@@ -38,8 +37,8 @@ import org.jsoup.nodes.TextNode;
 import javafx.scene.image.Image;
 import sune.app.mediadown.MediaDownloader;
 import sune.app.mediadown.Shared;
+import sune.app.mediadown.concurrent.ListTask;
 import sune.app.mediadown.concurrent.Threads;
-import sune.app.mediadown.concurrent.WorkerProxy;
 import sune.app.mediadown.configuration.Configuration;
 import sune.app.mediadown.configuration.Configuration.ConfigurationProperty;
 import sune.app.mediadown.media.Media;
@@ -52,7 +51,6 @@ import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginConfiguration;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.server.Server;
-import sune.app.mediadown.util.CheckedBiFunction;
 import sune.app.mediadown.util.CheckedSupplier;
 import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.JavaScript;
@@ -132,91 +130,73 @@ public final class NovaVoyoServer implements Server {
 		return MediaUtils.mediaTitle(programName, numSeason, numEpisode, episodeName);
 	}
 	
-	// ----- Internal methods
-	
-	private final WorkerProxy _dwp = WorkerProxy.defaultProxy();
-	
-	private final List<Media> internal_getMedia(String url) throws Exception {
-		return internal_getMedia(url, _dwp, (p, a) -> true);
-	}
-	
-	private final List<Media> internal_getMedia(String url, WorkerProxy proxy,
-			CheckedBiFunction<WorkerProxy, Media, Boolean> function) throws Exception {
-		List<Media> sources = new ArrayList<>();
-		
-		// Ensure the user is logged in
-		VoyoAccount.login();
-		
-		// Obtain the main iframe for the video
-		Document document = FastWeb.document(Utils.uri(url));
-		Element elIframe = document.selectFirst(".js-detail-player .iframe-wrap iframe");
-		if(elIframe == null)
-			return null;
-		
-		// Obtain the embedded iframe document to extract the player settings
-		String embedURL = elIframe.absUrl("src");
-		Document embedDoc = FastWeb.document(Utils.uri(embedURL));
-		
-		VoyoError error;
-		if(!(error = checkForError(embedDoc)).isSuccess())
-			throw new IllegalStateException("Error " + error.event() + ": " + error.type());
-		
-		SSDCollection settings = null;
-		for(Element elScript : embedDoc.select("script:not([src])")) {
-			String content = elScript.html();
-			int index;
-			if((index = content.indexOf("Player.init")) >= 0) {
-				content = Utils.bracketSubstring(content, '{', '}', false, index, content.length());
-				settings = JavaScript.readObject(content);
-				break;
-			}
-		}
-		
-		if(settings == null)
-			return null; // Do not continue
-		
-		SSDCollection tracks = settings.getDirectCollection("tracks");
-		URI sourceURI = Utils.uri(url);
-		MediaSource source = MediaSource.of(this);
-		
-		String title = mediaTitle(settings.getCollection("plugins.measuring.streamInfo"), document);
-		for(SSDCollection node : tracks.collectionsIterable()) {
-			MediaFormat format = MediaFormat.fromName(node.getName());
-			for(SSDCollection coll : ((SSDCollection) node).collectionsIterable()) {
-				String videoURL = coll.getDirectString("src");
-				if(format == MediaFormat.UNKNOWN)
-					format = MediaFormat.fromPath(videoURL);
-				MediaLanguage language = MediaLanguage.ofCode(coll.getDirectString("lang"));
-				List<Media> media = MediaUtils.createMedia(source, Utils.uri(videoURL), sourceURI,
-					title, language, MediaMetadata.empty());
-				for(Media s : media) {
-					sources.add(s);
-					if(!function.apply(proxy, s))
-						return null; // Do not continue
+	@Override
+	public ListTask<Media> getMedia(URI uri, Map<String, Object> data) throws Exception {
+		return ListTask.of((task) -> {
+			// Ensure the user is logged in
+			VoyoAccount.login();
+			
+			// Obtain the main iframe for the video
+			Document document = FastWeb.document(uri);
+			Element elIframe = document.selectFirst(".js-detail-player .iframe-wrap iframe");
+			if(elIframe == null)
+				return;
+			
+			// Obtain the embedded iframe document to extract the player settings
+			String embedURL = elIframe.absUrl("src");
+			Document embedDoc = FastWeb.document(Utils.uri(embedURL));
+			
+			VoyoError error;
+			if(!(error = checkForError(embedDoc)).isSuccess())
+				throw new IllegalStateException("Error " + error.event() + ": " + error.type());
+			
+			SSDCollection settings = null;
+			for(Element elScript : embedDoc.select("script:not([src])")) {
+				String content = elScript.html();
+				int index;
+				if((index = content.indexOf("Player.init")) >= 0) {
+					content = Utils.bracketSubstring(content, '{', '}', false, index, content.length());
+					settings = JavaScript.readObject(content);
+					break;
 				}
 			}
-		}
-		
-		return sources;
+			
+			if(settings == null)
+				return; // Do not continue
+			
+			SSDCollection tracks = settings.getDirectCollection("tracks");
+			URI sourceURI = uri;
+			MediaSource source = MediaSource.of(this);
+			
+			String title = mediaTitle(settings.getCollection("plugins.measuring.streamInfo"), document);
+			for(SSDCollection node : tracks.collectionsIterable()) {
+				MediaFormat format = MediaFormat.fromName(node.getName());
+				for(SSDCollection coll : ((SSDCollection) node).collectionsIterable()) {
+					String videoURL = coll.getDirectString("src");
+					if(format == MediaFormat.UNKNOWN)
+						format = MediaFormat.fromPath(videoURL);
+					MediaLanguage language = MediaLanguage.ofCode(coll.getDirectString("lang"));
+					List<Media> media = MediaUtils.createMedia(source, Utils.uri(videoURL), sourceURI,
+						title, language, MediaMetadata.empty());
+					for(Media s : media) {
+						if(!task.add(s)) {
+							return; // Do not continue
+						}
+					}
+				}
+			}
+		});
 	}
 	
-	// -----
-	
 	@Override
-	public List<Media> getMedia(URI uri, Map<String, Object> data) throws Exception {
-		return internal_getMedia(uri.toString());
-	}
-	
-	@Override
-	public boolean isCompatibleURL(String url) {
-		URL urlObj = Utils.url(url);
+	public boolean isCompatibleURI(URI uri) {
 		// Check the protocol
-		String protocol = urlObj.getProtocol();
+		String protocol = uri.getScheme();
 		if(!protocol.equals("http") &&
 		   !protocol.equals("https"))
 			return false;
 		// Check the host
-		String host = urlObj.getHost();
+		String host = uri.getHost();
 		if((host.startsWith("www."))) // www prefix
 			host = host.substring(4);
 		if(!host.equals("voyo.nova.cz"))
