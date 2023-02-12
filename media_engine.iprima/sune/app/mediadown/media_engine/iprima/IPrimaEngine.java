@@ -92,7 +92,7 @@ public final class IPrimaEngine implements MediaEngine {
 				@Override
 				protected void iteration(IPrima web) throws Exception {
 					ListTask<Program> t = web.getPrograms(IPrimaEngine.this);
-					t.addEventListener(ListTaskEvent.ITEM_ADDED, (p) -> accumulator.add(new ProgramWrapper(Utils.cast(p.b))));
+					t.addEventListener(ListTaskEvent.ADD, (p) -> accumulator.add(new ProgramWrapper(Utils.cast(p.b))));
 					t.startAndWait();
 				}
 			}).iterate(SUPPORTED_WEBS);
