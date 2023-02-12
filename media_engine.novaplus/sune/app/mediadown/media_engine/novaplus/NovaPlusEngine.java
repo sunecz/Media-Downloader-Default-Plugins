@@ -74,8 +74,6 @@ public final class NovaPlusEngine implements MediaEngine {
 	NovaPlusEngine() {
 	}
 	
-	// ----- Internal methods
-	
 	private static final String mediaTitle(SSDCollection streamInfo) {
 		// NovaPlus has weird naming, this is actually correct
 		String programName = streamInfo.getDirectString("episode", "");
@@ -303,8 +301,6 @@ public final class NovaPlusEngine implements MediaEngine {
 	public ListTask<Media> getMedia(URI uri, Map<String, Object> data) throws Exception {
 		return ListTask.of((task) -> getMedia(task, uri, data));
 	}
-	
-	// -----
 	
 	@Override
 	public boolean isDirectMediaSupported() {
