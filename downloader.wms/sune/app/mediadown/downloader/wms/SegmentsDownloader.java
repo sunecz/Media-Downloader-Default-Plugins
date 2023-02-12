@@ -30,14 +30,14 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
-import sune.app.mediadown.Download;
 import sune.app.mediadown.InternalState;
 import sune.app.mediadown.MediaDownloader;
 import sune.app.mediadown.Shared;
 import sune.app.mediadown.TaskStates;
 import sune.app.mediadown.concurrent.SyncObject;
 import sune.app.mediadown.concurrent.Worker;
-import sune.app.mediadown.convert.ConversionMedia;
+import sune.app.mediadown.conversion.ConversionMedia;
+import sune.app.mediadown.download.Download;
 import sune.app.mediadown.download.DownloadConfiguration;
 import sune.app.mediadown.download.DownloadResult;
 import sune.app.mediadown.download.FileDownloader;

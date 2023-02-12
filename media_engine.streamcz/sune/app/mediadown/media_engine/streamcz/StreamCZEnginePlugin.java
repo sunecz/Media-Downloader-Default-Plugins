@@ -1,7 +1,7 @@
 package sune.app.mediadown.media_engine.streamcz;
 
 import sune.app.mediadown.MediaDownloader;
-import sune.app.mediadown.engine.MediaEngines;
+import sune.app.mediadown.entity.MediaEngines;
 import sune.app.mediadown.plugin.Plugin;
 import sune.app.mediadown.plugin.PluginBase;
 

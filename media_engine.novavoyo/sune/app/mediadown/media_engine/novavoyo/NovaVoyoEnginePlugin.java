@@ -2,10 +2,10 @@ package sune.app.mediadown.media_engine.novavoyo;
 
 import sune.app.mediadown.MediaDownloader;
 import sune.app.mediadown.configuration.Configuration.ConfigurationProperty;
+import sune.app.mediadown.entity.Servers;
 import sune.app.mediadown.plugin.Plugin;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginConfiguration;
-import sune.app.mediadown.server.Servers;
 import sune.app.mediadown.util.Password;
 
 @Plugin(name          = "media_engine.novavoyo",

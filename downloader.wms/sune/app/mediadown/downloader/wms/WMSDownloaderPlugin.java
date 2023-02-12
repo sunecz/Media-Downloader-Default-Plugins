@@ -3,7 +3,7 @@ package sune.app.mediadown.downloader.wms;
 import sune.app.mediadown.MediaDownloader;
 import sune.app.mediadown.configuration.ApplicationConfigurationAccessor;
 import sune.app.mediadown.configuration.Configuration.ConfigurationProperty;
-import sune.app.mediadown.download.Downloaders;
+import sune.app.mediadown.entity.Downloaders;
 import sune.app.mediadown.plugin.Plugin;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginConfiguration;

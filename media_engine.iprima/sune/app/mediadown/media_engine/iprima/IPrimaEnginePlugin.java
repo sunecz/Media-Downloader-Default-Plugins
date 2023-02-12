@@ -12,7 +12,7 @@ import javafx.scene.control.TabPane;
 import javafx.stage.Stage;
 import sune.app.mediadown.MediaDownloader;
 import sune.app.mediadown.configuration.Configuration.ConfigurationProperty;
-import sune.app.mediadown.engine.MediaEngines;
+import sune.app.mediadown.entity.MediaEngines;
 import sune.app.mediadown.gui.ProgressWindow;
 import sune.app.mediadown.gui.ProgressWindow.ProgressAction;
 import sune.app.mediadown.gui.ProgressWindow.ProgressContext;

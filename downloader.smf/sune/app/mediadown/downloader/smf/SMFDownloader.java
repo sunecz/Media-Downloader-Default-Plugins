@@ -3,8 +3,8 @@ package sune.app.mediadown.downloader.smf;
 import java.nio.file.Path;
 
 import sune.app.mediadown.download.DownloadResult;
-import sune.app.mediadown.download.Downloader;
 import sune.app.mediadown.download.MediaDownloadConfiguration;
+import sune.app.mediadown.entity.Downloader;
 import sune.app.mediadown.media.Media;
 import sune.app.mediadown.media.MediaUtils;
 import sune.app.mediadown.plugin.PluginBase;

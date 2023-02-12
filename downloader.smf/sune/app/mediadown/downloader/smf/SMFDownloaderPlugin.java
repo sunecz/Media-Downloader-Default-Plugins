@@ -1,7 +1,7 @@
 package sune.app.mediadown.downloader.smf;
 
 import sune.app.mediadown.MediaDownloader;
-import sune.app.mediadown.download.Downloaders;
+import sune.app.mediadown.entity.Downloaders;
 import sune.app.mediadown.plugin.Plugin;
 import sune.app.mediadown.plugin.PluginBase;
 

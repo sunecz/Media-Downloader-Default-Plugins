@@ -1,9 +1,9 @@
 package sune.app.mediadown.server.html5;
 
 import sune.app.mediadown.MediaDownloader;
+import sune.app.mediadown.entity.Servers;
 import sune.app.mediadown.plugin.Plugin;
 import sune.app.mediadown.plugin.PluginBase;
-import sune.app.mediadown.server.Servers;
 
 @Plugin(name          = "server.html5",
 	    title         = "plugin.server.html5.title",

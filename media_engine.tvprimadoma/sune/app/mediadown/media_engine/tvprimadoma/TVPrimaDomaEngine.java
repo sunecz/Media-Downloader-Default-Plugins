@@ -9,13 +9,13 @@ import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 
 import javafx.scene.image.Image;
-import sune.app.mediadown.Episode;
-import sune.app.mediadown.MediaGetter;
-import sune.app.mediadown.MediaGetters;
-import sune.app.mediadown.Program;
 import sune.app.mediadown.Shared;
 import sune.app.mediadown.concurrent.ListTask;
-import sune.app.mediadown.engine.MediaEngine;
+import sune.app.mediadown.entity.Episode;
+import sune.app.mediadown.entity.MediaEngine;
+import sune.app.mediadown.entity.MediaGetter;
+import sune.app.mediadown.entity.MediaGetters;
+import sune.app.mediadown.entity.Program;
 import sune.app.mediadown.media.Media;
 import sune.app.mediadown.media.MediaFormat;
 import sune.app.mediadown.media.MediaLanguage;

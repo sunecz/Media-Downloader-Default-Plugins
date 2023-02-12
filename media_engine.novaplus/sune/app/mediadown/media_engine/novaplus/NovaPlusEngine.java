@@ -14,11 +14,11 @@ import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 
 import javafx.scene.image.Image;
-import sune.app.mediadown.Episode;
-import sune.app.mediadown.Program;
 import sune.app.mediadown.Shared;
 import sune.app.mediadown.concurrent.ListTask;
-import sune.app.mediadown.engine.MediaEngine;
+import sune.app.mediadown.entity.Episode;
+import sune.app.mediadown.entity.MediaEngine;
+import sune.app.mediadown.entity.Program;
 import sune.app.mediadown.media.Media;
 import sune.app.mediadown.media.MediaLanguage;
 import sune.app.mediadown.media.MediaMetadata;
