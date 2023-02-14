@@ -189,6 +189,22 @@ final class PrimaPlus implements IPrima {
 			return new ProgramWrapper(stripItemToProgram(item));
 		}
 		
+		private final Map<String, String> logIn() {
+			// It is important to specify the referer, otherwise the response code is 403.
+			Map<String, String> requestHeaders = Utils.toMap("Referer", "https://www.iprima.cz/");
+			
+			try {
+				// Try to log in to the iPrima website using the internal account to have HD sources available.
+				IPrimaAuthenticator.SessionData sessionData = IPrimaAuthenticator.getSessionData();
+				Utils.merge(requestHeaders, sessionData.requestHeaders());
+			} catch(Exception ex) {
+				// Notify the user that the HD sources may not be available due to inability to log in.
+				MediaDownloader.error(new IllegalStateException("Unable to log in to the iPrima website.", ex));
+			}
+			
+			return requestHeaders;
+		}
+		
 		public final ListTask<Program> getPrograms(IPrimaEngine engine) throws Exception {
 			return ListTask.of((task) -> {
 				final String method = "strip.strip.bulkItems.vdm";
@@ -303,7 +319,8 @@ final class PrimaPlus implements IPrima {
 					return; // Do not continue
 				}
 				
-				String html = FastWeb.get(program.uri(), Map.of());
+				Map<String, String> requestHeaders = logIn();
+				String html = FastWeb.get(program.uri(), requestHeaders);
 				Nuxt nuxt = Nuxt.extract(html);
 				
 				if(nuxt == null) {
@@ -331,6 +348,12 @@ final class PrimaPlus implements IPrima {
 					for(ListIterator<SSDCollection> itEpisode = collEpisodes.listIterator(numEpisode);
 							itEpisode.hasPrevious(); --numEpisode) {
 						SSDCollection episodeData = itEpisode.previous();
+						
+						SSDNode nodeUpsell = episodeData.get("distribution.upsell", null);
+						if(nodeUpsell != null && nodeUpsell.isCollection()) {
+							continue; // Not playable with the current account tier
+						}
+						
 						String title = nuxt.resolve(episodeData.getDirectString("title"));
 						String uri = nuxt.resolve(episodeData.getString("additionals.webUrl"));
 						
@@ -374,17 +397,7 @@ final class PrimaPlus implements IPrima {
 					throw new IllegalStateException("Unable to extract video play ID");
 				}
 				
-				// It is important to specify the referer, otherwise the response code is 403.
-				Map<String, String> requestHeaders = Utils.toMap("Referer", "https://www.iprima.cz/");
-				try {
-					// Try to log in to the iPrima website using the internal account to have HD sources available.
-					IPrimaAuthenticator.SessionData sessionData = IPrimaAuthenticator.getSessionData();
-					Utils.merge(requestHeaders, sessionData.requestHeaders());
-				} catch(Exception ex) {
-					// Notify the user that the HD sources may not be available due to inability to log in.
-					MediaDownloader.error(new IllegalStateException("Unable to log in to the iPrima website.", ex));
-				}
-				
+				Map<String, String> requestHeaders = logIn();
 				URI configUri = Utils.uri(Utils.format(URL_API_PLAY, "play_id", videoPlayId));
 				String content = FastWeb.get(configUri, requestHeaders);
 				
@@ -515,10 +528,12 @@ final class PrimaPlus implements IPrima {
 			
 			private final SSDCollection data;
 			private final Map<String, String> args;
+			private final boolean isPremium;
 			
-			private Nuxt(SSDCollection data, Map<String, String> args) {
+			private Nuxt(SSDCollection data, Map<String, String> args, boolean isPremium) {
 				this.data = Objects.requireNonNull(data);
 				this.args = Objects.requireNonNull(args);
+				this.isPremium = isPremium;
 			}
 			
 			public static final Nuxt extract(String html) {
@@ -555,10 +570,17 @@ final class PrimaPlus implements IPrima {
 				content = regexJSCall.replaceAll(content, (m) -> "\"\"");
 				
 				// Cannot use JavaScript.readObject since the names are not quoted
-				SSDCollection data = SSDF.read(Utils.prefixUnicodeEscapeSequences(content, "\\"));
-				data = data.getDirectCollection("data");
+				SSDCollection object = SSDF.read(Utils.prefixUnicodeEscapeSequences(content, "\\"));
+				SSDCollection data = object.getDirectCollection("data");
+				SSDCollection state = object.getDirectCollection("state");
 				
-				return new Nuxt(data, mapArgs);
+				String role = Utils.stream(state.collectionsIterable())
+					.filter((c) -> c.hasDirectObject("role"))
+					.findFirst().get()
+					.getDirectString("role").toLowerCase();
+				boolean isPremium = role.equals("premium");
+				
+				return new Nuxt(data, mapArgs, isPremium);
 			}
 			
 			public SSDCollection getCollection(String name) {
@@ -602,6 +624,11 @@ final class PrimaPlus implements IPrima {
 			
 			public SSDCollection data() {
 				return data;
+			}
+			
+			@SuppressWarnings("unused")
+			public boolean isPremium() {
+				return isPremium;
 			}
 		}
 		
