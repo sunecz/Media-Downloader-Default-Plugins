@@ -538,6 +538,8 @@ final class PrimaPlus implements IPrima {
 				// Also parse the function arguments since some values are present there
 				String fnArgsNames = Utils.bracketSubstring(html, '(', ')', false, html.indexOf("function", indexVar), end);
 				String fnArgsValues = Utils.bracketSubstring(html, '(', ')', false, indexReturn + content.length(), end);
+				fnArgsNames = fnArgsNames.substring(1, fnArgsNames.length() - 1); // Remove brackets
+				fnArgsValues = fnArgsValues.substring(1, fnArgsValues.length() - 1); // Remove brackets
 				// Source: https://stackoverflow.com/a/1757107
 				Regex regexComma = Regex.of(",(?=(?:[^\\\"]*\\\"[^\\\"]*\\\")*[^\\\"]*$)");
 				
