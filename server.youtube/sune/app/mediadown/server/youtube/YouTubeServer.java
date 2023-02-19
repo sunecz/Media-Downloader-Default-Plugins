@@ -97,7 +97,7 @@ public class YouTubeServer implements Server {
 
 				String playerConfig = Utils.bracketSubstring(scriptHTML, '{', '}', false, matcher.end() - 1, scriptHTML.length());
 				SSDCollection dataConfig = JavaScript.readObject(playerConfig);
-				String title = dataConfig.getString("videoDetails.title");
+				String title = JavaScript.replaceUnicodeEscapeSequences(dataConfig.getString("videoDetails.title"));
 				SSDCollection formatsConfig = dataConfig.getCollection("streamingData.adaptiveFormats");
 				List<Tuple> videos = new ArrayList<>();
 				List<Tuple> audios = new ArrayList<>();
@@ -148,6 +148,7 @@ public class YouTubeServer implements Server {
 						// Cannot get the cipher, just skip the source
 						if(cipher == null)
 							continue;
+						cipher = JavaScript.replaceUnicodeEscapeSequences(cipher);
 						videoURL = YT.decipher(cipher, ctx);
 					}
 					
