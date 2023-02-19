@@ -51,7 +51,7 @@ Temporary Items
 /.externalToolBuilders/
 /bin/
 /etc/
-/jar/
+/build/
 # Ignore files
 .classpath
 .project
