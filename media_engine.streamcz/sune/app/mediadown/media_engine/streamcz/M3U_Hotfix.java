@@ -19,10 +19,10 @@ import sune.app.mediadown.download.segment.RemoteFileSegment;
 import sune.app.mediadown.download.segment.RemoteFileSegmentable;
 import sune.app.mediadown.download.segment.RemoteFileSegmentsHolder;
 import sune.app.mediadown.media.MediaResolution;
+import sune.app.mediadown.net.Net;
 import sune.app.mediadown.util.CheckedFunction;
 import sune.app.mediadown.util.Pair;
 import sune.app.mediadown.util.Regex;
-import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Web;
 import sune.app.mediadown.util.Web.GetRequest;
 import sune.app.mediadown.util.Web.Request;
@@ -35,23 +35,23 @@ public final class M3U_Hotfix {
 	}
 	
 	private static final CheckedFunction<URI, StreamResponse> streamResolver(Request request) {
-		return ((uri) -> Web.requestStream(request.setURL(Utils.url(uri))));
+		return ((uri) -> Web.requestStream(request.setURL(Net.url(uri))));
 	}
 	
 	private static final CheckedFunction<URI, StreamResponse> streamResolver() {
-		return ((uri) -> Web.requestStream(new GetRequest(Utils.url(uri))));
+		return ((uri) -> Web.requestStream(new GetRequest(Net.url(uri))));
 	}
 	
 	public static final List<M3UFile> parse(Request request) throws Exception {
-		URI baseURI = Utils.uri(Utils.baseURL(request.url.toString()));
-		try(M3UReader reader = new M3UReader(baseURI, Utils.uri(request.url), streamResolver(request), null)) {
+		URI baseURI = Net.baseURI(Net.uri(request.url));
+		try(M3UReader reader = new M3UReader(baseURI, Net.uri(request.url), streamResolver(request), null)) {
 			return reader.read();
 		}
 	}
 	
 	public static final List<M3UFile> parse(String uri, String content) throws Exception {
-		URI baseURI = Utils.uri(Utils.baseURL(uri));
-		try(M3UReader reader = new M3UReader(baseURI, Utils.uri(uri), streamResolver(), content)) {
+		URI baseURI = Net.baseURI(Net.uri(uri));
+		try(M3UReader reader = new M3UReader(baseURI, Net.uri(uri), streamResolver(), content)) {
 			return reader.read();
 		}
 	}
@@ -416,12 +416,12 @@ public final class M3U_Hotfix {
 			// Hotfix: Escape the invalid character that is present in stream.cz HLS URLs.
 			//         This should be done differently but as a hotfix it should suffice.
 			uri = uri.replace("|", "%7C");
-			return Utils.isRelativeURL(uri) ? baseURI.resolve(uri) : Utils.uri(uri);
+			return Net.isRelativeURI(uri) ? baseURI.resolve(uri) : Net.uri(uri);
 		}
 		
 		private final List<M3UFile> readStreamInfo(String uri) throws Exception {
 			URI resolvedURI = resolveURI(uri);
-			URI resolvedBaseURI = Utils.isRelativeURL(uri) ? resolveURI(uri) : Utils.uri(Utils.baseURL(uri));
+			URI resolvedBaseURI = Net.isRelativeURI(uri) ? resolveURI(uri) : Net.baseURI(Net.uri(uri));
 			MediaResolution resolution = fileBuilder.resolution();
 			try(M3UReader reader = new M3UReader(resolvedBaseURI, resolvedURI, streamResolver, null, resolution)) {
 				return reader.read();

@@ -16,6 +16,7 @@ import sune.app.mediadown.Shared;
 import sune.app.mediadown.configuration.Configuration;
 import sune.app.mediadown.configuration.Configuration.ConfigurationProperty;
 import sune.app.mediadown.media_engine.iprima.IPrimaAuthenticator.ProfileManager.Profile;
+import sune.app.mediadown.net.Net;
 import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.Property;
 import sune.app.mediadown.util.Reflection2;
@@ -57,15 +58,15 @@ public final class IPrimaAuthenticator {
 	}
 	
 	private static final String loginOAuth(String email, String password) throws Exception {
-		StringResponse response = Web.request(new GetRequest(Utils.url(URL_OAUTH_LOGIN), Shared.USER_AGENT));
+		StringResponse response = Web.request(new GetRequest(Net.url(URL_OAUTH_LOGIN), Shared.USER_AGENT));
 		String csrfToken = Utils.parseDocument(response.content).selectFirst("input[name='_csrf_token']").val();
 		Map<String, String> params = Map.of("_email", email, "_password", password, "_csrf_token", csrfToken);
-		response = Web.request(new PostRequest(Utils.url(URL_OAUTH_LOGIN), Shared.USER_AGENT, params));
+		response = Web.request(new PostRequest(Net.url(URL_OAUTH_LOGIN), Shared.USER_AGENT, params));
 		return selectConfiguredProfile(response);
 	}
 	
 	private static final String selectProfile(String profileId) throws Exception {
-		URL url = Utils.url(Utils.format(URL_PROFILE_SELECT, "profile_id", profileId));
+		URL url = Net.url(Utils.format(URL_PROFILE_SELECT, "profile_id", profileId));
 		
 		try(StreamResponse response = Web.requestStream(new GetRequest(url, Shared.USER_AGENT))) {
 			String responseUrl = responseUrl(response).toExternalForm();
@@ -117,7 +118,7 @@ public final class IPrimaAuthenticator {
 			"redirect_uri", "https://auth.iprima.cz/sso/auth-check"
 		);
 		
-		return tryAndClose(Web.requestStream(new PostRequest(Utils.url(URL_OAUTH_TOKEN), Shared.USER_AGENT, params)),
+		return tryAndClose(Web.requestStream(new PostRequest(Net.url(URL_OAUTH_TOKEN), Shared.USER_AGENT, params)),
 		                   (response) -> SessionTokens.parse(JSON.read(response.stream)));
 	}
 	
@@ -128,7 +129,7 @@ public final class IPrimaAuthenticator {
 			"token", tokens.tokenDataString()
 		);
 		
-		URL url = Utils.url(URL_OAUTH_AUTHORIZE + '?' + Utils.joinURLParams(params));
+		URL url = Net.url(URL_OAUTH_AUTHORIZE + '?' + Utils.joinURLParams(params));
 		return tryAndClose(Web.requestStream(new GetRequest(url, Shared.USER_AGENT)),
 		                   (response) -> JSON.read(response.stream).getDirectString("code", null));
 	}
@@ -138,7 +139,7 @@ public final class IPrimaAuthenticator {
 			return false;
 		}
 		
-		URL url = Utils.url(Utils.format(URL_USER_AUTH, "code", code));
+		URL url = Net.url(Utils.format(URL_USER_AUTH, "code", code));
 		return tryAndClose(Web.requestStream(new GetRequest(url, Shared.USER_AGENT, null, null, false)),
 		                   (response) -> response.code == 302);
 	}
@@ -194,7 +195,7 @@ public final class IPrimaAuthenticator {
 		}
 		
 		private static final List<Profile> listProfiles() throws Exception {
-			return extractProfiles(Web.request(new GetRequest(Utils.url(URL_PROFILE_PAGE), Shared.USER_AGENT)).content);
+			return extractProfiles(Web.request(new GetRequest(Net.url(URL_PROFILE_PAGE), Shared.USER_AGENT)).content);
 		}
 		
 		public static final List<Profile> profiles() throws Exception {
@@ -262,7 +263,7 @@ public final class IPrimaAuthenticator {
 		public static final Device createDevice(String id, String type, String name) throws Exception {
 			Map<String, String> params = Map.of("slotType", type, "title", name, "deviceUID", id);
 			Map<String, String> headers = Map.of("Referer", "https://prima.iprima.cz/", "X-Requested-With", "XMLHttpRequest");
-			PostRequest request = new PostRequest(Utils.url(URL_ADD_DEVICE), Shared.USER_AGENT, params, null, headers);
+			PostRequest request = new PostRequest(Net.url(URL_ADD_DEVICE), Shared.USER_AGENT, params, null, headers);
 			
 			// It is actually enough to just to call the endpoint even if it returns errors,
 			// so ignore them, if there are any.
@@ -277,7 +278,7 @@ public final class IPrimaAuthenticator {
 			json.setDirect("slotId", id);
 			String body = json.toJSON(true);
 			Map<String, String> headers = Map.of("Referer", "https://prima.iprima.cz/");
-			PostRequest request = new PostRequest(Utils.url(URL_REMOVE_DEVICE), Shared.USER_AGENT, null, null, headers,
+			PostRequest request = new PostRequest(Net.url(URL_REMOVE_DEVICE), Shared.USER_AGENT, null, null, headers,
 				true, null, -1L, -1L, 5000, body);
 			try(StreamResponse response = Web.requestStream(request)) {
 				return response.code == 200;

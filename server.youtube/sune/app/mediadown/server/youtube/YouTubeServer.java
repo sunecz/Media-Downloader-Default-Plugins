@@ -35,6 +35,7 @@ import sune.app.mediadown.media.MediaSource;
 import sune.app.mediadown.media.MediaType;
 import sune.app.mediadown.media.VideoMedia;
 import sune.app.mediadown.media.VideoMediaContainer;
+import sune.app.mediadown.net.Net;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.task.ListTask;
@@ -81,7 +82,7 @@ public class YouTubeServer implements Server {
 	public ListTask<Media> getMedia(URI uri, Map<String, Object> data) throws Exception {
 		return ListTask.of((task) -> {
 			String url = maybeTransformEmbedURL(uri.toString());
-			StringResponse response = Web.request(new GetRequest(Utils.url(url), Shared.USER_AGENT));
+			StringResponse response = Web.request(new GetRequest(Net.url(url), Shared.USER_AGENT));
 			Document document = Utils.parseDocument(response.content, url);
 			Signature.Context ctx = Signature.Extractor.extract(document);
 			Elements scripts = document.getElementsByTag("script");
@@ -191,12 +192,12 @@ public class YouTubeServer implements Server {
 						
 						Media media = VideoMediaContainer.separated().media(
 							VideoMedia.segmented().source(source)
-								.uri(Utils.uri(urlVideo)).format(videoFormat)
+								.uri(Net.uri(urlVideo)).format(videoFormat)
 								.quality(videoQuality).metadata(metadata)
 								.segments(segmentsVideo).size(videoSize)
 								.codecs(videoCodecs).duration(videoDuration),
 							AudioMedia.segmented().source(source)
-								.uri(Utils.uri(urlAudio)).format(audioFormat)
+								.uri(Net.uri(urlAudio)).format(audioFormat)
 								.quality(audioQuality).metadata(metadata)
 								.segments(segmentsAudio).size(audioSize)
 								.codecs(audioCodecs).duration(audioDuration)
@@ -308,7 +309,7 @@ public class YouTubeServer implements Server {
 				String segUrl = url + "&sq=0";
 				
 				// (2) Read the first segment's content and extract information about segments
-				String content = Web.request(new GetRequest(Utils.url(segUrl))).content;
+				String content = Web.request(new GetRequest(Net.url(segUrl))).content;
 				Matcher matcher = REGEX_OTF_SEGMENTS.matcher(content);
 				
 				if(!matcher.find()) {
@@ -322,7 +323,7 @@ public class YouTubeServer implements Server {
 				// (4) Prepare the segments themselves
 				List<RemoteFileSegment> segments = new ArrayList<>();
 				for(int i = 0; i <= count; ++i) {
-					URI uri = Utils.uri(url + "&sq=" + i);
+					URI uri = Net.uri(url + "&sq=" + i);
 					segments.add(new RemoteFileSegment(uri, MediaConstants.UNKNOWN_SIZE));
 				}
 				
@@ -338,13 +339,13 @@ public class YouTubeServer implements Server {
 					.orElse(MediaConstants.UNKNOWN_SIZE);
 				
 				if(clen == MediaConstants.UNKNOWN_SIZE) {
-					clen = Web.size(new HeadRequest(Utils.url(url), UserAgent.CHROME));
+					clen = Web.size(new HeadRequest(Net.url(url), UserAgent.CHROME));
 				}
 				
 				List<RemoteFileSegment> segments = new ArrayList<>();
 				for(long start = 0L, end; start < clen; start += SEGMENT_SIZE) {
 					end = Math.min(start + SEGMENT_SIZE, clen) - 1L; // end is inclusive, therefore N - 1
-					URI uri = Utils.uri(url + "&range=" + start + "-" + end);
+					URI uri = Net.uri(url + "&range=" + start + "-" + end);
 					segments.add(new RemoteFileSegment(uri, end - start + 1L));
 				}
 				
@@ -517,7 +518,7 @@ public class YouTubeServer implements Server {
 		private static final String obtainBaseJSContent(Document document) throws Exception {
 			Element script;
 			return (script = document.selectFirst("script[src*=\"player_ias\"]")) != null
-						? Web.request(new GetRequest(Utils.url("https://youtube.com" + script.attr("src")),
+						? Web.request(new GetRequest(Net.url("https://youtube.com" + script.attr("src")),
 						                             UserAgent.CHROME))
 						     .content
 						: null;

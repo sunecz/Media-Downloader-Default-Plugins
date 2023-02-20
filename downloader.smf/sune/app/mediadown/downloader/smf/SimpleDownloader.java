@@ -43,6 +43,7 @@ import sune.app.mediadown.media.MediaConstants;
 import sune.app.mediadown.media.MediaType;
 import sune.app.mediadown.media.MediaUtils;
 import sune.app.mediadown.media.SubtitlesMedia;
+import sune.app.mediadown.net.Net;
 import sune.app.mediadown.pipeline.DownloadPipelineResult;
 import sune.app.mediadown.util.Metadata;
 import sune.app.mediadown.util.NIO;
@@ -125,7 +126,7 @@ public final class SimpleDownloader implements Download, DownloadResult {
 					tracker.progress(counter.incrementAndGet() / count);
 				} else {
 					worker.submit(() -> {
-						HeadRequest request = new HeadRequest(Utils.url(mh.media().uri()), Shared.USER_AGENT, HEADERS);
+						HeadRequest request = new HeadRequest(Net.url(mh.media().uri()), Shared.USER_AGENT, HEADERS);
 						long size = Ignore.defaultValue(() -> Web.size(request), MediaConstants.UNKNOWN_SIZE);
 						mh.size(size);
 						if(size > 0L) theSize.getAndAdd(size);
@@ -203,7 +204,7 @@ public final class SimpleDownloader implements Download, DownloadResult {
 			for(MediaHolder mh : mediaHolders) {
 				if(!checkIfCanContinue()) break;
 				Path tempFile = tempFileIt.next();
-				GetRequest request = new GetRequest(Utils.url(mh.media().uri()), Shared.USER_AGENT, HEADERS);
+				GetRequest request = new GetRequest(Net.url(mh.media().uri()), Shared.USER_AGENT, HEADERS);
 				downloader.start(request, tempFile, DownloadConfiguration.ofTotalBytes(mh.size()));
 			}
 			
@@ -225,7 +226,7 @@ public final class SimpleDownloader implements Download, DownloadResult {
 							+ (subtitleLanguage != null ? '.' + subtitleLanguage : "")
 							+ (!subtitleType.isEmpty() ? '.' + subtitleType : "");
 					Path subDest = subtitlesDir.resolve(subtitleFileName);
-					GetRequest request = new GetRequest(Utils.url(sm.uri()), Shared.USER_AGENT, HEADERS);
+					GetRequest request = new GetRequest(Net.url(sm.uri()), Shared.USER_AGENT, HEADERS);
 					downloader.start(request, subDest, DownloadConfiguration.ofTotalBytes(subtitle.size()));
 				}
 			}

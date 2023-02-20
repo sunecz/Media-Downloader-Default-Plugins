@@ -20,6 +20,7 @@ import sune.app.mediadown.media.MediaLanguage;
 import sune.app.mediadown.media.MediaMetadata;
 import sune.app.mediadown.media.MediaSource;
 import sune.app.mediadown.media.MediaUtils;
+import sune.app.mediadown.net.Net;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.task.ListTask;
@@ -112,7 +113,7 @@ public final class TNCZEngine implements MediaEngine {
 				}
 			}
 			
-			Episode episode = new Episode(program, Utils.uri(episodeURL), Utils.validateFileName(episodeName));
+			Episode episode = new Episode(program, Net.uri(episodeURL), Utils.validateFileName(episodeName));
 			
 			if(!task.add(episode)) {
 				return false; // Do not continue
@@ -130,7 +131,7 @@ public final class TNCZEngine implements MediaEngine {
 			for(Element elProgram : document.select(SEL_PROGRAMS)) {
 				String programURL = elProgram.absUrl("href");
 				String programTitle = elProgram.selectFirst(".title").text();
-				Program program = new Program(Utils.uri(programURL), programTitle);
+				Program program = new Program(Net.uri(programURL), programTitle);
 				
 				if(!task.add(program)) {
 					return; // Do not continue
@@ -176,7 +177,7 @@ public final class TNCZEngine implements MediaEngine {
 						"content", content
 					);
 					
-					StringResponse response = Web.request(new GetRequest(Utils.url(url), Shared.USER_AGENT));
+					StringResponse response = Web.request(new GetRequest(Net.url(url), Shared.USER_AGENT));
 					document = Utils.parseDocument(response.content, url);
 					
 					if(!parseEpisodeList(task, program, document)) {
@@ -200,7 +201,7 @@ public final class TNCZEngine implements MediaEngine {
 			}
 			
 			String iframeURL = iframe.absUrl("src");
-			String content = Web.request(new GetRequest(Utils.url(iframeURL), Shared.USER_AGENT)).content;
+			String content = Web.request(new GetRequest(Net.url(iframeURL), Shared.USER_AGENT)).content;
 			
 			if(content != null && !content.isEmpty()) {
 				int begin = content.indexOf(TXT_PLAYER_CONFIG_BEGIN) + TXT_PLAYER_CONFIG_BEGIN.length() - 1;
@@ -220,7 +221,7 @@ public final class TNCZEngine implements MediaEngine {
 							for(SSDCollection coll : ((SSDCollection) node).collectionsIterable()) {
 								String videoURL = coll.getDirectString("src");
 								MediaLanguage language = MediaLanguage.ofCode(coll.getDirectString("lang"));
-								List<Media> media = MediaUtils.createMedia(source, Utils.uri(videoURL), sourceURI,
+								List<Media> media = MediaUtils.createMedia(source, Net.uri(videoURL), sourceURI,
 									title, language, MediaMetadata.empty());
 								
 								for(Media s : media) {

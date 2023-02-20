@@ -69,6 +69,7 @@ import sune.app.mediadown.media.MediaType;
 import sune.app.mediadown.media.MediaUtils;
 import sune.app.mediadown.media.SubtitlesMedia;
 import sune.app.mediadown.media.VideoMediaBase;
+import sune.app.mediadown.net.Net;
 import sune.app.mediadown.pipeline.DownloadPipelineResult;
 import sune.app.mediadown.util.CheckedSupplier;
 import sune.app.mediadown.util.Metadata;
@@ -442,7 +443,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 						// May seem wasteful to create the request object everytime, however this
 						// will update the underlying URLStreamHandler and other properties, that
 						// allow to actually retry the download with "fresh" values.
-						request = new GetRequest(Utils.url(segment.uri()), Shared.USER_AGENT, HEADERS);
+						request = new GetRequest(Net.url(segment.uri()), Shared.USER_AGENT, HEADERS);
 						lastAttempt = i == maxRetryAttempts;
 						handler.setPropagateError(lastAttempt);
 						exception = null;
@@ -554,7 +555,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 						+ (subtitleLanguage != null ? '.' + subtitleLanguage : "")
 						+ (!subtitleType.isEmpty() ? '.' + subtitleType : "");
 					Path subDest = subtitlesDir.resolve(subtitleFileName);
-					GetRequest request = new GetRequest(Utils.url(sm.uri()), Shared.USER_AGENT, HEADERS);
+					GetRequest request = new GetRequest(Net.url(sm.uri()), Shared.USER_AGENT, HEADERS);
 					downloader.start(request, subDest, DownloadConfiguration.ofDefault());
 				}
 			}

@@ -55,6 +55,7 @@ import sune.app.mediadown.media.SubtitlesMedia;
 import sune.app.mediadown.media.VideoMedia;
 import sune.app.mediadown.media.VideoMediaContainer;
 import sune.app.mediadown.media_engine.streamcz.M3U_Hotfix.M3UFile;
+import sune.app.mediadown.net.Net;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.task.ListTask;
@@ -98,7 +99,7 @@ public final class StreamCZEngine implements MediaEngine {
 	@Override
 	public ListTask<Program> getPrograms() throws Exception {
 		return ListTask.of((task) -> {
-			URI baseUri = Utils.uri("https://www.stream.cz/");
+			URI baseUri = Net.uri("https://www.stream.cz/");
 			
 			(new ConcurrentLoop<API.Node>() {
 				
@@ -134,7 +135,7 @@ public final class StreamCZEngine implements MediaEngine {
 			}
 			
 			for(API.Node item : API.episodes(programId)) {
-				URI uri = Utils.uri(Utils.urlConcat(program.uri().toString(), item.urlName()));
+				URI uri = Net.uri(Net.uriConcat(program.uri().toString(), item.urlName()));
 				Episode episode = new Episode(program, uri, item.name(), "id", item.id());
 				
 				if(!task.add(episode)) {
@@ -155,7 +156,7 @@ public final class StreamCZEngine implements MediaEngine {
 			SSDCollection videoData = state.getCollection("fetchable.episode.videoDetail.data");
 			String splBaseUrl = videoData.getDirectString("spl");
 			String splUrl = String.format("%s%s,%d,%s", splBaseUrl, "spl2", 3, "VOD").replace("|", "%7C");
-			URI splUri = Utils.uri(splUrl);
+			URI splUri = Net.uri(splUrl);
 			SSDCollection json = JSON.read(FastWeb.getRequest(splUri, Map.of()).body());
 			
 			String programName = videoData.getDirectString("name", null);
@@ -257,7 +258,7 @@ public final class StreamCZEngine implements MediaEngine {
 					loop:
 					for(SSDObject subtitleUrlObj : subtitlesItem.getDirectCollection("urls").objectsIterable()) {
 						String subtitleUrl = subtitleUrlObj.stringValue();
-						URI subtitleUri = Utils.isRelativeURL(subtitleUrl) ? splUri.resolve(subtitleUrl) : Utils.uri(subtitleUrl);
+						URI subtitleUri = Net.isRelativeURI(subtitleUrl) ? splUri.resolve(subtitleUrl) : Net.uri(subtitleUrl);
 						MediaFormat subtitleFormat = MediaFormat.UNKNOWN;
 						
 						switch(subtitleUrlObj.getName()) {
@@ -287,7 +288,7 @@ public final class StreamCZEngine implements MediaEngine {
 					   .orElse(MediaResolution.UNKNOWN);
 					MediaFormat format = MediaFormat.MP4;
 					String strUrl = item.getDirectString("url").replace("|", "%7C");
-					URI mediaUri = Utils.isRelativeURL(strUrl) ? splUri.resolve(strUrl) : Utils.uri(strUrl);
+					URI mediaUri = Net.isRelativeURI(strUrl) ? splUri.resolve(strUrl) : Net.uri(strUrl);
 					MediaMetadata metadata = MediaMetadata.builder().sourceURI(sourceURI).title(title).build();
 					List<String> codecs = List.of(codec);
 					
@@ -331,7 +332,7 @@ public final class StreamCZEngine implements MediaEngine {
 				if(file == null) continue;
 				
 				String strUrl = file.getDirectString("url").replace("|", "%7C");
-				URI mediaUri = Utils.isRelativeURL(strUrl) ? splUri.resolve(strUrl) : Utils.uri(strUrl);
+				URI mediaUri = Net.isRelativeURI(strUrl) ? splUri.resolve(strUrl) : Net.uri(strUrl);
 				MediaLanguage language = MediaLanguage.UNKNOWN;
 				MediaMetadata metadata = MediaMetadata.empty();
 				List<Media.Builder<?, ?>> media = Hotfix.createMediaBuilders(source, mediaUri, sourceURI, title, language, metadata);
@@ -420,8 +421,8 @@ public final class StreamCZEngine implements MediaEngine {
 	
 	private static final class API {
 		
-		private static final URI URL_CATEGORIES = Utils.uri("https://www.stream.cz/videa/filmy");
-		private static final URI URL_API = Utils.uri("https://api.stream.cz/graphql");
+		private static final URI URL_CATEGORIES = Net.uri("https://www.stream.cz/videa/filmy");
+		private static final URI URL_API = Net.uri("https://api.stream.cz/graphql");
 		private static final String REFERER = "https://www.stream.cz/";
 		
 		public static final SSDCollection request(String json) throws Exception {

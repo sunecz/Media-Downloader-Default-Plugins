@@ -43,6 +43,7 @@ import sune.app.mediadown.media.MediaMetadata;
 import sune.app.mediadown.media.MediaSource;
 import sune.app.mediadown.media.MediaUtils;
 import sune.app.mediadown.media.SubtitlesMedia;
+import sune.app.mediadown.net.Net;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.task.ListTask;
@@ -146,7 +147,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 						if(info != null) {
 							PlaylistData playlistData = PlaylistDataGetter.get(videoURL, info);
 							Map<String, String> headers = Utils.toMap("X-Requested-With", "XMLHttpRequest");
-							Request request = new GetRequest(Utils.url(playlistData.url), Shared.USER_AGENT, headers);
+							Request request = new GetRequest(Net.url(playlistData.url), Shared.USER_AGENT, headers);
 							
 							SSDCollection json;
 							try(StreamResponse response = Web.requestStream(request)) {
@@ -167,7 +168,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 								
 								if(streamURL != null) {
 									List<Media.Builder<?, ?>> media = MediaUtils.createMediaBuilders(source,
-										Utils.uri(streamURL), uri, job.title, MediaLanguage.UNKNOWN,
+										Net.uri(streamURL), uri, job.title, MediaLanguage.UNKNOWN,
 										MediaMetadata.empty());
 									
 									// Check, if the media has some additional subtitles
@@ -181,7 +182,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 											String subURL = mediaSubtitles.getDirectString("url");
 											MediaFormat subFormat = MediaFormat.fromPath(subURL);
 											SubtitlesMedia.Builder<?, ?> subtitles = SubtitlesMedia.simple().source(source)
-													.uri(Utils.uri(subURL)).format(subFormat).language(subLanguage);
+													.uri(Net.uri(subURL)).format(subFormat).language(subLanguage);
 											media.forEach((m) -> MediaUtils.appendMedia((MediaContainer.Builder<?, ?>) m, subtitles));
 										}
 									}
@@ -199,7 +200,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 					}
 					case NONE: {
 						if(videoURL != null) {
-							List<Media> media = MediaUtils.createMedia(source, Utils.uri(videoURL), uri,
+							List<Media> media = MediaUtils.createMedia(source, Net.uri(videoURL), uri,
 								job.title, MediaLanguage.UNKNOWN, MediaMetadata.empty());
 							
 							for(Media s : media) {
@@ -397,7 +398,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			String id = data.getDirectString("id");
 			String url = programSlugToURL(data.getDirectString("slug"));
 			String title = data.getDirectString("title");
-			return new Program(Utils.uri(url), title, "id", id);
+			return new Program(Net.uri(url), title, "id", id);
 		}
 		
 		private static final Episode parseEpisode(Program program, SSDCollection data) {
@@ -405,7 +406,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			String url = episodeSlugToURL(program, id);
 			String title = data.getDirectString("title");
 			boolean playable = data.getDirectBoolean("playable");
-			return new Episode(program, Utils.uri(url), title, "id", id, "playable", playable);
+			return new Episode(program, Net.uri(url), title, "id", id, "playable", playable);
 		}
 		
 		private static final String createRequestBody(String operationName, String query, Object... args) {
@@ -429,7 +430,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		private static final SSDCollection doOperation(String operationName, String query, Object... variables) throws Exception {
 			String body = createRequestBody(operationName, query, variables);
 			Map<String, String> headers = Map.of("Content-Type", "application/json", "Referer", REFERER);
-			StringResponse response = Web.request(new PostRequest(Utils.url(URL), Shared.USER_AGENT, null, headers).toBodyRequest(body));
+			StringResponse response = Web.request(new PostRequest(Net.url(URL), Shared.USER_AGENT, null, headers).toBodyRequest(body));
 			if(response.code != 200)
 				throw new IllegalStateException("API returned non-OK code: " + response.code + ". Body: " + response.content);
 			return JSON.read(response.content);
@@ -723,7 +724,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		private static final String BASE_URL = "https://www.ceskatelevize.cz";
 		
 		public static PlaylistData get(String url, SourceInfo info) throws Exception {
-			String requestURLRelative = Utils.url(url).getPath();
+			String requestURLRelative = Net.url(url).getPath();
 			String endpointURL = BASE_URL + info.baseURL + "/ajax/get-client-playlist/" + info.wwwServerGet;
 			Map<String, String> params = Utils.toMap(
 				"playlist[0][type]", info.type,
@@ -737,7 +738,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 				"X-Requested-With", "XMLHttpRequest",
 				"x-addr", "127.0.0.1"
 			);
-			Request request = new PostRequest(Utils.url(endpointURL), Shared.USER_AGENT, params, headers);
+			Request request = new PostRequest(Net.url(endpointURL), Shared.USER_AGENT, params, headers);
 			
 			SSDCollection json;
 			try(StreamResponse response = Web.requestStream(request)) {
@@ -814,7 +815,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		}
 		
 		public static final String obtainHash() throws Exception {
-			StringResponse response = Web.request(new GetRequest(Utils.url(URL_PLAYER_HASH), Shared.USER_AGENT));
+			StringResponse response = Web.request(new GetRequest(Net.url(URL_PLAYER_HASH), Shared.USER_AGENT));
 			return response != null ? response.content : null;
 		}
 		
@@ -1132,7 +1133,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			String showCode = matcherURL.group(1);
 			String showId = API.getShowId(showCode);
 			String showURL = Utils.format(FORMAT_SHOW_URL, "show_id", showId, "show_code", showCode);
-			Program program = new Program(Utils.uri(showURL), showCode);
+			Program program = new Program(Net.uri(showURL), showCode);
 			
 			// Obtain all the episodes to extract media sources from
 			ListTask<Episode> task = ListTask.of((t) -> {
@@ -1249,7 +1250,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 				}
 			}
 			
-			URL apiURL = Utils.url(API_URL);
+			URL apiURL = Net.url(API_URL);
 			for(SSDCollection item : items) {
 				// Construct the HTTP POST body as a JSON object
 				SSDCollection coll = SSDCollection.empty();
@@ -1297,7 +1298,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 					.orElseGet(document::title);
 			// Extract all the videos on the page
 			for(Element elVideo : document.select(SELECTOR_VIDEO)) {
-				String url = Utils.urlFix(elVideo.attr("href"), true);
+				String url = Net.uriFix(elVideo.attr("href"));
 				jobs.add(new ExtractJob(url, ExtractMethod.SOURCE_INFO, title));
 			}
 		}

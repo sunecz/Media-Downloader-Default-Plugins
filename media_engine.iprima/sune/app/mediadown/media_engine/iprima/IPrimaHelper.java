@@ -55,6 +55,7 @@ import sune.app.mediadown.media.MediaMetadata;
 import sune.app.mediadown.media.MediaSource;
 import sune.app.mediadown.media.MediaUtils;
 import sune.app.mediadown.media_engine.iprima.IPrimaEngine.IPrima;
+import sune.app.mediadown.net.Net;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginConfiguration;
 import sune.app.mediadown.task.ListTask;
@@ -107,8 +108,8 @@ final class IPrimaHelper {
 			protected Integer runTask(Integer off) throws Exception {
 				Map<String, Object> localURLArgs = new LinkedHashMap<>(urlArgs);
 				localURLArgs.put("offset", off);
-				URL url = Utils.url(urlBuilder.apply(localURLArgs));
-				String response = internal_request(Utils.uri(url));
+				URL url = Net.url(urlBuilder.apply(localURLArgs));
+				String response = internal_request(Net.uri(url));
 				AtomicInteger index = new AtomicInteger();
 				int result = callback.apply(iprima, source, response, urlArgs, (val) -> {
 					return threadSafeListAdder(val, off, index.getAndIncrement());
@@ -214,7 +215,7 @@ final class IPrimaHelper {
 					return; // Do not continue
 				}
 				
-				URL configURL = Utils.url(Utils.format(playURL(), "product_id", productId));
+				URL configURL = Net.url(Utils.format(playURL(), "product_id", productId));
 				// It is important to specify the referer, otherwise the response code is 403.
 				Map<String, String> requestHeaders = Utils.toMap("Referer", "https://www.iprima.cz/");
 				try {
@@ -226,7 +227,7 @@ final class IPrimaHelper {
 					MediaDownloader.error(new IllegalStateException("Unable to log in to the iPrima website.", ex));
 				}
 				
-				String content = internal_request(Utils.uri(configURL), requestHeaders);
+				String content = internal_request(Net.uri(configURL), requestHeaders);
 				if(content == null || content.isEmpty()) {
 					return; // Do not continue
 				}
@@ -348,7 +349,7 @@ final class IPrimaHelper {
 				for(SSDCollection streamInfo : streamInfos.collectionsIterable()) {
 					String src = streamInfo.getDirectString("url");
 					MediaLanguage language = MediaLanguage.ofCode(streamInfo.getString("lang.key"));
-					List<Media> media = MediaUtils.createMedia(source, Utils.uri(src), sourceURI, title,
+					List<Media> media = MediaUtils.createMedia(source, Net.uri(src), sourceURI, title,
 						language, MediaMetadata.empty());
 					
 					for(Media s : media) {
@@ -427,7 +428,7 @@ final class IPrimaHelper {
 			// Sometimes an episode is not playable due to e.g. licensing, just skip it
 			if(elEpisodeLink == null) return null;
 			
-			String episodeURL = Utils.urlFix(elEpisodeLink.attr("href"), true);
+			String episodeURL = Net.uriFix(elEpisodeLink.attr("href"));
 			String episodeTitle = elEpisodeLink.attr("title");
 			String episodeSeasonTitle = seasonTitle == null ? getEpisodeSeasonTitle(elEpisode) : seasonTitle;
 			
@@ -436,7 +437,7 @@ final class IPrimaHelper {
 				                            elEpisodeLink.attr("title"));
 			}
 			
-			return new Episode(program, Utils.uri(episodeURL), episodeTitle);
+			return new Episode(program, Net.uri(episodeURL), episodeTitle);
 		}
 		
 		private final Episode parseEpisodeArticleElement(Element elEpisode, Program program) {
@@ -444,7 +445,7 @@ final class IPrimaHelper {
 			// Sometimes an episode is not playable due to e.g. licensing, just skip it
 			if(elEpisodeLink == null) return null;
 			
-			String episodeURL = Utils.urlFix(elEpisodeLink.attr("href"), true);
+			String episodeURL = Net.uriFix(elEpisodeLink.attr("href"));
 			String episodeTitle = elEpisode.selectFirst("h4").text();
 			String episodeSeasonTitle = getEpisodeSeasonTitle(elEpisode);
 			
@@ -453,7 +454,7 @@ final class IPrimaHelper {
 				                            elEpisodeLink.attr("title"));
 			}
 			
-			return new Episode(program, Utils.uri(episodeURL), episodeTitle);
+			return new Episode(program, Net.uri(episodeURL), episodeTitle);
 		}
 		
 		private final boolean getEpisodesFromDocument(Program program, Document document,
@@ -528,12 +529,12 @@ final class IPrimaHelper {
 							// episodes. This will probably result in duplicates but it should not
 							// matter.
 							if(elSeason.selectFirst(SELECTOR_SEASON_DESCRIPTION).text().trim().isEmpty()
-									&& !Utils.urlBasename(elSeason.absUrl("href")).contains("nedavno-odvysilane")) {
+									&& !Net.uriBasename(elSeason.absUrl("href")).toString().contains("nedavno-odvysilane")) {
 								continue;
 							}
 							
 							String seasonTitle = elSeason.selectFirst(SELECTOR_SEASON_TITLE).text().trim();
-							String seasonURL = Utils.urlFix(elSeason.attr("href"), true);
+							String seasonURL = Net.uriFix(elSeason.attr("href"));
 							Document seasonDocument = Utils.document(seasonURL);
 							
 							// Extract all the episodes from the season document
@@ -657,11 +658,11 @@ final class IPrimaHelper {
 					continue;
 				}
 				
-				String url = Utils.urlFix(elProgram.attr("href"), true);
+				String url = Net.uriFix(elProgram.attr("href"));
 				String title = elProgram.attr("title");
 				SSDCollection data = JSON.read(elProgram.attr("data-item-json"));
 				String id = String.valueOf(data.getDirectInt("id"));
-				Program program = new Program(Utils.uri(url), title, "source", iprima, "id", id, "type", graphQLType);
+				Program program = new Program(Net.uri(url), title, "source", iprima, "id", id, "type", graphQLType);
 				
 				if(!task.add(program)) {
 					return CALLBACK_EXIT; // Do not continue
@@ -674,7 +675,7 @@ final class IPrimaHelper {
 		private static final void getProgramsOfType(ListTask<Program> task, IPrima iprima, String subdomain,
 				String type, String graphQLType) throws Exception {
 			String apiURL = Utils.format(URL_API, "subdomain", subdomain, "type", type);
-			String response = internal_request(Utils.uri(apiURL));
+			String response = internal_request(Net.uri(apiURL));
 			
 			if(response != null) {
 				callback(task, iprima, response, type, graphQLType);
@@ -705,13 +706,13 @@ final class IPrimaHelper {
 		
 		public ListTask<Program> getPrograms(IPrima iprima, String urlPrograms) throws Exception {
 			return ListTask.of((task) -> {
-				String response = internal_request(Utils.uri(urlPrograms));
+				String response = internal_request(Net.uri(urlPrograms));
 				Document document = Utils.parseDocument(response, urlPrograms);
 				
 				for(Element elProgram : document.select(SELECTOR_PROGRAM)) {
 					String url = elProgram.absUrl("href");
 					String title = elProgram.text();
-					Program program = new Program(Utils.uri(url), title, "source", iprima, "type", "ProgramNode");
+					Program program = new Program(Net.uri(url), title, "source", iprima, "type", "ProgramNode");
 					
 					if(!task.add(program)) {
 						break; // Do not continue
@@ -773,7 +774,7 @@ final class IPrimaHelper {
 					String urlSnippetAPI = Utils.format(URL_API, "base_url", baseURL, "type", snippetType,
 						"count", Integer.MAX_VALUE, "offset", 0, "program_id", programID);
 					
-					response = internal_request(Utils.uri(urlSnippetAPI));
+					response = internal_request(Net.uri(urlSnippetAPI));
 					if(response == null) {
 						continue;
 					}
@@ -782,7 +783,7 @@ final class IPrimaHelper {
 					for(Element elEpisode : doc.select(SELECTOR_EPISODE)) {
 						String url = elEpisode.attr("href");
 						String title = elEpisode.text();
-						Episode episode = new Episode(program, Utils.uri(url), title);
+						Episode episode = new Episode(program, Net.uri(url), title);
 						
 						if(!task.add(episode)) {
 							break scriptsLoop; // Do not continue
@@ -862,14 +863,14 @@ final class IPrimaHelper {
 				MediaSource source = MediaSource.of(engine);
 				
 				for(String urlPlay : urls) {
-					String content = internal_request(Utils.uri(urlPlay), requestHeaders);
+					String content = internal_request(Net.uri(urlPlay), requestHeaders);
 					
 					if(content == null || content.isEmpty()) {
 						continue;
 					}
 					
 					SSDCollection data = JSON.read(content);
-					URI sourceURI = Utils.uri(urlPlay);
+					URI sourceURI = Net.uri(urlPlay);
 					
 					for(SSDCollection videoData : data.collectionsIterable()) {
 						// Obtain the program title
@@ -892,7 +893,7 @@ final class IPrimaHelper {
 						for(SSDCollection streamInfo : streamInfos.collectionsIterable()) {
 							String src = streamInfo.getDirectString("url");
 							MediaLanguage language = MediaLanguage.ofCode(streamInfo.getString("lang.key"));
-							List<Media> media = MediaUtils.createMedia(source, Utils.uri(src), sourceURI, title,
+							List<Media> media = MediaUtils.createMedia(source, Net.uri(src), sourceURI, title,
 								language, MediaMetadata.empty());
 							
 							for(Media s : media) {

@@ -17,6 +17,7 @@ import sune.app.mediadown.media.MediaMetadata;
 import sune.app.mediadown.media.MediaQuality;
 import sune.app.mediadown.media.MediaSource;
 import sune.app.mediadown.media.VideoMedia;
+import sune.app.mediadown.net.Net;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.task.ListTask;
@@ -44,7 +45,7 @@ public class HTML5Server implements Server {
 	private final Document getDocument(String url, Map<String, Object> data) throws Exception {
 		Map<String, String> headers = new LinkedHashMap<>();
 		data.forEach((k, v) -> headers.put(k, v != null ? v.toString() : ""));
-		StringResponse response = Web.request(new GetRequest(Utils.url(url), Shared.USER_AGENT, headers));
+		StringResponse response = Web.request(new GetRequest(Net.url(url), Shared.USER_AGENT, headers));
 		return Utils.parseDocument(response.content, url);
 	}
 	
@@ -58,9 +59,9 @@ public class HTML5Server implements Server {
 			
 			for(Element video : videos) {
 				if(video.hasAttr("src")) {
-					String sourceURL = Utils.urlFix(video.absUrl("src"));
+					String sourceURL = Net.uriFix(video.absUrl("src"));
 					Media media = VideoMedia.simple().source(source)
-							.uri(Utils.uri(sourceURL)).format(MediaFormat.fromPath(sourceURL))
+							.uri(Net.uri(sourceURL)).format(MediaFormat.fromPath(sourceURL))
 							.quality(MediaQuality.UNKNOWN).metadata(metadata)
 							.build();
 					
@@ -71,10 +72,10 @@ public class HTML5Server implements Server {
 				
 				Elements sourceTags = video.getElementsByTag("source");
 				for(Element sourceTag : sourceTags) {
-					String sourceURL  = Utils.urlFix(sourceTag.absUrl("src"));
+					String sourceURL  = Net.uriFix(sourceTag.absUrl("src"));
 					String sourceType = sourceTag.attr("type");
 					Media media = VideoMedia.simple().source(source)
-							.uri(Utils.uri(sourceURL)).format(MediaFormat.fromMimeType(sourceType))
+							.uri(Net.uri(sourceURL)).format(MediaFormat.fromMimeType(sourceType))
 							.quality(MediaQuality.UNKNOWN).metadata(metadata)
 							.build();
 					

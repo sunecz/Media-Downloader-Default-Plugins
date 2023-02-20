@@ -21,9 +21,9 @@ import org.jsoup.nodes.Element;
 
 import io.netty.handler.codec.http.FullHttpRequest;
 import sune.app.mediadown.media.Media;
+import sune.app.mediadown.net.Net;
 import sune.app.mediadown.util.Reflection2;
 import sune.app.mediadown.util.Reflection3;
-import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Web;
 import sune.app.mediadownloader.drm.DRMBrowser;
 import sune.app.mediadownloader.drm.DRMContext;
@@ -55,7 +55,7 @@ public class NovaVoyoDRMEngine implements DRMEngine {
 	}
 	
 	private static final List<HttpCookie> savedCookies() throws Exception {
-		URI uri = Utils.uri("https://voyo.nova.cz/muj-profil");
+		URI uri = Net.uri("https://voyo.nova.cz/muj-profil");
 		
 		// Get the top-level domain so that all the cookies are included
 		String domain = uri.getHost();
@@ -92,7 +92,7 @@ public class NovaVoyoDRMEngine implements DRMEngine {
 	
 	@Override
 	public boolean isCompatibleURL(String url) {
-		URL urlObj = Utils.url(url);
+		URL urlObj = Net.url(url);
 		// Check the protocol
 		String protocol = urlObj.getProtocol();
 		if(!protocol.equals("http") &&
@@ -182,7 +182,7 @@ public class NovaVoyoDRMEngine implements DRMEngine {
 					setCefCookies(url, savedCookies());
 					
 					// Obtain the iframe element and get its URL
-					Element elIframe = document(Utils.uri(url)).selectFirst(".js-detail-player .iframe-wrap iframe");
+					Element elIframe = document(Net.uri(url)).selectFirst(".js-detail-player .iframe-wrap iframe");
 					if(elIframe != null) {
 						embedUrl = elIframe.absUrl("src");
 					}

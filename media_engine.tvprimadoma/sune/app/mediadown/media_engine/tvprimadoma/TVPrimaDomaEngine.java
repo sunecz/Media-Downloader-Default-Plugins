@@ -24,6 +24,7 @@ import sune.app.mediadown.media.MediaSource;
 import sune.app.mediadown.media.MediaType;
 import sune.app.mediadown.media.MediaUtils;
 import sune.app.mediadown.media.VideoMedia;
+import sune.app.mediadown.net.Net;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.task.ListTask;
@@ -66,7 +67,7 @@ public final class TVPrimaDomaEngine implements MediaEngine {
 			Element elTitle = elEpisode.selectFirst("h3");
 			String url = elEpisode.absUrl("href");
 			String title = elTitle.text();
-			Episode episode = new Episode(program, Utils.uri(url), title);
+			Episode episode = new Episode(program, Net.uri(url), title);
 			
 			if(!task.add(episode)) {
 				return false; // Do not continue
@@ -80,13 +81,13 @@ public final class TVPrimaDomaEngine implements MediaEngine {
 	@Override
 	public ListTask<Program> getPrograms() throws Exception {
 		return ListTask.of((task) -> {
-			Document document = Utils.document(Utils.url(URL_PROGRAMS));
+			Document document = Utils.document(Net.url(URL_PROGRAMS));
 			
 			for(Element elProgram : document.select(SELECTOR_PROGRAMS)) {
 				Element elTitle = elProgram.selectFirst("h3");
 				String url = elProgram.absUrl("href");
 				String title = elTitle.text();
-				Program program = new Program(Utils.uri(url), title);
+				Program program = new Program(Net.uri(url), title);
 				
 				if(!task.add(program)) {
 					return; // Do not continue
@@ -153,7 +154,7 @@ public final class TVPrimaDomaEngine implements MediaEngine {
 					// Must transform the URL first to the canonical (one visited directly from Stream.cz)
 					Document iframeDocument = Utils.document(iframeSrc);
 					String canonicalUrl = iframeDocument.selectFirst("link[rel='canonical']").absUrl("href");
-					URI canonicalUri = Utils.uri(canonicalUrl);
+					URI canonicalUri = Net.uri(canonicalUrl);
 					
 					MediaGetter getter;
 					if((getter = MediaGetters.fromURI(canonicalUri)) != null) {
@@ -212,12 +213,12 @@ public final class TVPrimaDomaEngine implements MediaEngine {
 				String videoURL = video.getDirectString("url");
 				
 				List<Media> media = new ArrayList<>();
-				media.addAll(MediaUtils.createMedia(source, Utils.uri(videoURL), sourceURI, title, language, metadata));
+				media.addAll(MediaUtils.createMedia(source, Net.uri(videoURL), sourceURI, title, language, metadata));
 				
 				for(SSDCollection additionalVideo : additionalURLs.collectionsIterable()) {
 					String additionalVideoURL = additionalVideo.getDirectString("url");
 					media.add(VideoMedia.simple().source(source)
-					          	.uri(Utils.uri(additionalVideoURL))
+					          	.uri(Net.uri(additionalVideoURL))
 					          	.quality(MediaQuality.fromString(additionalVideo.getDirectString("name"), MediaType.VIDEO))
 					          	.format(MediaFormat.fromPath(additionalVideoURL))
 					          	.metadata(metadata)
@@ -293,7 +294,7 @@ public final class TVPrimaDomaEngine implements MediaEngine {
 		
 		public static final SSDCollection videoList(String url) throws Exception {
 			String frameURL = null;
-			String script = Web.request(new GetRequest(Utils.url(url), Shared.USER_AGENT)).content;
+			String script = Web.request(new GetRequest(Net.url(url), Shared.USER_AGENT)).content;
 			int index;
 			if((index = script.indexOf("{\"")) >= 0) {
 				String configContent = Utils.bracketSubstring(script, '{', '}', false, index, script.length());
@@ -331,7 +332,7 @@ public final class TVPrimaDomaEngine implements MediaEngine {
 
 			// Send the request to obtain the frame's content
 			Map<String, String> headers = Map.of("Referer", URL_REFERER);
-			String content = Web.request(new GetRequest(Utils.url(frameURL), Shared.USER_AGENT, headers)).content;
+			String content = Web.request(new GetRequest(Net.url(frameURL), Shared.USER_AGENT, headers)).content;
 			
 			SSDCollection playerVideos = null;
 			if((index = content.indexOf("var playerVideos")) >= 0) {

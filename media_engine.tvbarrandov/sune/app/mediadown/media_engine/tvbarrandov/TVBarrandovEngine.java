@@ -62,6 +62,7 @@ import sune.app.mediadown.media.MediaSource;
 import sune.app.mediadown.media.MediaType;
 import sune.app.mediadown.media.MediaUtils;
 import sune.app.mediadown.media.VideoMedia;
+import sune.app.mediadown.net.Net;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginConfiguration;
 import sune.app.mediadown.plugin.PluginLoaderContext;
@@ -133,7 +134,7 @@ public final class TVBarrandovEngine implements MediaEngine {
 		for(Element elEpisode : document.select(SELECTOR_EPISODES)) {
 			String url = elEpisode.selectFirst("a.show-box__container").absUrl("href");
 			String title = maybeImproveEpisodeTitle(program, url, elEpisode.selectFirst(".show-box__timestamp").text());
-			Episode episode = new Episode(program, Utils.uri(url), title);
+			Episode episode = new Episode(program, Net.uri(url), title);
 			
 			if(!task.add(episode)) {
 				return false; // Do not continue
@@ -146,13 +147,13 @@ public final class TVBarrandovEngine implements MediaEngine {
 	@Override
 	public ListTask<Program> getPrograms() throws Exception {
 		return ListTask.of((task) -> {
-			Document document = FastWeb.document(Utils.uri(URL_PROGRAMS), Map.of());
+			Document document = FastWeb.document(Net.uri(URL_PROGRAMS), Map.of());
 			
 			for(Element elProgram : document.select(SELECTOR_PROGRAMS)) {
 				if(elProgram.selectFirst(".show-box") == null) continue;
 				String url = elProgram.selectFirst("a.show-box__container").absUrl("href");
 				String title = elProgram.selectFirst(".show-box__title").text();
-				Program program = new Program(Utils.uri(url), title);
+				Program program = new Program(Net.uri(url), title);
 				
 				if(!task.add( program)) {
 					return; // Do not continue
@@ -212,7 +213,7 @@ public final class TVBarrandovEngine implements MediaEngine {
 			URI uriToProcess = null;
 			
 			// Check whether we've been redirected to the Premium Archive information page
-			if(Utils.uri(document.baseUri()).getPath().startsWith("/premiovy-archiv")) {
+			if(Net.uri(document.baseUri()).getPath().startsWith("/premiovy-archiv")) {
 				// Some videos are marked as premium but are actually available on YouTube,
 				// try to search for them on the official YouTube channel.
 				String queryURL = "https://www.youtube.com/c/TelevizeBarrandovOfficial/search?query=%{query}s";
@@ -233,7 +234,7 @@ public final class TVBarrandovEngine implements MediaEngine {
 					boolean tryDayBefore = false;
 					do {
 						// Construct the query URL for searching the term
-						URI requestURI = Utils.uri(Utils.format(queryURL, "query", JavaScript.encodeURIComponent(query)));
+						URI requestURI = Net.uri(Utils.format(queryURL, "query", JavaScript.encodeURIComponent(query)));
 						HttpResponse<String> response = FastWeb.getRequest(requestURI, Map.of());
 						Document searchDocument = Utils.parseDocument(response.body(), response.uri());
 						boolean isSearchPage = true;
@@ -243,7 +244,7 @@ public final class TVBarrandovEngine implements MediaEngine {
 							isSearchPage = false;
 							
 							Element elMeta = searchDocument.selectFirst("noscript > meta");
-							URI consentURI = Utils.uri(Utils.unquote(elMeta.attr("content").split(";", 2)[1].split("=", 2)[1]));
+							URI consentURI = Net.uri(Utils.unquote(elMeta.attr("content").split(";", 2)[1].split("=", 2)[1]));
 							Document consentDocument = FastWeb.document(consentURI, Map.of());
 							Map<String, Object> args = new LinkedHashMap<>();
 							
@@ -277,7 +278,7 @@ public final class TVBarrandovEngine implements MediaEngine {
 								"Referer", consentURI.toString()
 							);
 							
-							URI postURI = Utils.uri("https://consent.youtube.com/save");
+							URI postURI = Net.uri("https://consent.youtube.com/save");
 							response = FastWeb.postRequest(postURI, headers, args);
 							
 							// Retry the previous search request but now with rejecting the consent
@@ -314,7 +315,7 @@ public final class TVBarrandovEngine implements MediaEngine {
 										// words, i.e. program name and the date string.
 										if(Regex.of("(?U)\\b" + Regex.quote(programName) + "\\b").matcher(title).find()
 												&& Regex.of("(?U)\\b" + Regex.quote(dateString) + "\\b").matcher(title).find()) {
-											uriToProcess = Utils.uri("https://www.youtube.com/watch?v=" + videoId);
+											uriToProcess = Net.uri("https://www.youtube.com/watch?v=" + videoId);
 											// Video found, do not continue
 											break;
 										}
@@ -393,7 +394,7 @@ public final class TVBarrandovEngine implements MediaEngine {
 					String type = elSource.attr("type");
 					
 					Media media = VideoMedia.simple().source(source)
-							.uri(Utils.uri(src))
+							.uri(Net.uri(src))
 							.format(MediaFormat.fromMimeType(type))
 							.quality(MediaQuality.fromString(res, MediaType.VIDEO))
 							.duration(duration)
@@ -405,7 +406,7 @@ public final class TVBarrandovEngine implements MediaEngine {
 					}
 				}
 			} else if((elVideo = document.selectFirst(".video-responsive > iframe")) != null) { // Embedded video
-				uriToProcess = Utils.uri(elVideo.attr("src"));
+				uriToProcess = Net.uri(elVideo.attr("src"));
 			}
 			
 			// Check if any URI needs to be processed (used for embedded and searched videos)
@@ -745,7 +746,7 @@ public final class TVBarrandovEngine implements MediaEngine {
 	            "prihlasit", ""
 	        );
 			
-			HttpResponse<String> response = FastWeb.postRequest(Utils.uri(URL_LOGIN), headers, args);
+			HttpResponse<String> response = FastWeb.postRequest(Net.uri(URL_LOGIN), headers, args);
 			return response.uri().toString().equals(URL_REDIRECT);
 		}
 	}

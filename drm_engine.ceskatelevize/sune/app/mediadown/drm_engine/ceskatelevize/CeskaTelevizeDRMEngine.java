@@ -13,8 +13,8 @@ import org.cef.network.CefCookieManager;
 
 import io.netty.handler.codec.http.FullHttpRequest;
 import sune.app.mediadown.media.Media;
+import sune.app.mediadown.net.Net;
 import sune.app.mediadown.util.JSON;
-import sune.app.mediadown.util.Utils;
 import sune.app.mediadownloader.drm.DRMBrowser;
 import sune.app.mediadownloader.drm.DRMContext;
 import sune.app.mediadownloader.drm.DRMEngine;
@@ -37,7 +37,7 @@ public class CeskaTelevizeDRMEngine implements DRMEngine {
 	
 	@Override
 	public boolean isCompatibleURL(String url) {
-		URL urlObj = Utils.url(url);
+		URL urlObj = Net.url(url);
 		// Check the protocol
 		String protocol = urlObj.getProtocol();
 		if(!protocol.equals("http") &&

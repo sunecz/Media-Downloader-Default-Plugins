@@ -47,6 +47,7 @@ import sune.app.mediadown.media.MediaLanguage;
 import sune.app.mediadown.media.MediaMetadata;
 import sune.app.mediadown.media.MediaSource;
 import sune.app.mediadown.media.MediaUtils;
+import sune.app.mediadown.net.Net;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginConfiguration;
 import sune.app.mediadown.plugin.PluginLoaderContext;
@@ -144,7 +145,7 @@ public final class NovaVoyoServer implements Server {
 			
 			// Obtain the embedded iframe document to extract the player settings
 			String embedURL = elIframe.absUrl("src");
-			Document embedDoc = FastWeb.document(Utils.uri(embedURL));
+			Document embedDoc = FastWeb.document(Net.uri(embedURL));
 			
 			VoyoError error;
 			if(!(error = checkForError(embedDoc)).isSuccess())
@@ -176,7 +177,7 @@ public final class NovaVoyoServer implements Server {
 					if(format == MediaFormat.UNKNOWN)
 						format = MediaFormat.fromPath(videoURL);
 					MediaLanguage language = MediaLanguage.ofCode(coll.getDirectString("lang"));
-					List<Media> media = MediaUtils.createMedia(source, Utils.uri(videoURL), sourceURI,
+					List<Media> media = MediaUtils.createMedia(source, Net.uri(videoURL), sourceURI,
 						title, language, MediaMetadata.empty());
 					for(Media s : media) {
 						if(!task.add(s)) {
@@ -303,7 +304,7 @@ public final class NovaVoyoServer implements Server {
 			// (1) Remove all cookies.
 			// (2) Visit any (logged-in-only?) page.
 			FastWeb.cookieManager().getCookieStore().removeAll();
-			FastWeb.getRequest(Utils.uri(URL_MY_ACCOUNT), Map.of());
+			FastWeb.getRequest(Net.uri(URL_MY_ACCOUNT), Map.of());
 		}
 		
 		public static final boolean isLoggedIn() {
@@ -359,7 +360,7 @@ public final class NovaVoyoServer implements Server {
 			List<Device> devices;
 			
 			// Remember the login session cookies for later use
-			URI cookiesURI = Utils.uri(URL_MY_ACCOUNT);
+			URI cookiesURI = Net.uri(URL_MY_ACCOUNT);
 			List<HttpCookie> cookies = savedCookies(cookiesURI);
 			// Remember the list of removeURLs of devices for later use
 			devices = DeviceManager.listDevices();
@@ -441,7 +442,7 @@ public final class NovaVoyoServer implements Server {
 			if(username.isEmpty() || password.isEmpty())
 				return false;
 			
-			URI uri = Utils.uri(URL_LOGIN);
+			URI uri = Net.uri(URL_LOGIN);
 			Document document = FastWeb.document(uri);
 			String argDo = document.selectFirst("input[type='hidden'][name='_do']").val();
 			
@@ -484,7 +485,7 @@ public final class NovaVoyoServer implements Server {
 			List<Device> devices = new ArrayList<>();
 			
 			DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd.MM.yyyy");
-			Document document = FastWeb.document(Utils.uri(URL_DEVICES));
+			Document document = FastWeb.document(Net.uri(URL_DEVICES));
 			for(Element elDevice : document.select(SELECTOR_DEVICES)) {
 				boolean isCurrent = elDevice.hasClass("-current");
 				boolean isActive = !elDevice.parent().parent().hasClass("-forbidden");
@@ -519,7 +520,7 @@ public final class NovaVoyoServer implements Server {
 		
 		private static final void removeDevice(String removeURL) throws Exception {
 			if(removeURL == null) return; // Nothing to remove
-			FastWeb.getRequest(Utils.uri(removeURL), Map.of());
+			FastWeb.getRequest(Net.uri(removeURL), Map.of());
 		}
 	}
 	

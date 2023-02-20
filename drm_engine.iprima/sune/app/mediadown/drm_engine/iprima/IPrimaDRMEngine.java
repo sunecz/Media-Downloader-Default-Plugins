@@ -22,10 +22,10 @@ import io.netty.handler.codec.http.HttpMethod;
 import sune.app.mediadown.media.Media;
 import sune.app.mediadown.media_engine.iprima.IPrimaAuthenticator;
 import sune.app.mediadown.media_engine.iprima.IPrimaAuthenticator.SessionData;
+import sune.app.mediadown.net.Net;
 import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.Reflection2;
 import sune.app.mediadown.util.Reflection3;
-import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Web;
 import sune.app.mediadownloader.drm.DRMBrowser;
 import sune.app.mediadownloader.drm.DRMContext;
@@ -102,7 +102,7 @@ public class IPrimaDRMEngine implements DRMEngine {
 	
 	@Override
 	public boolean isCompatibleURL(String url) {
-		URL urlObj = Utils.url(url);
+		URL urlObj = Net.url(url);
 		// Check the protocol
 		String protocol = urlObj.getProtocol();
 		if(!protocol.equals("http") &&
@@ -232,7 +232,7 @@ public class IPrimaDRMEngine implements DRMEngine {
 				try {
 					SessionData sessionData = doHeadlessLogin();
 					rawString = sessionData.rawString();
-					cookies = savedCookies(Utils.uri(url));
+					cookies = savedCookies(Net.uri(url));
 					setCefCookies(url, cookies);
 					isLoggedIn = true;
 				} catch(Exception ex) {

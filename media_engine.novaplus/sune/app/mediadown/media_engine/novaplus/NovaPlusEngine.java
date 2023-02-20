@@ -23,6 +23,7 @@ import sune.app.mediadown.media.MediaLanguage;
 import sune.app.mediadown.media.MediaMetadata;
 import sune.app.mediadown.media.MediaSource;
 import sune.app.mediadown.media.MediaUtils;
+import sune.app.mediadown.net.Net;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.task.ListTask;
@@ -109,7 +110,7 @@ public final class NovaPlusEngine implements MediaEngine {
 			if(elLink != null) {
 				String episodeURL = elLink.absUrl("href");
 				String episodeName = elLink.text();
-				Episode episode = new Episode(program, Utils.uri(episodeURL), Utils.validateFileName(episodeName));
+				Episode episode = new Episode(program, Net.uri(episodeURL), Utils.validateFileName(episodeName));
 				
 				if(!task.add(episode)) {
 					return 2; // Do not continue
@@ -179,7 +180,7 @@ public final class NovaPlusEngine implements MediaEngine {
 				timeoutException = null;
 				
 				try {
-					pageContent = Web.request(new GetRequest(Utils.url(pageURL), Shared.USER_AGENT, headers)).content;
+					pageContent = Web.request(new GetRequest(Net.url(pageURL), Shared.USER_AGENT, headers)).content;
 				} catch(SocketTimeoutException ex) {
 					timeoutException = ex;
 				}
@@ -189,7 +190,7 @@ public final class NovaPlusEngine implements MediaEngine {
 			if(timeoutException != null) throw timeoutException;
 			
 			if(pageContent == null) continue;
-			Document doc = Utils.parseDocument(pageContent, Utils.baseURL(pageURL));
+			Document doc = Utils.parseDocument(pageContent, Net.baseURI(Net.uri(pageURL)));
 			elItems = doc.select(SEL_EPISODES);
 			
 			offset += itemsPerPage;
@@ -205,7 +206,7 @@ public final class NovaPlusEngine implements MediaEngine {
 		for(Element elProgram : document.select(SEL_PROGRAMS)) {
 			String programURL = elProgram.absUrl("href");
 			String programTitle = elProgram.selectFirst(".title").text();
-			Program program = new Program(Utils.uri(programURL), programTitle);
+			Program program = new Program(Net.uri(programURL), programTitle);
 			
 			if(!task.add(program)) {
 				return; // Do not continue
@@ -215,9 +216,9 @@ public final class NovaPlusEngine implements MediaEngine {
 	
 	private final void getEpisodes(ListTask<Episode> task, Program program) throws Exception {
 		for(String urlPath : List.of("videa/cele-dily", "videa/reprizy")) {
-			URI uri = Utils.uri(Utils.urlConcat(program.uri().toString(), urlPath));
+			URI uri = Net.uri(Net.uriConcat(program.uri().toString(), urlPath));
 			
-			StringResponse response = Web.request(new GetRequest(Utils.url(uri), Shared.USER_AGENT));
+			StringResponse response = Web.request(new GetRequest(Net.url(uri), Shared.USER_AGENT));
 			if(response.code != 200) continue; // Probably does not exist, ignore
 			
 			Document document = Utils.parseDocument(response.content, uri);
@@ -228,8 +229,8 @@ public final class NovaPlusEngine implements MediaEngine {
 		
 		// If no episodes were found, try to obtain them from the All videos page.
 		if(task.isEmpty()) {
-			URI uri = Utils.uri(Utils.urlConcat(program.uri().toString(), "videa"));
-			StringResponse response = Web.request(new GetRequest(Utils.url(uri), Shared.USER_AGENT));
+			URI uri = Net.uri(Net.uriConcat(program.uri().toString(), "videa"));
+			StringResponse response = Web.request(new GetRequest(Net.url(uri), Shared.USER_AGENT));
 			
 			if(response.code == 200) {
 				Document document = Utils.parseDocument(response.content, uri);
@@ -250,7 +251,7 @@ public final class NovaPlusEngine implements MediaEngine {
 		}
 		
 		String iframeURL = iframe.absUrl("data-src");
-		String content = Web.request(new GetRequest(Utils.url(iframeURL), Shared.USER_AGENT)).content;
+		String content = Web.request(new GetRequest(Net.url(iframeURL), Shared.USER_AGENT)).content;
 		
 		if(content == null || content.isEmpty()) {
 			return; // Do not continue
@@ -273,7 +274,7 @@ public final class NovaPlusEngine implements MediaEngine {
 						String videoURL = coll.getDirectString("src");
 						MediaLanguage language = MediaLanguage.ofCode(coll.getDirectString("lang"));
 						String title = mediaTitle(scriptData.getCollection("plugins.measuring.streamInfo"));
-						List<Media> media = MediaUtils.createMedia(source, Utils.uri(videoURL), sourceURI,
+						List<Media> media = MediaUtils.createMedia(source, Net.uri(videoURL), sourceURI,
 							title, language, MediaMetadata.empty());
 						
 						for(Media s : media) {

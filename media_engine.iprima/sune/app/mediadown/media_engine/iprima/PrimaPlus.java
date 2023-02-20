@@ -30,6 +30,7 @@ import sune.app.mediadown.media_engine.iprima.IPrimaHelper.FastWeb;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper.ProgramWrapper;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper.ThreadedSpawnableTaskQueue;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper._Singleton;
+import sune.app.mediadown.net.Net;
 import sune.app.mediadown.task.ListTask;
 import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.Regex;
@@ -78,7 +79,7 @@ final class PrimaPlus implements IPrima {
 	
 	private static final class API {
 		
-		private static final URI URL_ENDPOINT = Utils.uri("https://gateway-api.prod.iprima.cz/json-rpc/");
+		private static final URI URL_ENDPOINT = Net.uri("https://gateway-api.prod.iprima.cz/json-rpc/");
 		
 		private static final String URL_API_PLAY = "https://api.play-backend.iprima.cz/api/v1/products/play/ids-%{play_id}s";
 		private static final String URL_BASE_MOVIE = "https://www.iprima.cz/filmy/";
@@ -182,7 +183,7 @@ final class PrimaPlus implements IPrima {
 				}
 			}
 			
-			return new Program(Utils.uri(uri), title, "source", iprima, "id", id, "type", type);
+			return new Program(Net.uri(uri), title, "source", iprima, "id", id, "type", type);
 		}
 		
 		private final ProgramWrapper stripItemToProgramWrapper(SSDCollection item) {
@@ -369,7 +370,7 @@ final class PrimaPlus implements IPrima {
 							fullTitle.append(" - ").append(title);
 						}
 						
-						Episode episode = new Episode(program, Utils.uri(uri), fullTitle.toString());
+						Episode episode = new Episode(program, Net.uri(uri), fullTitle.toString());
 						
 						if(!task.add(episode)) {
 							return; // Do not continue
@@ -398,7 +399,7 @@ final class PrimaPlus implements IPrima {
 				}
 				
 				Map<String, String> requestHeaders = logIn();
-				URI configUri = Utils.uri(Utils.format(URL_API_PLAY, "play_id", videoPlayId));
+				URI configUri = Net.uri(Utils.format(URL_API_PLAY, "play_id", videoPlayId));
 				String content = FastWeb.get(configUri, requestHeaders);
 				
 				if(content == null || content.isEmpty()) {
@@ -444,7 +445,7 @@ final class PrimaPlus implements IPrima {
 				for(SSDCollection streamInfo : streamInfos.collectionsIterable()) {
 					String src = streamInfo.getDirectString("url");
 					MediaLanguage language = MediaLanguage.ofCode(streamInfo.getString("lang.key"));
-					List<Media> media = MediaUtils.createMedia(source, Utils.uri(src), sourceURI, title,
+					List<Media> media = MediaUtils.createMedia(source, Net.uri(src), sourceURI, title,
 						language, MediaMetadata.empty());
 					
 					for(Media m : media) {
