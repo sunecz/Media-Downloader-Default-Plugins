@@ -36,6 +36,7 @@ import sune.app.mediadown.media.MediaType;
 import sune.app.mediadown.media.VideoMedia;
 import sune.app.mediadown.media.VideoMediaContainer;
 import sune.app.mediadown.net.Net;
+import sune.app.mediadown.net.Net.QueryArgument;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.task.ListTask;
@@ -95,9 +96,9 @@ public class YouTubeServer implements Server {
 				if(!matcher.find()) {
 					continue;
 				}
-
+				
 				String playerConfig = Utils.bracketSubstring(scriptHTML, '{', '}', false, matcher.end() - 1, scriptHTML.length());
-				SSDCollection dataConfig = JavaScript.readObject(playerConfig);
+				SSDCollection dataConfig = JavaScript.readObject(Utils.prefixUnicodeEscapeSequences(playerConfig, "\\\\\\"));
 				String title = JavaScript.replaceUnicodeEscapeSequences(dataConfig.getString("videoDetails.title"));
 				SSDCollection formatsConfig = dataConfig.getCollection("streamingData.adaptiveFormats");
 				List<Tuple> videos = new ArrayList<>();
@@ -292,9 +293,9 @@ public class YouTubeServer implements Server {
 		}
 		
 		public static final FileSegmentsHolder<? extends FileSegment> buildSegments(String url) throws Exception {
-			Map<String, String> args = Utils.urlParams(url);
+			QueryArgument args = Net.queryDestruct(url);
 			
-			if(args.get("source").equals("yt_otf")) {
+			if(args.valueOf("source").equals("yt_otf")) {
 				// When YouTube uses OTF as the source the file is split into segments that are
 				// indexed from 0 to N. The information about the total number of segments (N) is
 				// included in the very first segment. Durations of the segments are also present
@@ -334,7 +335,7 @@ public class YouTubeServer implements Server {
 				
 				return new RemoteFileSegmentsHolder(segments, duration);
 			} else {
-				long clen = Optional.ofNullable(args.get("clen"))
+				long clen = Optional.ofNullable(args.valueOf("clen"))
 					.map(Long::valueOf)
 					.orElse(MediaConstants.UNKNOWN_SIZE);
 				
@@ -349,7 +350,7 @@ public class YouTubeServer implements Server {
 					segments.add(new RemoteFileSegment(uri, end - start + 1L));
 				}
 				
-				double duration = Optional.ofNullable(args.get("dur"))
+				double duration = Optional.ofNullable(args.valueOf("dur"))
 					.map(Double::valueOf)
 					.orElse(MediaConstants.UNKNOWN_DURATION);
 				
@@ -482,11 +483,11 @@ public class YouTubeServer implements Server {
 		}
 		
 		public static final String maybeDecipherRateBypass(String videoURL, Document document) throws Exception {
-			Map<String, String> urlArgs = Utils.urlParams(videoURL);
+			QueryArgument urlArgs = Net.queryDestruct(videoURL);
 			
 			// Only process URLs that do not have ratebypass=yes in their query arguments
-			if(!urlArgs.getOrDefault("ratebypass", "").equals("yes")) {
-				String n = urlArgs.get("n");
+			if(!urlArgs.valueOf("ratebypass", "").equals("yes")) {
+				String n = urlArgs.valueOf("n");
 				
 				// The 'n' argument may not be present in the URL, so check for it
 				if(n != null) {
@@ -499,11 +500,14 @@ public class YouTubeServer implements Server {
 						cacheRateBypass.put(n, deciphered);
 					}
 					
-					urlArgs.put("n", deciphered);
-					urlArgs.put("ratebypass", "yes");
+					List<QueryArgument> args = new ArrayList<>(3);
+					args.add(urlArgs);
+					
+					args.add(QueryArgument.ofValue("n", deciphered));
+					args.add(QueryArgument.ofValue("ratebypass", "yes"));
 					
 					String urlBase = videoURL.substring(0, videoURL.indexOf('?'));
-					videoURL = urlBase + '?' + Utils.joinURLParams(urlArgs);
+					videoURL = urlBase + '?' + Net.queryConstruct(args);
 				}
 			}
 			

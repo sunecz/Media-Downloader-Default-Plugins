@@ -21,6 +21,7 @@ import sune.app.mediadown.media.MediaMetadata;
 import sune.app.mediadown.media.MediaSource;
 import sune.app.mediadown.media.MediaUtils;
 import sune.app.mediadown.net.Net;
+import sune.app.mediadown.net.Net.QueryArgument;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.task.ListTask;
@@ -153,11 +154,11 @@ public final class TNCZEngine implements MediaEngine {
 			// Check for more episodes
 			Element elButtonMore;
 			if((elButtonMore = document.selectFirst(SEL_EPISODES_LOAD_MORE)) != null) {
-				Map<String, String> urlArgs = Utils.urlParams(elButtonMore.attr("data-href"));
+				QueryArgument urlArgs = Net.queryDestruct(elButtonMore.attr("data-href"));
 				
-				int channel = Integer.valueOf(urlArgs.get("channel"));
-				int content = Integer.valueOf(urlArgs.get("content"));
-				String strFilter = urlArgs.get("filter");
+				int channel = Integer.valueOf(urlArgs.valueOf("channel"));
+				int content = Integer.valueOf(urlArgs.valueOf("content"));
+				String strFilter = urlArgs.valueOf("filter");
 				
 				Matcher matcherFilter;
 				if(!(matcherFilter = REGEX_SHOW_ID.matcher(strFilter)).find()) {

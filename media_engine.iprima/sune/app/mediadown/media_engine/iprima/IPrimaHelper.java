@@ -186,7 +186,7 @@ final class IPrimaHelper {
 				// (1) Extract product ID from iframe's URL
 				Element elIframe;
 				if((elIframe = document.selectFirst("iframe.video-embed")) != null) {
-					productId = Utils.urlParams(elIframe.attr("src")).getOrDefault("id", null);
+					productId = Net.queryDestruct(elIframe.attr("src")).valueOf("id", null);
 				}
 				
 				// (2) OR Extract product ID from JavaScript player configuration

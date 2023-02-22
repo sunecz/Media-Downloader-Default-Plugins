@@ -70,7 +70,7 @@ public final class IPrimaAuthenticator {
 		
 		try(StreamResponse response = Web.requestStream(new GetRequest(url, Shared.USER_AGENT))) {
 			String responseUrl = responseUrl(response).toExternalForm();
-			return Utils.urlParams(responseUrl).getOrDefault("code", null);
+			return Net.queryDestruct(responseUrl).valueOf("code", null);
 		}
 	}
 	
@@ -123,13 +123,13 @@ public final class IPrimaAuthenticator {
 	}
 	
 	private static final String authorize(SessionTokens tokens) throws Exception {
-		Map<String, String> params = Map.of(
+		Map<String, Object> params = Map.of(
 			"response_type", "token_code",
 			"client_id", "sso_token",
 			"token", tokens.tokenDataString()
 		);
 		
-		URL url = Net.url(URL_OAUTH_AUTHORIZE + '?' + Utils.joinURLParams(params));
+		URL url = Net.url(URL_OAUTH_AUTHORIZE + '?' + Net.queryConstruct(Net.createQuery(params)));
 		return tryAndClose(Web.requestStream(new GetRequest(url, Shared.USER_AGENT)),
 		                   (response) -> JSON.read(response.stream).getDirectString("code", null));
 	}

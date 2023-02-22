@@ -4,7 +4,6 @@ import java.net.SocketTimeoutException;
 import java.net.URI;
 import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
 import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.stream.Collectors;
@@ -24,6 +23,7 @@ import sune.app.mediadown.media.MediaMetadata;
 import sune.app.mediadown.media.MediaSource;
 import sune.app.mediadown.media.MediaUtils;
 import sune.app.mediadown.net.Net;
+import sune.app.mediadown.net.Net.QueryArgument;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.task.ListTask;
@@ -139,15 +139,15 @@ public final class NovaPlusEngine implements MediaEngine {
 		
 		// If the button exists, load the episodes the dynamic way
 		String href = elLoadMore.absUrl("data-href");
-		Map<String, String> params = Utils.urlParams(href);
-		Map<String, String> excludedMap = params.entrySet().stream()
-			.filter((e) -> e.getKey().startsWith("excluded"))
-			.collect(Collectors.toMap(Entry::getKey, Entry::getValue));
+		QueryArgument params = Net.queryDestruct(href);
+		List<QueryArgument> excludedList = params.arguments().stream()
+			.filter((a) -> a.name().startsWith("excluded"))
+			.collect(Collectors.toList());
 		// The random variable is here due to caching issue, this should circumvent it
 		String random = "&rand=" + String.valueOf(Math.random() * 1000000.0);
-		String excluded = random + '&' + Utils.joinURLParams(excludedMap);
-		int offset = Integer.valueOf(params.get("offset"));
-		String content = params.get("content");
+		String excluded = random + '&' + Net.queryConstruct(excludedList);
+		int offset = Integer.valueOf(params.valueOf("offset"));
+		String content = params.valueOf("content");
 		
 		Map<String, String> headers = Map.of(
 			"Cache-Control", "no-cache, no-store, must-revalidate",
