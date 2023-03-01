@@ -1,38 +1,24 @@
 package sune.app.mediadown.downloader.wms;
 
-import java.net.CookieManager;
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpClient.Redirect;
-import java.net.http.HttpClient.Version;
-import java.net.http.HttpHeaders;
-import java.net.http.HttpRequest;
-import java.net.http.HttpRequest.BodyPublishers;
-import java.net.http.HttpResponse;
-import java.net.http.HttpResponse.BodyHandlers;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.function.ToLongFunction;
-import java.util.regex.Matcher;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 import sune.app.mediadown.InternalState;
 import sune.app.mediadown.MediaDownloader;
-import sune.app.mediadown.Shared;
 import sune.app.mediadown.TaskStates;
 import sune.app.mediadown.concurrent.SyncObject;
 import sune.app.mediadown.concurrent.Worker;
@@ -69,27 +55,22 @@ import sune.app.mediadown.media.MediaType;
 import sune.app.mediadown.media.MediaUtils;
 import sune.app.mediadown.media.SubtitlesMedia;
 import sune.app.mediadown.media.VideoMediaBase;
-import sune.app.mediadown.net.Net;
+import sune.app.mediadown.net.Web;
+import sune.app.mediadown.net.Web.Request;
+import sune.app.mediadown.net.Web.Response;
 import sune.app.mediadown.pipeline.DownloadPipelineResult;
-import sune.app.mediadown.util.CheckedSupplier;
 import sune.app.mediadown.util.Metadata;
 import sune.app.mediadown.util.NIO;
 import sune.app.mediadown.util.Opt;
 import sune.app.mediadown.util.Opt.OptMapper;
 import sune.app.mediadown.util.Pair;
 import sune.app.mediadown.util.Range;
-import sune.app.mediadown.util.Reflection2;
-import sune.app.mediadown.util.Reflection3;
-import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Utils.Ignore;
-import sune.app.mediadown.util.Web;
-import sune.app.mediadown.util.Web.GetRequest;
-import sune.app.mediadown.util.Web.Response;
 
 public final class SegmentsDownloader implements Download, DownloadResult {
 	
-	private static final Map<String, String> HEADERS = Map.of("Accept", "*/*");
+	private static final Map<String, List<String>> HEADERS = Map.of("Accept", List.of("*/*"));
 	private static final long TIME_UPDATE_RESOLUTION_MS = 50L;
 	
 	private final Translation translation = MediaDownloader.translation().getTranslation("plugin.downloader.wms");
@@ -111,15 +92,6 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 	private DownloadPipelineResult pipelineResult;
 	private InternalDownloader downloader;
 	private DownloadTracker downloadTracker;
-	
-	private static final ConcurrentVarLazyLoader<CookieManager> cookieManager
-		= ConcurrentVarLazyLoader.of(SegmentsDownloader::ensureCookieManager);
-	private static final ConcurrentVarLazyLoader<HttpClient> httpClient
-		= ConcurrentVarLazyLoader.of(SegmentsDownloader::buildHttpClient);
-	private static final ConcurrentVarLazyLoader<HttpRequest.Builder> httpRequestBuilder
-		= ConcurrentVarLazyLoader.of(SegmentsDownloader::buildHttpRequestBuilder);
-	private static final ConcurrentVarLazyLoader<Regex> regexContentRange
-		= ConcurrentVarLazyLoader.of(SegmentsDownloader::buildRegexContentRange);
 	
 	SegmentsDownloader(Media media, Path dest, MediaDownloadConfiguration configuration, int maxRetryAttempts,
 			boolean asyncTotalSize, int waitOnRetryMs) {
@@ -152,71 +124,8 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		int cmp; return (cmp = Integer.compare(b.length(), a.length())) == 0 ? 1 : cmp;
 	}
 	
-	private static final CookieManager ensureCookieManager() throws Exception {
-		Reflection3.invokeStatic(Web.class, "ensureCookieManager");
-		return (CookieManager) Reflection2.getField(Web.class, null, "COOKIE_MANAGER");
-	}
-	
-	private static final HttpClient buildHttpClient() throws Exception {
-		return HttpClient.newBuilder()
-				         .connectTimeout(Duration.ofMillis(5000))
-				         .followRedirects(Redirect.NORMAL)
-				         .cookieHandler(cookieManager.value())
-				         .version(Version.HTTP_2)
-				         .build();
-	}
-	
-	private static final HttpRequest.Builder buildHttpRequestBuilder() throws Exception {
-		return HttpRequest.newBuilder()
-				          .method("HEAD", BodyPublishers.noBody())
-				          .setHeader("User-Agent", Shared.USER_AGENT);
-	}
-	
-	private static final Regex buildRegexContentRange() {
-		// Source: https://httpwg.org/specs/rfc9110.html#field.content-range
-		return Regex.of("^([!#$%&'*+\\-.^_`|~0-9A-Za-z]+) (?:(\\d+)-(\\d+)/(\\d+|\\*)|\\*/(\\d+))$");
-	}
-	
-	private static final long sizeOf(URI uri, Map<String, String> headers) throws Exception {
-		HttpRequest request = httpRequestBuilder.value().copy().uri(uri).build();
-		HttpResponse<Void> response = httpClient.value().send(request, BodyHandlers.discarding());
-		
-		if(response.statusCode() != 200) {
-			return MediaConstants.UNKNOWN_SIZE;
-		}
-		
-		HttpHeaders responseHeaders = response.headers();
-		
-		// Parse Content-Range header, if present
-		Optional<String> contentRange = responseHeaders.firstValue("content-range");
-		if(contentRange.isPresent()) {
-			Matcher matcher = regexContentRange.value().matcher(contentRange.get());
-			
-			if(matcher.matches()) {
-				String unit = matcher.group(1);
-				
-				switch(unit) {
-					case "bytes": {
-						String strRangeStart = matcher.group(2);
-						
-						if(strRangeStart == null) {
-							return Long.valueOf(matcher.group(5));
-						}
-						
-						long rangeStart = Long.valueOf(strRangeStart);
-						long rangeEnd = Long.valueOf(matcher.group(3));
-						return rangeEnd - rangeStart + 1L;
-					}
-					default: {
-						// Not supported, ignore the header
-						break;
-					}
-				}
-			}
-		}
-		
-		// Parse Content-Length header, if present
-		return responseHeaders.firstValueAsLong("content-length").orElse(MediaConstants.UNKNOWN_SIZE);
+	private static final long sizeOf(URI uri, Map<String, List<String>> headers) throws Exception {
+		return Web.size(Request.of(uri).headers(headers).HEAD());
 	}
 	
 	private static final Pair<Boolean, Long> sizeOrEstimatedSize(List<RemoteFile> segments, List<RemoteFile> subtitles) {
@@ -270,7 +179,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 	}
 	
 	private static final boolean allowOnlySuccessfulResponse(Response response) {
-		return response.code == 200;
+		return response.statusCode() == 200;
 	}
 	
 	private final void waitMs(long ms, TimeUpdateTrackerBase tracker) {
@@ -431,7 +340,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 				for(FileSegment segment : segmentsHolder.segments()) {
 					if(!checkState()) break downloadLoop;
 					
-					GetRequest request = null;
+					Request request = Request.of(segment.uri()).headers(HEADERS).GET();
 					boolean lastAttempt = false;
 					boolean error = false;
 					Exception exception = null;
@@ -440,10 +349,6 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 					for(int i = 0; (error || downloadedBytes <= 0L) && i <= maxRetryAttempts; ++i) {
 						if(!checkState()) break downloadLoop;
 						
-						// May seem wasteful to create the request object everytime, however this
-						// will update the underlying URLStreamHandler and other properties, that
-						// allow to actually retry the download with "fresh" values.
-						request = new GetRequest(Net.url(segment.uri()), Shared.USER_AGENT, HEADERS);
 						lastAttempt = i == maxRetryAttempts;
 						handler.setPropagateError(lastAttempt);
 						exception = null;
@@ -555,7 +460,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 						+ (subtitleLanguage != null ? '.' + subtitleLanguage : "")
 						+ (!subtitleType.isEmpty() ? '.' + subtitleType : "");
 					Path subDest = subtitlesDir.resolve(subtitleFileName);
-					GetRequest request = new GetRequest(Net.url(sm.uri()), Shared.USER_AGENT, HEADERS);
+					Request request = Request.of(sm.uri()).headers(HEADERS).GET();
 					downloader.start(request, subDest, DownloadConfiguration.ofDefault());
 				}
 			}
@@ -1099,50 +1004,6 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 			if(type.is(MediaType.VIDEO)) return estimate((VideoMediaBase) media);
 			if(type.is(MediaType.AUDIO)) return estimate((AudioMediaBase) media);
 			return MediaConstants.UNKNOWN_SIZE;
-		}
-	}
-	
-	private static final class ConcurrentVarLazyLoader<T> {
-		
-		private final AtomicBoolean isSet = new AtomicBoolean();
-		private final AtomicBoolean isSetting = new AtomicBoolean();
-		private volatile T value;
-		
-		private final CheckedSupplier<T> supplier;
-		
-		private ConcurrentVarLazyLoader(CheckedSupplier<T> supplier) {
-			this.supplier = Objects.requireNonNull(supplier);
-		}
-		
-		public static final <T> ConcurrentVarLazyLoader<T> of(CheckedSupplier<T> supplier) {
-			return new ConcurrentVarLazyLoader<>(supplier);
-		}
-		
-		public final T value() throws Exception {
-			if(isSet.get()) return value; // Already set
-			
-			while(!isSet.get()
-						&& !isSetting.compareAndSet(false, true)) {
-				synchronized(isSetting) {
-					try {
-						isSetting.wait();
-					} catch(InterruptedException ex) {
-						// Ignore
-					}
-				}
-				if(isSet.get()) return value; // Already set
-			}
-			
-			try {
-				value = supplier.get();
-				isSet.set(true);
-				return value;
-			} finally {
-				isSetting.set(false);
-				synchronized(isSetting) {
-					isSetting.notifyAll();
-				}
-			}
 		}
 	}
 }

@@ -1,7 +1,7 @@
 package sune.app.mediadown.media_engine.iprima;
 
-import java.net.HttpURLConnection;
-import java.net.URL;
+import java.net.URI;
+import java.net.http.HttpClient.Redirect;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -12,22 +12,18 @@ import java.util.function.Supplier;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 
-import sune.app.mediadown.Shared;
 import sune.app.mediadown.configuration.Configuration;
 import sune.app.mediadown.configuration.Configuration.ConfigurationProperty;
 import sune.app.mediadown.media_engine.iprima.IPrimaAuthenticator.ProfileManager.Profile;
+import sune.app.mediadown.net.HTML;
 import sune.app.mediadown.net.Net;
+import sune.app.mediadown.net.Web;
+import sune.app.mediadown.net.Web.Request;
+import sune.app.mediadown.net.Web.Response;
 import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.Property;
-import sune.app.mediadown.util.Reflection2;
 import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
-import sune.app.mediadown.util.Web;
-import sune.app.mediadown.util.Web.GetRequest;
-import sune.app.mediadown.util.Web.PostRequest;
-import sune.app.mediadown.util.Web.Response;
-import sune.app.mediadown.util.Web.StreamResponse;
-import sune.app.mediadown.util.Web.StringResponse;
 import sune.util.ssdf2.SSDCollection;
 
 public final class IPrimaAuthenticator {
@@ -53,35 +49,31 @@ public final class IPrimaAuthenticator {
 		try(closeable) { return action.call(closeable); }
 	}
 	
-	private static final URL responseUrl(Response response) {
-		return Reflection2.<HttpURLConnection>getField(Response.class, response, "connection").getURL();
-	}
-	
 	private static final String loginOAuth(String email, String password) throws Exception {
-		StringResponse response = Web.request(new GetRequest(Net.url(URL_OAUTH_LOGIN), Shared.USER_AGENT));
-		String csrfToken = Utils.parseDocument(response.content).selectFirst("input[name='_csrf_token']").val();
-		Map<String, String> params = Map.of("_email", email, "_password", password, "_csrf_token", csrfToken);
-		response = Web.request(new PostRequest(Net.url(URL_OAUTH_LOGIN), Shared.USER_AGENT, params));
+		Response.OfString response = Web.request(Request.of(Net.uri(URL_OAUTH_LOGIN)).GET());
+		String csrfToken = HTML.parse(response.body()).selectFirst("input[name='_csrf_token']").val();
+		String body = Net.queryString("_email", email, "_password", password, "_csrf_token", csrfToken);
+		response = Web.request(Request.of(Net.uri(URL_OAUTH_LOGIN)).POST(body));
 		return selectConfiguredProfile(response);
 	}
 	
 	private static final String selectProfile(String profileId) throws Exception {
-		URL url = Net.url(Utils.format(URL_PROFILE_SELECT, "profile_id", profileId));
+		URI uri = Net.uri(Utils.format(URL_PROFILE_SELECT, "profile_id", profileId));
 		
-		try(StreamResponse response = Web.requestStream(new GetRequest(url, Shared.USER_AGENT))) {
-			String responseUrl = responseUrl(response).toExternalForm();
+		try(Response.OfStream response = Web.requestStream(Request.of(uri).GET())) {
+			String responseUrl = response.uri().toString();
 			return Net.queryDestruct(responseUrl).valueOf("code", null);
 		}
 	}
 	
-	private static final List<Profile> profiles(StringResponse response) throws Exception {
-		String url = responseUrl(response).toExternalForm();
+	private static final List<Profile> profiles(Response.OfString response) throws Exception {
+		String url = response.uri().toString();
 		return ProfileManager.isProfileSelectPage(url)
-					? ProfileManager.extractProfiles(response.content)
+					? ProfileManager.extractProfiles(response.body())
 					: ProfileManager.profiles();
 	}
 	
-	private static final String selectConfiguredProfile(StringResponse response) throws Exception {
+	private static final String selectConfiguredProfile(Response.OfString response) throws Exception {
 		List<Profile> profiles = profiles(response);
 		
 		// At least one profile should be automatically available
@@ -110,7 +102,7 @@ public final class IPrimaAuthenticator {
 			return null;
 		}
 		
-		Map<String, String> params = Map.of(
+		String body = Net.queryString(
 			"scope", "openid+email+profile+phone+address+offline_access",
 			"client_id", "prima_sso",
 			"grant_type", "authorization_code",
@@ -118,20 +110,20 @@ public final class IPrimaAuthenticator {
 			"redirect_uri", "https://auth.iprima.cz/sso/auth-check"
 		);
 		
-		return tryAndClose(Web.requestStream(new PostRequest(Net.url(URL_OAUTH_TOKEN), Shared.USER_AGENT, params)),
-		                   (response) -> SessionTokens.parse(JSON.read(response.stream)));
+		return tryAndClose(Web.requestStream(Request.of(Net.uri(URL_OAUTH_TOKEN)).POST(body)),
+		                   (response) -> SessionTokens.parse(JSON.read(response.stream())));
 	}
 	
 	private static final String authorize(SessionTokens tokens) throws Exception {
-		Map<String, Object> params = Map.of(
+		String query = Net.queryString(
 			"response_type", "token_code",
 			"client_id", "sso_token",
 			"token", tokens.tokenDataString()
 		);
 		
-		URL url = Net.url(URL_OAUTH_AUTHORIZE + '?' + Net.queryConstruct(Net.createQuery(params)));
-		return tryAndClose(Web.requestStream(new GetRequest(url, Shared.USER_AGENT)),
-		                   (response) -> JSON.read(response.stream).getDirectString("code", null));
+		URI uri = Net.uri(URL_OAUTH_AUTHORIZE + '?' + query);
+		return tryAndClose(Web.requestStream(Request.of(uri).GET()),
+		                   (response) -> JSON.read(response.stream()).getDirectString("code", null));
 	}
 	
 	private static final boolean userAuth(String code) throws Exception {
@@ -139,9 +131,9 @@ public final class IPrimaAuthenticator {
 			return false;
 		}
 		
-		URL url = Net.url(Utils.format(URL_USER_AUTH, "code", code));
-		return tryAndClose(Web.requestStream(new GetRequest(url, Shared.USER_AGENT, null, null, false)),
-		                   (response) -> response.code == 302);
+		URI uri = Net.uri(Utils.format(URL_USER_AUTH, "code", code));
+		return tryAndClose(Web.requestStream(Request.of(uri).followRedirects(Redirect.NEVER).GET()),
+		                   (response) -> response.statusCode() == 302);
 	}
 	
 	private static final Configuration configuration() {
@@ -183,7 +175,7 @@ public final class IPrimaAuthenticator {
 		
 		public static final List<Profile> extractProfiles(String content) throws Exception {
 			List<Profile> profiles = new ArrayList<>();
-			Document document = Utils.parseDocument(content);
+			Document document = HTML.parse(content);
 			
 			for(Element elButton : document.select(SELECTOR_PROFILE)) {
 				String id = elButton.attr("data-identifier");
@@ -195,7 +187,7 @@ public final class IPrimaAuthenticator {
 		}
 		
 		private static final List<Profile> listProfiles() throws Exception {
-			return extractProfiles(Web.request(new GetRequest(Net.url(URL_PROFILE_PAGE), Shared.USER_AGENT)).content);
+			return extractProfiles(Web.request(Request.of(Net.uri(URL_PROFILE_PAGE)).GET()).body());
 		}
 		
 		public static final List<Profile> profiles() throws Exception {
@@ -241,7 +233,7 @@ public final class IPrimaAuthenticator {
 		
 		private static final List<Device> listDevices() throws Exception {
 			List<Device> devices = new ArrayList<>();
-			Document document = Utils.document(URL_LIST_DEVICES);
+			Document document = HTML.from(Net.uri(URL_LIST_DEVICES));
 			
 			for(Element elButton : document.select(SELECTOR_DEVICES)) {
 				devices.add(Device.fromRemoveButton(elButton));
@@ -261,13 +253,16 @@ public final class IPrimaAuthenticator {
 		}
 		
 		public static final Device createDevice(String id, String type, String name) throws Exception {
-			Map<String, String> params = Map.of("slotType", type, "title", name, "deviceUID", id);
-			Map<String, String> headers = Map.of("Referer", "https://prima.iprima.cz/", "X-Requested-With", "XMLHttpRequest");
-			PostRequest request = new PostRequest(Net.url(URL_ADD_DEVICE), Shared.USER_AGENT, params, null, headers);
+			String body = Net.queryString("slotType", type, "title", name, "deviceUID", id);
+			Map<String, List<String>> headers = Web.Headers.ofSingle(
+				"Referer", "https://prima.iprima.cz/",
+				"X-Requested-With", "XMLHttpRequest"
+			);
+			Request request = Request.of(Net.uri(URL_ADD_DEVICE)).headers(headers).POST(body);
 			
 			// It is actually enough to just to call the endpoint even if it returns errors,
 			// so ignore them, if there are any.
-			try(StreamResponse response = Web.requestStream(request)) {
+			try(Response.OfStream response = Web.requestStream(request)) {
 				return new Device(id, type, name);
 			}
 		}
@@ -277,11 +272,10 @@ public final class IPrimaAuthenticator {
 			json.setDirect("slotType", "WEB");
 			json.setDirect("slotId", id);
 			String body = json.toJSON(true);
-			Map<String, String> headers = Map.of("Referer", "https://prima.iprima.cz/");
-			PostRequest request = new PostRequest(Net.url(URL_REMOVE_DEVICE), Shared.USER_AGENT, null, null, headers,
-				true, null, -1L, -1L, 5000, body);
-			try(StreamResponse response = Web.requestStream(request)) {
-				return response.code == 200;
+			Map<String, List<String>> headers = Web.Headers.ofSingle("Referer", "https://prima.iprima.cz/");
+			Request request = Request.of(Net.uri(URL_REMOVE_DEVICE)).headers(headers).POST(body);
+			try(Response.OfStream response = Web.requestStream(request)) {
+				return response.statusCode() == 200;
 			}
 		}
 		
@@ -378,7 +372,7 @@ public final class IPrimaAuthenticator {
 		private final String accessToken;
 		private final String deviceId;
 		private final String profileId;
-		private Map<String, String> requestHeaders;
+		private Map<String, List<String>> requestHeaders;
 		
 		public SessionData(String rawString, String accessToken, String deviceId, String profileId) {
 			this.rawString = rawString;
@@ -387,12 +381,12 @@ public final class IPrimaAuthenticator {
 			this.profileId = profileId;
 		}
 		
-		public final Map<String, String> requestHeaders() {
+		public final Map<String, List<String>> requestHeaders() {
 			if(requestHeaders == null) {
 				requestHeaders = Map.of(
-					"X-OTT-Access-Token", accessToken,
-					"X-OTT-CDN-Url-Type", "WEB",
-					"X-OTT-Device", deviceId
+					"X-OTT-Access-Token", List.of(accessToken),
+					"X-OTT-CDN-Url-Type", List.of("WEB"),
+					"X-OTT-Device", List.of(deviceId)
 				);
 			}
 			return requestHeaders;

@@ -3,22 +3,11 @@ package sune.app.mediadown.media_engine.streamcz;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.reflect.Method;
-import java.net.CookieManager;
 import java.net.URI;
-import java.net.URLEncoder;
-import java.net.http.HttpClient;
-import java.net.http.HttpClient.Redirect;
-import java.net.http.HttpClient.Version;
-import java.net.http.HttpRequest;
-import java.net.http.HttpRequest.BodyPublisher;
-import java.net.http.HttpRequest.BodyPublishers;
-import java.net.http.HttpResponse;
-import java.net.http.HttpResponse.BodyHandlers;
-import java.time.Duration;
+import java.net.http.HttpHeaders;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
 import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -32,7 +21,6 @@ import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 
 import javafx.scene.image.Image;
-import sune.app.mediadown.Shared;
 import sune.app.mediadown.concurrent.Threads;
 import sune.app.mediadown.download.segment.FileSegmentsHolder;
 import sune.app.mediadown.entity.Episode;
@@ -54,24 +42,23 @@ import sune.app.mediadown.media.MediaUtils.Parser.FormatParserData;
 import sune.app.mediadown.media.SubtitlesMedia;
 import sune.app.mediadown.media.VideoMedia;
 import sune.app.mediadown.media.VideoMediaContainer;
-import sune.app.mediadown.media_engine.streamcz.M3U_Hotfix.M3UFile;
+import sune.app.mediadown.media.format.M3U;
+import sune.app.mediadown.media.format.M3U.M3UFile;
+import sune.app.mediadown.net.HTML;
 import sune.app.mediadown.net.Net;
+import sune.app.mediadown.net.Web;
+import sune.app.mediadown.net.Web.Request;
+import sune.app.mediadown.net.Web.Response;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.task.ListTask;
-import sune.app.mediadown.util.CheckedSupplier;
 import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.JavaScript;
 import sune.app.mediadown.util.Opt;
 import sune.app.mediadown.util.Reflection;
-import sune.app.mediadown.util.Reflection2;
-import sune.app.mediadown.util.Reflection3;
 import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Utils.Ignore;
-import sune.app.mediadown.util.Web;
-import sune.app.mediadown.util.Web.GetRequest;
-import sune.app.mediadown.util.Web.StreamResponse;
 import sune.util.ssdf2.SSDCollection;
 import sune.util.ssdf2.SSDObject;
 
@@ -125,7 +112,7 @@ public final class StreamCZEngine implements MediaEngine {
 			String programId = program.get("id");
 			
 			if(programId == null) {
-				Document document = FastWeb.document(program.uri());
+				Document document = HTML.from(program.uri());
 				SSDCollection state = API.appServerState(document);
 				programId = state.getString("fetchable.tag.show.data.id");
 				
@@ -151,13 +138,13 @@ public final class StreamCZEngine implements MediaEngine {
 			URI sourceURI = uri;
 			MediaSource source = MediaSource.of(this);
 			
-			Document document = FastWeb.document(sourceURI);
+			Document document = HTML.from(sourceURI);
 			SSDCollection state = API.appServerState(document);
 			SSDCollection videoData = state.getCollection("fetchable.episode.videoDetail.data");
 			String splBaseUrl = videoData.getDirectString("spl");
 			String splUrl = String.format("%s%s,%d,%s", splBaseUrl, "spl2", 3, "VOD").replace("|", "%7C");
 			URI splUri = Net.uri(splUrl);
-			SSDCollection json = JSON.read(FastWeb.getRequest(splUri, Map.of()).body());
+			SSDCollection json = JSON.read(Web.requestStream(Request.of(splUri).GET()).stream());
 			
 			String programName = videoData.getDirectString("name", null);
 			String numSeason = null;
@@ -426,7 +413,13 @@ public final class StreamCZEngine implements MediaEngine {
 		private static final String REFERER = "https://www.stream.cz/";
 		
 		public static final SSDCollection request(String json) throws Exception {
-			return JSON.read(FastWeb.postRequest(URL_API, Map.of("Referer", REFERER, "Content-Type", "application/json"), json).body());
+			return JSON.read(
+				Web.requestStream(
+					Request.of(URL_API).headers(
+						Web.Headers.ofSingle("Referer", REFERER, "Content-Type", "application/json")
+					).POST(json)
+				).stream()
+			);
 		}
 		
 		public static final SSDCollection appServerState(Document document) {
@@ -445,7 +438,7 @@ public final class StreamCZEngine implements MediaEngine {
 		}
 		
 		public static final List<Node> categories() throws Exception {
-			Document document = FastWeb.document(URL_CATEGORIES);
+			Document document = HTML.from(URL_CATEGORIES);
 			SSDCollection state = appServerState(document);
 			
 			if(state != null) {
@@ -703,14 +696,14 @@ public final class StreamCZEngine implements MediaEngine {
 			}
 		}
 		
-		private static final List<Media.Builder<?, ?>> parse(URI uri, MediaFormat format, GetRequest request,
+		private static final List<Media.Builder<?, ?>> parse(URI uri, MediaFormat format, Request request,
 				URI sourceURI, Map<String, Object> data, long size, String title, MediaLanguage language,
 				MediaSource source) throws Exception {
 			if(format == MediaFormat.M3U8) {
 				FormatParserData<M3UFile> parserData = new FormatParserData<>(uri, format, request, sourceURI, data, size);
 				List<Media.Builder<?, ?>> media = new ArrayList<>();
 				
-				for(M3UFile result : M3U_Hotfix.parse(request)) {
+				for(M3UFile result : M3U.parse(request)) {
 					boolean isProtected = result.getKey().isPresent();
 					MediaMetadata.Builder mediaData = MediaMetadata.builder().isProtected(isProtected).sourceURI(sourceURI);
 					Media.Builder<?, ?> m = mapperM3U(setData(parserData, result, mediaData), title, language, source);
@@ -723,19 +716,19 @@ public final class StreamCZEngine implements MediaEngine {
 			return List.of();
 		}
 		
-		private static final List<String> contentType(Map<String, List<String>> headers) {
-			return headers.get("Content-Type");
+		private static final List<String> contentType(HttpHeaders headers) {
+			return headers.allValues("content-type");
 		}
 		
 		public static final List<Media.Builder<?, ?>> createMediaBuilders(MediaSource source, URI uri, URI sourceURI,
 				String title, MediaLanguage language, MediaMetadata data) throws Exception {
-			GetRequest request = new GetRequest(uri.toURL(), Shared.USER_AGENT);
-			try(StreamResponse response = Web.peek(request.toHeadRequest())) {
-				MediaFormat format = Opt.of(contentType(response.headers))
+			Request request = Request.of(uri).GET();
+			try(Response.OfStream response = Web.peek(request)) {
+				MediaFormat format = Opt.of(contentType(response.headers()))
 					.ifTrue(Objects::nonNull).map(List::stream).orElseGet(Stream::empty)
 					.map(MediaFormat::fromMimeType).filter(Objects::nonNull).findFirst()
 					.orElse(MediaFormat.UNKNOWN);
-				return parse(uri, format, request, sourceURI, data.data(), Web.size(response.headers),
+				return parse(uri, format, request, sourceURI, data.data(), Web.size(response.headers()),
 				             title, language, source);
 			}
 		}
@@ -776,143 +769,6 @@ public final class StreamCZEngine implements MediaEngine {
 				return;
 			
 			executor.shutdownNow();
-		}
-	}
-	
-	private static final class FastWeb {
-		
-		private static final ConcurrentVarLazyLoader<CookieManager> cookieManager
-			= ConcurrentVarLazyLoader.of(FastWeb::ensureCookieManager);
-		private static final ConcurrentVarLazyLoader<HttpClient> httpClient
-			= ConcurrentVarLazyLoader.of(FastWeb::buildHttpClient);
-		private static final ConcurrentVarLazyLoader<HttpRequest.Builder> httpRequestBuilder
-			= ConcurrentVarLazyLoader.of(FastWeb::buildHttpRequestBuilder);
-		
-		// Forbid anyone to create an instance of this class
-		private FastWeb() {
-		}
-		
-		private static final CookieManager ensureCookieManager() throws Exception {
-			Reflection3.invokeStatic(Web.class, "ensureCookieManager");
-			return (CookieManager) Reflection2.getField(Web.class, null, "COOKIE_MANAGER");
-		}
-		
-		private static final HttpClient buildHttpClient() throws Exception {
-			return HttpClient.newBuilder()
-						.connectTimeout(Duration.ofMillis(5000))
-						.executor(Threads.Pools.newWorkStealing())
-						.followRedirects(Redirect.NORMAL)
-						.cookieHandler(cookieManager.value())
-						.version(Version.HTTP_2)
-						.build();
-		}
-		
-		private static final HttpRequest.Builder buildHttpRequestBuilder() throws Exception {
-			return HttpRequest.newBuilder()
-						.setHeader("User-Agent", Shared.USER_AGENT);
-		}
-		
-		private static final HttpRequest.Builder maybeAddHeaders(HttpRequest.Builder request, Map<String, String> headers) {
-			if(!headers.isEmpty()) {
-				request.headers(
-					headers.entrySet().stream()
-						.flatMap((e) -> Stream.of(e.getKey(), e.getValue()))
-						.toArray(String[]::new)
-				);
-			}
-			return request;
-		}
-		
-		public static final String bodyString(Map<String, Object> data) {
-			StringBuilder sb = new StringBuilder();
-			
-			boolean first = true;
-			for(Entry<String, Object> e : data.entrySet()) {
-				if(first) first = false; else sb.append('&');
-				sb.append(URLEncoder.encode(e.getKey(), Shared.CHARSET))
-				  .append('=')
-				  .append(URLEncoder.encode(Objects.toString(e.getValue()), Shared.CHARSET));
-			}
-			
-			return sb.toString();
-		}
-		
-		public static final HttpResponse<String> getRequest(URI uri, Map<String, String> headers) throws Exception {
-			HttpRequest request = maybeAddHeaders(httpRequestBuilder.value().copy().GET().uri(uri), headers).build();
-			HttpResponse<String> response = httpClient.value().sendAsync(request, BodyHandlers.ofString(Shared.CHARSET)).join();
-			return response;
-		}
-		
-		@SuppressWarnings("unused")
-		public static final String get(URI uri, Map<String, String> headers) throws Exception {
-			return getRequest(uri, headers).body();
-		}
-		
-		@SuppressWarnings("unused")
-		public static final HttpResponse<String> postRequest(URI uri, Map<String, String> headers,
-				Map<String, Object> data) throws Exception {
-			return postRequest(uri, headers, bodyString(data));
-		}
-		
-		public static final Document document(URI uri, Map<String, String> headers) throws Exception {
-			HttpResponse<String> response = getRequest(uri, headers);
-			return Utils.parseDocument(response.body(), response.uri());
-		}
-		
-		public static final Document document(URI uri) throws Exception {
-			return document(uri, Map.of());
-		}
-		
-		public static final HttpResponse<String> postRequest(URI uri, Map<String, String> headers,
-				String payload) throws Exception {
-			BodyPublisher body = BodyPublishers.ofString(payload, Shared.CHARSET);
-			HttpRequest request = maybeAddHeaders(httpRequestBuilder.value().copy().POST(body).uri(uri), headers).build();
-			HttpResponse<String> response = httpClient.value().sendAsync(request, BodyHandlers.ofString(Shared.CHARSET)).join();
-			return response;
-		}
-		
-		private static final class ConcurrentVarLazyLoader<T> {
-			
-			private final AtomicBoolean isSet = new AtomicBoolean();
-			private final AtomicBoolean isSetting = new AtomicBoolean();
-			private volatile T value;
-			
-			private final CheckedSupplier<T> supplier;
-			
-			private ConcurrentVarLazyLoader(CheckedSupplier<T> supplier) {
-				this.supplier = Objects.requireNonNull(supplier);
-			}
-			
-			public static final <T> ConcurrentVarLazyLoader<T> of(CheckedSupplier<T> supplier) {
-				return new ConcurrentVarLazyLoader<>(supplier);
-			}
-			
-			public final T value() throws Exception {
-				if(isSet.get()) return value; // Already set
-				
-				while(!isSet.get()
-							&& !isSetting.compareAndSet(false, true)) {
-					synchronized(isSetting) {
-						try {
-							isSetting.wait();
-						} catch(InterruptedException ex) {
-							// Ignore
-						}
-					}
-					if(isSet.get()) return value; // Already set
-				}
-				
-				try {
-					value = supplier.get();
-					isSet.set(true);
-					return value;
-				} finally {
-					isSetting.set(false);
-					synchronized(isSetting) {
-						isSetting.notifyAll();
-					}
-				}
-			}
 		}
 	}
 }

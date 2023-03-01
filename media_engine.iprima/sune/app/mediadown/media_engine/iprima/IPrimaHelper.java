@@ -5,27 +5,15 @@ import java.io.UncheckedIOException;
 import java.lang.StackWalker.Option;
 import java.lang.StackWalker.StackFrame;
 import java.lang.reflect.Constructor;
-import java.net.CookieManager;
 import java.net.URI;
 import java.net.URL;
-import java.net.URLEncoder;
-import java.net.http.HttpClient;
-import java.net.http.HttpClient.Redirect;
-import java.net.http.HttpClient.Version;
-import java.net.http.HttpRequest;
-import java.net.http.HttpRequest.BodyPublisher;
-import java.net.http.HttpRequest.BodyPublishers;
-import java.net.http.HttpResponse;
-import java.net.http.HttpResponse.BodyHandlers;
 import java.nio.channels.ClosedByInterruptException;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.Callable;
@@ -36,14 +24,12 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
-import java.util.stream.Stream;
 
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 
 import sune.app.mediadown.MediaDownloader;
-import sune.app.mediadown.Shared;
 import sune.app.mediadown.concurrent.CounterLock;
 import sune.app.mediadown.concurrent.Threads;
 import sune.app.mediadown.entity.Episode;
@@ -55,22 +41,21 @@ import sune.app.mediadown.media.MediaMetadata;
 import sune.app.mediadown.media.MediaSource;
 import sune.app.mediadown.media.MediaUtils;
 import sune.app.mediadown.media_engine.iprima.IPrimaEngine.IPrima;
+import sune.app.mediadown.net.HTML;
 import sune.app.mediadown.net.Net;
+import sune.app.mediadown.net.Web;
+import sune.app.mediadown.net.Web.Request;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginConfiguration;
 import sune.app.mediadown.task.ListTask;
 import sune.app.mediadown.util.CheckedFunction;
-import sune.app.mediadown.util.CheckedSupplier;
 import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.JavaScript;
 import sune.app.mediadown.util.Opt;
 import sune.app.mediadown.util.Reflection;
-import sune.app.mediadown.util.Reflection2;
-import sune.app.mediadown.util.Reflection3;
 import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.TriFunction;
 import sune.app.mediadown.util.Utils;
-import sune.app.mediadown.util.Web;
 import sune.util.ssdf2.SSDCollection;
 import sune.util.ssdf2.SSDCollectionType;
 
@@ -83,8 +68,8 @@ final class IPrimaHelper {
 	private static final Regex REGEX_EPISODE_NAME = Regex.of("^\\d+\\.[^\\-]+-\\s+(.*)$");
 	private static final Regex REGEX_COMPARE_SPLIT = Regex.of("(?<=\\d+)(?!\\d)|(?<!\\d)(?=\\d+)");
 	
-	private static final String internal_request(URI uri, Map<String, String> headers) throws Exception {
-		return FastWeb.get(uri, headers);
+	private static final String internal_request(URI uri, Map<String, List<String>> headers) throws Exception {
+		return Web.request(Request.of(uri).headers(headers).GET()).body();
 	}
 	
 	private static final String internal_request(URI uri) throws Exception {
@@ -180,7 +165,7 @@ final class IPrimaHelper {
 		
 		public ListTask<Media> getMedia(URI uri, MediaEngine engine) throws Exception {
 			return ListTask.of((task) -> {
-				Document document = Utils.document(uri);
+				Document document = HTML.from(uri);
 				String productId = null;
 				
 				// (1) Extract product ID from iframe's URL
@@ -217,7 +202,7 @@ final class IPrimaHelper {
 				
 				URL configURL = Net.url(Utils.format(playURL(), "product_id", productId));
 				// It is important to specify the referer, otherwise the response code is 403.
-				Map<String, String> requestHeaders = Utils.toMap("Referer", "https://www.iprima.cz/");
+				Map<String, List<String>> requestHeaders = Utils.toMap("Referer", List.of("https://www.iprima.cz/"));
 				try {
 					// Try to log in to the iPrima website using the internal account to have HD sources available.
 					IPrimaAuthenticator.SessionData sessionData = IPrimaAuthenticator.getSessionData();
@@ -483,7 +468,7 @@ final class IPrimaHelper {
 			content = Utils.replaceUnicodeEscapeSequences(content);
 			content = content.replace("\\n", "");
 			content = content.replace("\\/", "/");
-			Document document = Utils.parseDocument(content);
+			Document document = HTML.parse(content);
 			
 			if(!getEpisodesFromDocument(program, document, null, adder)) {
 				return CALLBACK_EXIT; // Do not continue
@@ -518,7 +503,7 @@ final class IPrimaHelper {
 					// or only for a specific season, we have to examine the whole document
 					// structure to obtain all the information about whether it can actually
 					// be done the traditional way.
-					Document document = Utils.document(program.uri());
+					Document document = HTML.from(program.uri());
 					// First check if there are any seasons present
 					Element elSeasons = document.selectFirst(SELECTOR_SEASONS);
 					
@@ -535,7 +520,7 @@ final class IPrimaHelper {
 							
 							String seasonTitle = elSeason.selectFirst(SELECTOR_SEASON_TITLE).text().trim();
 							String seasonURL = Net.uriFix(elSeason.attr("href"));
-							Document seasonDocument = Utils.document(seasonURL);
+							Document seasonDocument = HTML.from(Net.uri(seasonURL));
 							
 							// Extract all the episodes from the season document
 							if(!getEpisodesFromDocument(program, seasonDocument, seasonTitle, task::add)) {
@@ -649,7 +634,7 @@ final class IPrimaHelper {
 				String graphQLType) throws Exception {
 			SSDCollection json = JSON.read(response);
 			String content = json.getDirectString("content");
-			Document document = Utils.parseDocument(content);
+			Document document = HTML.parse(content);
 			Elements programs = document.select(".component--scope--cinematography > a");
 			
 			for(Element elProgram : programs) {
@@ -706,8 +691,9 @@ final class IPrimaHelper {
 		
 		public ListTask<Program> getPrograms(IPrima iprima, String urlPrograms) throws Exception {
 			return ListTask.of((task) -> {
-				String response = internal_request(Net.uri(urlPrograms));
-				Document document = Utils.parseDocument(response, urlPrograms);
+				URI uriPrograms = Net.uri(urlPrograms);
+				String response = internal_request(uriPrograms);
+				Document document = HTML.parse(response, uriPrograms);
 				
 				for(Element elProgram : document.select(SELECTOR_PROGRAM)) {
 					String url = elProgram.absUrl("href");
@@ -757,7 +743,7 @@ final class IPrimaHelper {
 					return; // Do not continue
 				}
 				
-				Document document = Utils.parseDocument(response, uri.toString());
+				Document document = HTML.parse(response, uri);
 				String baseURL = uri.getScheme() + "://" + uri.getHost();
 				
 				scriptsLoop:
@@ -779,7 +765,7 @@ final class IPrimaHelper {
 						continue;
 					}
 					
-					Document doc = Utils.parseDocument(response);
+					Document doc = HTML.parse(response);
 					for(Element elEpisode : doc.select(SELECTOR_EPISODE)) {
 						String url = elEpisode.attr("href");
 						String title = elEpisode.text();
@@ -828,7 +814,7 @@ final class IPrimaHelper {
 				String response = internal_request(uri);
 				
 				if(response != null) {
-					Document document = Utils.parseDocument(response);
+					Document document = HTML.parse(response);
 					Element elScript = document.selectFirst(SELECTOR_SCRIPT);
 					
 					if(elScript != null) {
@@ -850,7 +836,7 @@ final class IPrimaHelper {
 				}
 				
 				// It is important to specify the referer, otherwise the response code is 403.
-				Map<String, String> requestHeaders = Utils.toMap("Referer", "https://www.iprima.cz/");
+				Map<String, List<String>> requestHeaders = Utils.toMap("Referer", List.of("https://www.iprima.cz/"));
 				try {
 					// Try to log in to the iPrima website using the internal account to have HD sources available.
 					IPrimaAuthenticator.SessionData sessionData = IPrimaAuthenticator.getSessionData();
@@ -905,97 +891,6 @@ final class IPrimaHelper {
 					}
 				}
 			});
-		}
-	}
-	
-	static final class FastWeb {
-		
-		private static final ConcurrentVarLazyLoader<CookieManager> cookieManager
-			= ConcurrentVarLazyLoader.of(FastWeb::ensureCookieManager);
-		private static final ConcurrentVarLazyLoader<HttpClient> httpClient
-			= ConcurrentVarLazyLoader.of(FastWeb::buildHttpClient);
-		private static final ConcurrentVarLazyLoader<HttpRequest.Builder> httpRequestBuilder
-			= ConcurrentVarLazyLoader.of(FastWeb::buildHttpRequestBuilder);
-		
-		// Forbid anyone to create an instance of this class
-		private FastWeb() {
-		}
-		
-		private static final CookieManager ensureCookieManager() throws Exception {
-			Reflection3.invokeStatic(Web.class, "ensureCookieManager");
-			return (CookieManager) Reflection2.getField(Web.class, null, "COOKIE_MANAGER");
-		}
-		
-		private static final HttpClient buildHttpClient() throws Exception {
-			return HttpClient.newBuilder()
-						.connectTimeout(Duration.ofMillis(5000))
-						.executor(Threads.Pools.newWorkStealing())
-						.followRedirects(Redirect.NORMAL)
-						.cookieHandler(cookieManager.value())
-						.version(Version.HTTP_2)
-						.build();
-		}
-		
-		private static final HttpRequest.Builder buildHttpRequestBuilder() throws Exception {
-			return HttpRequest.newBuilder()
-						.setHeader("User-Agent", Shared.USER_AGENT);
-		}
-		
-		private static final HttpRequest.Builder maybeAddHeaders(HttpRequest.Builder request, Map<String, String> headers) {
-			if(!headers.isEmpty()) {
-				request.headers(
-					headers.entrySet().stream()
-						.flatMap((e) -> Stream.of(e.getKey(), e.getValue()))
-						.toArray(String[]::new)
-				);
-			}
-			return request;
-		}
-		
-		public static final String bodyString(Map<String, Object> data) {
-			StringBuilder sb = new StringBuilder();
-			
-			boolean first = true;
-			for(Entry<String, Object> e : data.entrySet()) {
-				if(first) first = false; else sb.append('&');
-				sb.append(URLEncoder.encode(e.getKey(), Shared.CHARSET))
-				  .append('=')
-				  .append(URLEncoder.encode(Objects.toString(e.getValue()), Shared.CHARSET));
-			}
-			
-			return sb.toString();
-		}
-		
-		public static final HttpResponse<String> getRequest(URI uri, Map<String, String> headers) throws Exception {
-			HttpRequest request = maybeAddHeaders(httpRequestBuilder.value().copy().GET().uri(uri), headers).build();
-			HttpResponse<String> response = httpClient.value().sendAsync(request, BodyHandlers.ofString(Shared.CHARSET)).join();
-			return response;
-		}
-		
-		public static final String get(URI uri, Map<String, String> headers) throws Exception {
-			return getRequest(uri, headers).body();
-		}
-		
-		public static final HttpResponse<String> postRequest(URI uri, Map<String, String> headers,
-				Map<String, Object> data) throws Exception {
-			return postRequest(uri, headers, bodyString(data));
-		}
-		
-		public static final Document document(URI uri, Map<String, String> headers) throws Exception {
-			HttpResponse<String> response = getRequest(uri, headers);
-			return Utils.parseDocument(response.body(), response.uri());
-		}
-		
-		public static final Document document(URI uri) throws Exception {
-			return document(uri, Map.of());
-		}
-		
-		public static final HttpResponse<String> postRequest(URI uri, Map<String, String> headers,
-				String payload) throws Exception {
-			BodyPublisher body = BodyPublishers.ofString(payload, Shared.CHARSET);
-			HttpRequest request = maybeAddHeaders(httpRequestBuilder.value().copy().POST(body).uri(uri), headers).build();
-			HttpResponse<String> response = httpClient.value().sendAsync(request, BodyHandlers.ofString(Shared.CHARSET)).join();
-			return response;
 		}
 	}
 	
@@ -1187,50 +1082,6 @@ final class IPrimaHelper {
 					if(shouldShutdown) {
 						isShutdown.set(true);
 					}
-				}
-			}
-		}
-	}
-	
-	static final class ConcurrentVarLazyLoader<T> {
-		
-		private final AtomicBoolean isSet = new AtomicBoolean();
-		private final AtomicBoolean isSetting = new AtomicBoolean();
-		private volatile T value;
-		
-		private final CheckedSupplier<T> supplier;
-		
-		private ConcurrentVarLazyLoader(CheckedSupplier<T> supplier) {
-			this.supplier = Objects.requireNonNull(supplier);
-		}
-		
-		public static final <T> ConcurrentVarLazyLoader<T> of(CheckedSupplier<T> supplier) {
-			return new ConcurrentVarLazyLoader<>(supplier);
-		}
-		
-		public final T value() throws Exception {
-			if(isSet.get()) return value; // Already set
-			
-			while(!isSet.get()
-						&& !isSetting.compareAndSet(false, true)) {
-				synchronized(isSetting) {
-					try {
-						isSetting.wait();
-					} catch(InterruptedException ex) {
-						// Ignore
-					}
-				}
-				if(isSet.get()) return value; // Already set
-			}
-			
-			try {
-				value = supplier.get();
-				isSet.set(true);
-				return value;
-			} finally {
-				isSetting.set(false);
-				synchronized(isSetting) {
-					isSetting.notifyAll();
 				}
 			}
 		}

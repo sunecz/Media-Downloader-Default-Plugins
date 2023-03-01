@@ -16,7 +16,6 @@ import java.util.stream.Stream;
 
 import sune.app.mediadown.InternalState;
 import sune.app.mediadown.MediaDownloader;
-import sune.app.mediadown.Shared;
 import sune.app.mediadown.TaskStates;
 import sune.app.mediadown.concurrent.SyncObject;
 import sune.app.mediadown.concurrent.Worker;
@@ -43,7 +42,8 @@ import sune.app.mediadown.media.MediaConstants;
 import sune.app.mediadown.media.MediaType;
 import sune.app.mediadown.media.MediaUtils;
 import sune.app.mediadown.media.SubtitlesMedia;
-import sune.app.mediadown.net.Net;
+import sune.app.mediadown.net.Web;
+import sune.app.mediadown.net.Web.Request;
 import sune.app.mediadown.pipeline.DownloadPipelineResult;
 import sune.app.mediadown.util.Metadata;
 import sune.app.mediadown.util.NIO;
@@ -52,13 +52,10 @@ import sune.app.mediadown.util.Pair;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Utils.Ignore;
 import sune.app.mediadown.util.VideoUtils;
-import sune.app.mediadown.util.Web;
-import sune.app.mediadown.util.Web.GetRequest;
-import sune.app.mediadown.util.Web.HeadRequest;
 
 public final class SimpleDownloader implements Download, DownloadResult {
 	
-	private static final Map<String, String> HEADERS = Web.headers("Accept=*/*");
+	private static final Map<String, List<String>> HEADERS = Map.of("Accept", List.of("*/*"));
 	
 	private final Translation translation = MediaDownloader.translation().getTranslation("plugin.downloader.smf");
 	private final TrackerManager manager = new TrackerManager();
@@ -126,7 +123,7 @@ public final class SimpleDownloader implements Download, DownloadResult {
 					tracker.progress(counter.incrementAndGet() / count);
 				} else {
 					worker.submit(() -> {
-						HeadRequest request = new HeadRequest(Net.url(mh.media().uri()), Shared.USER_AGENT, HEADERS);
+						Request request = Request.of(mh.media().uri()).headers(HEADERS).HEAD();
 						long size = Ignore.defaultValue(() -> Web.size(request), MediaConstants.UNKNOWN_SIZE);
 						mh.size(size);
 						if(size > 0L) theSize.getAndAdd(size);
@@ -204,7 +201,7 @@ public final class SimpleDownloader implements Download, DownloadResult {
 			for(MediaHolder mh : mediaHolders) {
 				if(!checkIfCanContinue()) break;
 				Path tempFile = tempFileIt.next();
-				GetRequest request = new GetRequest(Net.url(mh.media().uri()), Shared.USER_AGENT, HEADERS);
+				Request request = Request.of(mh.media().uri()).headers(HEADERS).GET();
 				downloader.start(request, tempFile, DownloadConfiguration.ofTotalBytes(mh.size()));
 			}
 			
@@ -226,7 +223,7 @@ public final class SimpleDownloader implements Download, DownloadResult {
 							+ (subtitleLanguage != null ? '.' + subtitleLanguage : "")
 							+ (!subtitleType.isEmpty() ? '.' + subtitleType : "");
 					Path subDest = subtitlesDir.resolve(subtitleFileName);
-					GetRequest request = new GetRequest(Net.url(sm.uri()), Shared.USER_AGENT, HEADERS);
+					Request request = Request.of(sm.uri()).headers(HEADERS).GET();
 					downloader.start(request, subDest, DownloadConfiguration.ofTotalBytes(subtitle.size()));
 				}
 			}

@@ -1,7 +1,6 @@
 package sune.app.mediadown.media_engine.iprima;
 
 import java.net.URI;
-import java.net.http.HttpResponse;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -26,11 +25,13 @@ import sune.app.mediadown.media.MediaMetadata;
 import sune.app.mediadown.media.MediaSource;
 import sune.app.mediadown.media.MediaUtils;
 import sune.app.mediadown.media_engine.iprima.IPrimaEngine.IPrima;
-import sune.app.mediadown.media_engine.iprima.IPrimaHelper.FastWeb;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper.ProgramWrapper;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper.ThreadedSpawnableTaskQueue;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper._Singleton;
 import sune.app.mediadown.net.Net;
+import sune.app.mediadown.net.Web;
+import sune.app.mediadown.net.Web.Request;
+import sune.app.mediadown.net.Web.Response;
 import sune.app.mediadown.task.ListTask;
 import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.Regex;
@@ -85,9 +86,9 @@ final class PrimaPlus implements IPrima {
 		private static final String URL_BASE_MOVIE = "https://www.iprima.cz/filmy/";
 		private static final String URL_BASE_SERIES = "https://www.iprima.cz/serialy/";
 		
-		private static final Map<String, String> HEADERS = Map.of(
-			"Accept", "application/json",
-			"Content-Type", "application/json"
+		private static final Map<String, List<String>> HEADERS = Map.of(
+			"Accept", List.of("application/json"),
+			"Content-Type", List.of("application/json")
 		);
 		
 		private static final int EXIT_CALLBACK = -1;
@@ -102,8 +103,9 @@ final class PrimaPlus implements IPrima {
 		}
 		
 		private static final SSDCollection doRawRequest(String body) throws Exception {
-			HttpResponse<String> response = FastWeb.postRequest(URL_ENDPOINT, HEADERS, body);
-			return JSON.read(response.body()).getDirectCollection("result");
+			try(Response.OfStream response = Web.requestStream(Request.of(URL_ENDPOINT).headers(HEADERS).POST(body))) {
+				return JSON.read(response.stream()).getDirectCollection("result");
+			}
 		}
 		
 		private static final SSDCollection doRequest(String method, Object... params) throws Exception {
@@ -190,10 +192,9 @@ final class PrimaPlus implements IPrima {
 			return new ProgramWrapper(stripItemToProgram(item));
 		}
 		
-		private final Map<String, String> logIn() {
+		private final Map<String, List<String>> logIn() {
 			// It is important to specify the referer, otherwise the response code is 403.
-			Map<String, String> requestHeaders = Utils.toMap("Referer", "https://www.iprima.cz/");
-			
+			Map<String, List<String>> requestHeaders = Utils.toMap("Referer", List.of("https://www.iprima.cz/"));
 			try {
 				// Try to log in to the iPrima website using the internal account to have HD sources available.
 				IPrimaAuthenticator.SessionData sessionData = IPrimaAuthenticator.getSessionData();
@@ -320,8 +321,8 @@ final class PrimaPlus implements IPrima {
 					return; // Do not continue
 				}
 				
-				Map<String, String> requestHeaders = logIn();
-				String html = FastWeb.get(program.uri(), requestHeaders);
+				Map<String, List<String>> requestHeaders = logIn();
+				String html = Web.request(Request.of(program.uri()).headers(requestHeaders).GET()).body();
 				Nuxt nuxt = Nuxt.extract(html);
 				
 				if(nuxt == null) {
@@ -382,7 +383,7 @@ final class PrimaPlus implements IPrima {
 		
 		public final ListTask<Media> getMedia(IPrimaEngine engine, URI uri) throws Exception {
 			return ListTask.of((task) -> {
-				String html = FastWeb.get(uri, Map.of());
+				String html = Web.request(Request.of(uri).GET()).body();
 				Nuxt nuxt = Nuxt.extract(html);
 				
 				if(nuxt == null) {
@@ -398,9 +399,9 @@ final class PrimaPlus implements IPrima {
 					throw new IllegalStateException("Unable to extract video play ID");
 				}
 				
-				Map<String, String> requestHeaders = logIn();
+				Map<String, List<String>> requestHeaders = logIn();
 				URI configUri = Net.uri(Utils.format(URL_API_PLAY, "play_id", videoPlayId));
-				String content = FastWeb.get(configUri, requestHeaders);
+				String content = Web.request(Request.of(configUri).headers(requestHeaders).GET()).body();
 				
 				if(content == null || content.isEmpty()) {
 					throw new IllegalStateException("Empty play configuration content");
