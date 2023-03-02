@@ -572,7 +572,7 @@ final class PrimaPlus implements IPrima {
 				content = regexJSCall.replaceAll(content, (m) -> "\"\"");
 				
 				// Cannot use JavaScript.readObject since the names are not quoted
-				SSDCollection object = SSDF.read(Utils.prefixUnicodeEscapeSequences(content, "\\"));
+				SSDCollection object = SSDF.read(Utils.prefixUnicodeEscapeSequences(content, "\\\\\\"));
 				SSDCollection data = object.getDirectCollection("data");
 				SSDCollection state = object.getDirectCollection("state");
 				
