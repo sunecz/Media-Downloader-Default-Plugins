@@ -356,8 +356,10 @@ public class YouTubeServer implements Server {
 		}
 	}
 	
-	// Some parts taken from: https://youtube.com/s/player/5253ac4d/player_ias.vflset/cs_CZ/base.js
-	// Update: 2020-07-18
+	/*
+	 * Some parts taken from: https://www.youtube.com/s/player/7862ca1f/player_ias.vflset/cs_CZ/base.js
+	 * Update: 2023-03-02
+	 */
 	private static final class YT {
 		
 		private static Map<String, String> cacheRateBypass;
@@ -371,116 +373,142 @@ public class YouTubeServer implements Server {
 			return a instanceof List;
 		}
 		
-		private static final List<String> asArray(Object... a) {
-			// This list is modifiable, not as the one returned by Arrays.asList
-			List<String> l = new ArrayList<>(a.length);
-			for(int i = 0, k = a.length; i < k; ++k)
-				l.add((String) a[i]);
-			return l;
+		private static final List<String> toArray(Object a) {
+			return Utils.cast(a); // Force cast
 		}
 		
-		private static final int length(Object a) {
-			return a instanceof List ? ((List<?>) a).size() : 0;
-		}
-		
-	    /*
-	    Yp = function(a) {
-			"?" == a.charAt(0) && (a = a.substr(1));
-			return Wp(a)
-	    };
-	    */
-		private static final Map<String, String> Yp(String a) {
-			return Wp(a.charAt(0) == '?' ? a.substring(1) : a).entrySet().stream()
+		/*
+		qw = function(a) {
+		    "?" == a.charAt(0) && (a = a.substr(1));
+		    return ow(a, "&")
+		};
+		*/
+		private static final Map<String, String> qw(String a) {
+			return ow(a.charAt(0) == '?' ? a.substring(1) : a, "&").entrySet().stream()
 						.collect(Collectors.toMap((e) -> e.getKey(), (e) -> (String) e.getValue()));
 		}
 		
-	    /*
-	    Wp = function(a) {
-			a = a.split("&");
-			for (var b = {}, c = 0, d = a.length; c < d; c++) {
-				var e = a[c].split("=");
-				if (1 == e.length && e[0] || 2 == e.length) try {
-					var f = gd(e[0] || ""),
-						h = gd(e[1] || "");
-					f in b ? Array.isArray(b[f]) ? nb(b[f], h) : b[f] = [b[f], h] : b[f] = h
-				} catch (m) {
-					if ("q" != e[0]) {
-						var l = Error("Error decoding URL component");
-						l.params = {
-							key: e[0],
-							value: e[1]
-						};
-						g.L(l)
-					}
-				}
-			}
-			return b
-	    };
-	    */
-		@SuppressWarnings("unchecked")
-		private static final Map<String, Object> Wp(String a) {
-			Map<String, Object> b = new HashMap<>();
-			String[] w = a.split("&");
-			for(int c = 0, d = w.length; c < d; ++c) {
-				String[] e = w[c].split("=");
-				if(e.length == 1 && !e[0].isEmpty() || e.length == 2) {
-					String f = gd(getOrDefault(e, 0, ""));
-					String h = gd(getOrDefault(e, 1, ""));
-					if(b.containsKey(f)) {
-						if(isArray(b.get(f))) {
-							nb((List<String>) b.get(f), h);
+		/*
+		ow = function(a, b) {
+		    b = a.split(b);
+		    for (var c = {}, d = 0, e = b.length; d < e; d++) {
+		        var f = b[d].split("=");
+		        if (1 == f.length && f[0] || 2 == f.length) try {
+		            var h = Bna(f[0] || ""),
+		                l = Bna(f[1] || "");
+		            h in c ? (Array.isArray(c[h]) ? g.tb(c[h], l) : c[h] = [c[h], l]) : c[h] = l
+		        } catch (q) {
+		            var m = q,
+		                n = f[0],
+		                p = String(ow);
+		            m.args = [{
+		                key: n,
+		                value: f[1],
+		                query: a,
+		                method: Cna == p ? "unchanged" : p
+		            }];
+		            Dna.hasOwnProperty(n) || nw(m)
+		        }
+		    }
+		    return c
+		};
+		*/
+		private static final Map<String, Object> ow(String a, String b) {
+			Map<String, Object> c = new HashMap<>();
+			String[] w = a.split(b);
+			
+			for(int d = 0, e = w.length; d < e; ++d) {
+				String[] f = w[d].split("=");
+				
+				if((f.length == 1 && !f[0].isEmpty()) || f.length == 2) {
+					String h = Bna(getOrDefault(f, 0, ""));
+					String l = Bna(getOrDefault(f, 1, ""));
+					
+					if(c.containsKey(h)) {
+						Object v = c.get(h);
+						
+						if(isArray(v)) {
+							tb(toArray(v), l);
 						} else {
-							b.put(f, asArray(b.get(f), h));
+							c.put(h, List.of(v, l));
 						}
 					} else {
-						b.put(f, h);
+						c.put(h, l);
 					}
+					
+					// ... Ignore the catch statement in the try-catch
 				}
 			}
-			return b;
+			
+			return c;
 		}
 		
-	    /*
-	    gd = function(a) {
-			return decodeURIComponent(a.replace(/\+/g, " "))
-	    };
-	    */
-		private static final String gd(String a) {
+		/*
+		Bna = function(a) {
+		    return a && a.match(/^[\w.]*$/) ? a : de(a)
+		};
+		*/
+		private static final String Bna(String a) {
+			return !a.isEmpty() && Regex.of("^[\\w.]*$").matcher(a).matches() ? a : de(a);
+		}
+		
+		/*
+		de = function(a) {
+		    return decodeURIComponent(a.replace(/\+/g, " "))
+		};
+		*/
+		private static final String de(String a) {
 			return JavaScript.decodeURIComponent(a.replaceAll("\\+", " "));
 		}
 		
-	    /*
-	    nb = function(a, b) {
-			for (var c = 1; c < arguments.length; c++) {
-				var d = arguments[c];
-				if (g.La(d)) {
-					var e = a.length || 0,
-						f = d.length || 0;
-					a.length = e + f;
-					for (var h = 0; h < f; h++) a[e + h] = d[h]
-				} else a.push(d)
-			}
-	    };
-	    */
-		@SuppressWarnings("unchecked")
-		private static final void nb(List<String> a, Object... b) {
+		/*
+		g.tb = function(a, b) {
+		    for (var c = 1; c < arguments.length; c++) {
+		        var d = arguments[c];
+		        if (g.Ha(d)) {
+		            var e = a.length || 0,
+		                f = d.length || 0;
+		            a.length = e + f;
+		            for (var h = 0; h < f; h++) a[e + h] = d[h]
+		        } else a.push(d)
+		    }
+		};
+		*/
+		private static final void tb(List<String> a, Object... b) {
 			for(int c = 0, l = b.length; c < l; ++c) {
 				Object d = b[c];
-				if(length(d) > 0) {
-					a.addAll((List<String>) d);
+				
+				if(Ha(d)) {
+					a.addAll(toArray(d));
 				} else {
 					a.add((String) d);
 				}
 			}
 		}
 		
+		/*
+		g.Ha = function(a) {
+		    var b = oaa(a);
+		    return "array" == b || "object" == b && "number" == typeof a.length
+		};
+		*/
+		/*
+		oaa = function(a) {
+		    var b = typeof a;
+		    return "object" != b ? b : (a ? (Array.isArray(a) ? "array" : b) : "null")
+		};
+		*/
+		private static final boolean Ha(Object a) {
+			return isArray(a); // Simplified
+		}
+		
 		public static final String decipher(String cipher, Signature.Context ctx) throws Exception {
-			Map<String, String> args = YT.Yp(cipher);
+			Map<String, String> args = qw(cipher);
 			return args.get("url") + '&' + args.get("sp") + '=' + ctx.alter(args.get("s"));
 		}
 		
-		public static final String maybeDecipherRateBypass(String videoURL, Document document) throws Exception {
-			QueryArgument urlArgs = Net.queryDestruct(videoURL);
+		public static final String maybeDecipherRateBypass(String videoUrl, Document document) throws Exception {
+			QueryArgument urlArgs = Net.queryDestruct(videoUrl);
 			
 			// Only process URLs that do not have ratebypass=yes in their query arguments
 			if(!urlArgs.valueOf("ratebypass", "").equals("yes")) {
@@ -488,8 +516,9 @@ public class YouTubeServer implements Server {
 				
 				// The 'n' argument may not be present in the URL, so check for it
 				if(n != null) {
-					if(cacheRateBypass == null)
+					if(cacheRateBypass == null) {
 						cacheRateBypass = new HashMap<>();
+					}
 					
 					String deciphered;
 					if((deciphered = cacheRateBypass.get(n)) == null) {
@@ -497,18 +526,17 @@ public class YouTubeServer implements Server {
 						cacheRateBypass.put(n, deciphered);
 					}
 					
-					List<QueryArgument> args = new ArrayList<>(3);
-					args.add(urlArgs);
+					Map<String, Object> map = Net.queryMap(urlArgs);
+					map.put("n", deciphered);
+					map.put("ratebypass", "yes");
 					
-					args.add(QueryArgument.ofValue("n", deciphered));
-					args.add(QueryArgument.ofValue("ratebypass", "yes"));
-					
-					String urlBase = videoURL.substring(0, videoURL.indexOf('?'));
-					videoURL = urlBase + '?' + Net.queryConstruct(args);
+					QueryArgument args = Net.createQuery(map);
+					String urlBase = Utils.beforeFirst(videoUrl, "?");
+					videoUrl = urlBase + '?' + Net.queryConstruct(args);
 				}
 			}
 			
-			return videoURL;
+			return videoUrl;
 		}
 	}
 	
@@ -519,7 +547,7 @@ public class YouTubeServer implements Server {
 		private static final String obtainBaseJSContent(Document document) throws Exception {
 			Element script;
 			return (script = document.selectFirst("script[src*=\"player_ias\"]")) != null
-						? Web.request(Request.of(Net.uri("https://youtube.com" + script.attr("src")))
+						? Web.request(Request.of(Net.uri(script.absUrl("src")))
 						                     .userAgent(UserAgent.CHROME).GET())
 						     .body()
 						: null;
@@ -670,11 +698,11 @@ public class YouTubeServer implements Server {
 			
 			public static final Context extract(Document document) throws Exception {
 				String script = SignatureUtils.baseJSContent(document);
-				if(script == null)
-					return null; // Fast-fail
+				if(script == null) return null;
+				
 				Pair<String, Map<String, CheckedBiFunction<char[], Integer, char[]>>> pair = extractJSFunctionsMapping(script);
-				if(pair == null)
-					return null; // Fast-fail
+				if(pair == null) return null;
+				
 				return new Context(getFunctionCalls(script, pair.b, pair.a));
 			}
 		}
@@ -719,8 +747,9 @@ public class YouTubeServer implements Server {
 				ensureNashornDeprecationWarningIsDisabled();
 				
 				String altered;
-				if((altered = cache.get(signature)) != null)
+				if((altered = cache.get(signature)) != null) {
 					return altered;
+				}
 				
 				altered = execute(signature);
 				cache.put(signature, altered);
