@@ -1,12 +1,12 @@
 package sune.app.mediadown.media_engine.tvbarrandov;
 
 import java.net.URI;
+import java.net.http.HttpHeaders;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -258,8 +258,8 @@ public final class TVBarrandovEngine implements MediaEngine {
 								if(eom) break;
 							}
 							
-							Map<String, List<String>> headers = Map.of(
-								"Referer", List.of(consentURI.toString())
+							HttpHeaders headers = Web.Headers.ofSingle(
+								"Referer", consentURI.toString()
 							);
 							
 							String body = Net.queryString(args);
@@ -719,8 +719,8 @@ public final class TVBarrandovEngine implements MediaEngine {
 			if(username.isEmpty() || password.isEmpty())
 				return false;
 			
-			Map<String, List<String>> headers = Map.of(
-	 			"Referer", List.of(URL_REFERER)
+			HttpHeaders headers = Web.Headers.ofSingle(
+	 			"Referer", URL_REFERER
 	 		);
 			
 			Map<String, Object> args = Map.of(

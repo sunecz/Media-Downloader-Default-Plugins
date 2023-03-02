@@ -2,6 +2,7 @@ package sune.app.mediadown.media_engine.iprima;
 
 import java.net.URI;
 import java.net.http.HttpClient.Redirect;
+import java.net.http.HttpHeaders;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -254,7 +255,7 @@ public final class IPrimaAuthenticator {
 		
 		public static final Device createDevice(String id, String type, String name) throws Exception {
 			String body = Net.queryString("slotType", type, "title", name, "deviceUID", id);
-			Map<String, List<String>> headers = Web.Headers.ofSingle(
+			HttpHeaders headers = Web.Headers.ofSingle(
 				"Referer", "https://prima.iprima.cz/",
 				"X-Requested-With", "XMLHttpRequest"
 			);
@@ -272,7 +273,7 @@ public final class IPrimaAuthenticator {
 			json.setDirect("slotType", "WEB");
 			json.setDirect("slotId", id);
 			String body = json.toJSON(true);
-			Map<String, List<String>> headers = Web.Headers.ofSingle("Referer", "https://prima.iprima.cz/");
+			HttpHeaders headers = Web.Headers.ofSingle("Referer", "https://prima.iprima.cz/");
 			Request request = Request.of(Net.uri(URL_REMOVE_DEVICE)).headers(headers).POST(body);
 			try(Response.OfStream response = Web.requestStream(request)) {
 				return response.statusCode() == 200;
@@ -372,7 +373,7 @@ public final class IPrimaAuthenticator {
 		private final String accessToken;
 		private final String deviceId;
 		private final String profileId;
-		private Map<String, List<String>> requestHeaders;
+		private Map<String, String> requestHeaders;
 		
 		public SessionData(String rawString, String accessToken, String deviceId, String profileId) {
 			this.rawString = rawString;
@@ -381,12 +382,12 @@ public final class IPrimaAuthenticator {
 			this.profileId = profileId;
 		}
 		
-		public final Map<String, List<String>> requestHeaders() {
+		public final Map<String, String> requestHeaders() {
 			if(requestHeaders == null) {
-				requestHeaders = Map.of(
-					"X-OTT-Access-Token", List.of(accessToken),
-					"X-OTT-CDN-Url-Type", List.of("WEB"),
-					"X-OTT-Device", List.of(deviceId)
+				requestHeaders = Utils.toMap(
+					"X-OTT-Access-Token", accessToken,
+					"X-OTT-CDN-Url-Type", "WEB",
+					"X-OTT-Device", deviceId
 				);
 			}
 			return requestHeaders;

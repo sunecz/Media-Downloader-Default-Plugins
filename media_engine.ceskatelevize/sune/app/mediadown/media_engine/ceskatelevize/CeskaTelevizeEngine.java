@@ -6,6 +6,7 @@ import java.lang.ref.SoftReference;
 import java.lang.reflect.Constructor;
 import java.math.BigInteger;
 import java.net.URI;
+import java.net.http.HttpHeaders;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -142,7 +143,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 						
 						if(info != null) {
 							PlaylistData playlistData = PlaylistDataGetter.get(videoURL, info);
-							Map<String, List<String>> headers = Map.of("X-Requested-With", List.of("XMLHttpRequest"));
+							HttpHeaders headers = Web.Headers.ofSingle("X-Requested-With", "XMLHttpRequest");
 							Request request = Request.of(Net.uri(playlistData.url)).headers(headers).GET();
 							
 							SSDCollection json;
@@ -426,7 +427,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		private static final SSDCollection doOperation(String operationName, String query, Object... variables) throws Exception {
 			String body = createRequestBody(operationName, query, variables);
 			String contentType = "application/json";
-			Map<String, List<String>> headers = Map.of("Referer", List.of(REFERER));
+			HttpHeaders headers = Web.Headers.ofSingle("Referer", REFERER);
 			try(Response.OfStream response = Web.requestStream(Request.of(Net.uri(URL)).headers(headers).POST(body, contentType))) {
 				if(response.statusCode() != 200) {
 					throw new IllegalStateException(
@@ -737,9 +738,9 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 				"type", "html",
 				"canPlayDRM", "false"
 			);
-			Map<String, List<String>> headers = Utils.toMap(
-				"X-Requested-With", List.of("XMLHttpRequest"),
-				"x-addr", List.of("127.0.0.1")
+			HttpHeaders headers = Web.Headers.ofSingle(
+				"X-Requested-With", "XMLHttpRequest",
+				"x-addr", "127.0.0.1"
 			);
 			String body = Net.queryString(params);
 			Request request = Request.of(Net.uri(endpointURL)).headers(headers).POST(body);

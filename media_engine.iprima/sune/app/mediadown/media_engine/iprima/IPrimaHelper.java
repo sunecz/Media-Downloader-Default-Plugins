@@ -7,6 +7,7 @@ import java.lang.StackWalker.StackFrame;
 import java.lang.reflect.Constructor;
 import java.net.URI;
 import java.net.URL;
+import java.net.http.HttpHeaders;
 import java.nio.channels.ClosedByInterruptException;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -68,12 +69,12 @@ final class IPrimaHelper {
 	private static final Regex REGEX_EPISODE_NAME = Regex.of("^\\d+\\.[^\\-]+-\\s+(.*)$");
 	private static final Regex REGEX_COMPARE_SPLIT = Regex.of("(?<=\\d+)(?!\\d)|(?<!\\d)(?=\\d+)");
 	
-	private static final String internal_request(URI uri, Map<String, List<String>> headers) throws Exception {
+	private static final String internal_request(URI uri, HttpHeaders headers) throws Exception {
 		return Web.request(Request.of(uri).headers(headers).GET()).body();
 	}
 	
 	private static final String internal_request(URI uri) throws Exception {
-		return internal_request(uri, Map.of());
+		return internal_request(uri, Web.Headers.empty());
 	}
 	
 	// Accumulator must be thread-safe, e.g. ConcurrentSkipListSet
@@ -202,16 +203,17 @@ final class IPrimaHelper {
 				
 				URL configURL = Net.url(Utils.format(playURL(), "product_id", productId));
 				// It is important to specify the referer, otherwise the response code is 403.
-				Map<String, List<String>> requestHeaders = Utils.toMap("Referer", List.of("https://www.iprima.cz/"));
+				Map<String, String> mutRequestHeaders = Utils.toMap("Referer", "https://www.iprima.cz/");
 				try {
 					// Try to log in to the iPrima website using the internal account to have HD sources available.
 					IPrimaAuthenticator.SessionData sessionData = IPrimaAuthenticator.getSessionData();
-					Utils.merge(requestHeaders, sessionData.requestHeaders());
+					Utils.merge(mutRequestHeaders, sessionData.requestHeaders());
 				} catch(Exception ex) {
 					// Notify the user that the HD sources may not be available due to inability to log in.
 					MediaDownloader.error(new IllegalStateException("Unable to log in to the iPrima website.", ex));
 				}
 				
+				HttpHeaders requestHeaders = Web.Headers.ofSingleMap(mutRequestHeaders);
 				String content = internal_request(Net.uri(configURL), requestHeaders);
 				if(content == null || content.isEmpty()) {
 					return; // Do not continue
@@ -836,16 +838,17 @@ final class IPrimaHelper {
 				}
 				
 				// It is important to specify the referer, otherwise the response code is 403.
-				Map<String, List<String>> requestHeaders = Utils.toMap("Referer", List.of("https://www.iprima.cz/"));
+				Map<String, String> mutRequestHeaders = Utils.toMap("Referer", "https://www.iprima.cz/");
 				try {
 					// Try to log in to the iPrima website using the internal account to have HD sources available.
 					IPrimaAuthenticator.SessionData sessionData = IPrimaAuthenticator.getSessionData();
-					Utils.merge(requestHeaders, sessionData.requestHeaders());
+					Utils.merge(mutRequestHeaders, sessionData.requestHeaders());
 				} catch(Exception ex) {
 					// Notify the user that the HD sources may not be available due to inability to log in.
 					MediaDownloader.error(new IllegalStateException("Unable to log in to the iPrima website.", ex));
 				}
 				
+				HttpHeaders requestHeaders = Web.Headers.ofSingleMap(mutRequestHeaders);
 				MediaSource source = MediaSource.of(engine);
 				
 				for(String urlPlay : urls) {

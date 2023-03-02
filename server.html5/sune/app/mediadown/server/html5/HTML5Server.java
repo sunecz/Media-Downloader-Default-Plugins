@@ -1,6 +1,7 @@
 package sune.app.mediadown.server.html5;
 
 import java.net.URI;
+import java.net.http.HttpHeaders;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -43,8 +44,10 @@ public class HTML5Server implements Server {
 	}
 	
 	private final Document getDocument(String url, Map<String, Object> data) throws Exception {
-		Map<String, List<String>> headers = data.entrySet().stream()
-			.collect(Collectors.toMap(Map.Entry::getKey, (v) -> List.of(String.valueOf(v.getValue()))));
+		HttpHeaders headers = Web.Headers.ofMap(
+			data.entrySet().stream()
+				.collect(Collectors.toMap(Map.Entry::getKey, (v) -> List.of(String.valueOf(v.getValue()))))
+		);
 		Response.OfString response = Web.request(Request.of(Net.uri(url)).headers(headers).GET());
 		return HTML.parse(response.body(), Net.uri(url));
 	}

@@ -3,6 +3,7 @@ package sune.app.mediadown.media_engine.novavoyo;
 import java.net.CookieStore;
 import java.net.HttpCookie;
 import java.net.URI;
+import java.net.http.HttpHeaders;
 import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
@@ -431,8 +432,8 @@ public final class NovaVoyoServer implements Server {
 			Document document = HTML.from(uri);
 			String argDo = document.selectFirst("input[type='hidden'][name='_do']").val();
 			
-			Map<String, List<String>> headers = Map.of(
-	 			"Referer", List.of(URL_LOGIN)
+			HttpHeaders headers = Web.Headers.ofSingle(
+	 			"Referer", URL_LOGIN
 	 		);
 			
 			Map<String, Object> args = Map.of(

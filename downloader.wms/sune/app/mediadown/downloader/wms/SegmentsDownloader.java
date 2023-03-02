@@ -1,11 +1,11 @@
 package sune.app.mediadown.downloader.wms;
 
 import java.net.URI;
+import java.net.http.HttpHeaders;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -70,7 +70,7 @@ import sune.app.mediadown.util.Utils.Ignore;
 
 public final class SegmentsDownloader implements Download, DownloadResult {
 	
-	private static final Map<String, List<String>> HEADERS = Map.of("Accept", List.of("*/*"));
+	private static final HttpHeaders HEADERS = Web.Headers.ofSingle("Accept", "*/*");
 	private static final long TIME_UPDATE_RESOLUTION_MS = 50L;
 	
 	private final Translation translation = MediaDownloader.translation().getTranslation("plugin.downloader.wms");
@@ -124,7 +124,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		int cmp; return (cmp = Integer.compare(b.length(), a.length())) == 0 ? 1 : cmp;
 	}
 	
-	private static final long sizeOf(URI uri, Map<String, List<String>> headers) throws Exception {
+	private static final long sizeOf(URI uri, HttpHeaders headers) throws Exception {
 		return Web.size(Request.of(uri).headers(headers).HEAD());
 	}
 	

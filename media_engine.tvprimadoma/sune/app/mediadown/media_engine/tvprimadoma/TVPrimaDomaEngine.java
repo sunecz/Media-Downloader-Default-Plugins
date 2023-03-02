@@ -1,6 +1,7 @@
 package sune.app.mediadown.media_engine.tvprimadoma;
 
 import java.net.URI;
+import java.net.http.HttpHeaders;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -331,7 +332,7 @@ public final class TVPrimaDomaEngine implements MediaEngine {
 			}
 
 			// Send the request to obtain the frame's content
-			Map<String, List<String>> headers = Map.of("Referer", List.of(URL_REFERER));
+			HttpHeaders headers = Web.Headers.ofSingle("Referer", URL_REFERER);
 			String content = Web.request(Request.of(Net.uri(frameURL)).headers(headers).GET()).body();
 			
 			SSDCollection playerVideos = null;

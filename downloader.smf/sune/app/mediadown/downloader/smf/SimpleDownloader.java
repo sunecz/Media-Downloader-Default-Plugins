@@ -1,12 +1,12 @@
 package sune.app.mediadown.downloader.smf;
 
 import java.io.IOException;
+import java.net.http.HttpHeaders;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -55,7 +55,7 @@ import sune.app.mediadown.util.VideoUtils;
 
 public final class SimpleDownloader implements Download, DownloadResult {
 	
-	private static final Map<String, List<String>> HEADERS = Map.of("Accept", List.of("*/*"));
+	private static final HttpHeaders HEADERS = Web.Headers.ofSingle("Accept", "*/*");
 	
 	private final Translation translation = MediaDownloader.translation().getTranslation("plugin.downloader.smf");
 	private final TrackerManager manager = new TrackerManager();

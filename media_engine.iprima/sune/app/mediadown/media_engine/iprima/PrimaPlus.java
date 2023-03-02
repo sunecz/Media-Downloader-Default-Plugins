@@ -1,6 +1,7 @@
 package sune.app.mediadown.media_engine.iprima;
 
 import java.net.URI;
+import java.net.http.HttpHeaders;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -86,9 +87,9 @@ final class PrimaPlus implements IPrima {
 		private static final String URL_BASE_MOVIE = "https://www.iprima.cz/filmy/";
 		private static final String URL_BASE_SERIES = "https://www.iprima.cz/serialy/";
 		
-		private static final Map<String, List<String>> HEADERS = Map.of(
-			"Accept", List.of("application/json"),
-			"Content-Type", List.of("application/json")
+		private static final HttpHeaders HEADERS = Web.Headers.ofSingle(
+			"Accept", "application/json",
+			"Content-Type", "application/json"
 		);
 		
 		private static final int EXIT_CALLBACK = -1;
@@ -192,19 +193,19 @@ final class PrimaPlus implements IPrima {
 			return new ProgramWrapper(stripItemToProgram(item));
 		}
 		
-		private final Map<String, List<String>> logIn() {
+		private final HttpHeaders logIn() {
 			// It is important to specify the referer, otherwise the response code is 403.
-			Map<String, List<String>> requestHeaders = Utils.toMap("Referer", List.of("https://www.iprima.cz/"));
+			Map<String, String> mutRequestHeaders = Utils.toMap("Referer", "https://www.iprima.cz/");
 			try {
 				// Try to log in to the iPrima website using the internal account to have HD sources available.
 				IPrimaAuthenticator.SessionData sessionData = IPrimaAuthenticator.getSessionData();
-				Utils.merge(requestHeaders, sessionData.requestHeaders());
+				Utils.merge(mutRequestHeaders, sessionData.requestHeaders());
 			} catch(Exception ex) {
 				// Notify the user that the HD sources may not be available due to inability to log in.
 				MediaDownloader.error(new IllegalStateException("Unable to log in to the iPrima website.", ex));
 			}
 			
-			return requestHeaders;
+			return Web.Headers.ofSingleMap(mutRequestHeaders);
 		}
 		
 		public final ListTask<Program> getPrograms(IPrimaEngine engine) throws Exception {
@@ -321,7 +322,7 @@ final class PrimaPlus implements IPrima {
 					return; // Do not continue
 				}
 				
-				Map<String, List<String>> requestHeaders = logIn();
+				HttpHeaders requestHeaders = logIn();
 				String html = Web.request(Request.of(program.uri()).headers(requestHeaders).GET()).body();
 				Nuxt nuxt = Nuxt.extract(html);
 				
@@ -399,7 +400,7 @@ final class PrimaPlus implements IPrima {
 					throw new IllegalStateException("Unable to extract video play ID");
 				}
 				
-				Map<String, List<String>> requestHeaders = logIn();
+				HttpHeaders requestHeaders = logIn();
 				URI configUri = Net.uri(Utils.format(URL_API_PLAY, "play_id", videoPlayId));
 				String content = Web.request(Request.of(configUri).headers(requestHeaders).GET()).body();
 				

@@ -2,6 +2,7 @@ package sune.app.mediadown.media_engine.markizaplus;
 
 import java.net.SocketTimeoutException;
 import java.net.URI;
+import java.net.http.HttpHeaders;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -132,11 +133,11 @@ public final class MarkizaPlusEngine implements MediaEngine {
 		int offset = Integer.valueOf(params.valueOf("offset"));
 		String content = params.valueOf("content");
 		
-		Map<String, List<String>> headers = Map.of(
-			"Cache-Control", List.of("no-cache, no-store, must-revalidate"),
-			"Pragma", List.of("no-cache"),
-			"Expires", List.of("0"),
-			"X-Requested-With", List.of("XMLHttpRequest")
+		HttpHeaders headers = Web.Headers.ofSingle(
+			"Cache-Control", "no-cache, no-store, must-revalidate",
+			"Pragma", "no-cache",
+			"Expires", "0",
+			"X-Requested-With", "XMLHttpRequest"
 		);
 		
 		// The offset can be negative, therefore we can use it to obtain the first page
