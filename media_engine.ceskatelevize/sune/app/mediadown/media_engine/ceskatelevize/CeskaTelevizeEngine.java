@@ -683,7 +683,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			REGEX_CALL_GET_PLAYLIST_URL = Regex.of("getPlaylistUrl\\(\\s*(\\[[^;]+\\]),[^;]+\\);");
 		}
 		
-		public static final SourceInfo acquire(String url) {
+		public static final SourceInfo acquire(String url) throws Exception {
 			Document document = HTML.from(Net.uri(url));
 			SourceInfo info = new SourceInfo();
 			for(Element script : document.select("script:not([src])")) {
