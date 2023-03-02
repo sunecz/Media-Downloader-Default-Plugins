@@ -13,7 +13,6 @@ import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 
 import javafx.scene.image.Image;
-import sune.app.mediadown.Shared;
 import sune.app.mediadown.entity.Episode;
 import sune.app.mediadown.entity.MediaEngine;
 import sune.app.mediadown.entity.Program;
@@ -23,17 +22,18 @@ import sune.app.mediadown.media.MediaLanguage;
 import sune.app.mediadown.media.MediaMetadata;
 import sune.app.mediadown.media.MediaSource;
 import sune.app.mediadown.media.MediaUtils;
+import sune.app.mediadown.net.HTML;
 import sune.app.mediadown.net.Net;
 import sune.app.mediadown.net.Net.QueryArgument;
+import sune.app.mediadown.net.Web;
+import sune.app.mediadown.net.Web.Request;
+import sune.app.mediadown.net.Web.Response;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.task.ListTask;
 import sune.app.mediadown.util.JavaScript;
 import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
-import sune.app.mediadown.util.Web;
-import sune.app.mediadown.util.Web.GetRequest;
-import sune.app.mediadown.util.Web.StringResponse;
 import sune.util.ssdf2.SSDCollection;
 
 public final class MarkizaPlusEngine implements MediaEngine {
@@ -132,11 +132,11 @@ public final class MarkizaPlusEngine implements MediaEngine {
 		int offset = Integer.valueOf(params.valueOf("offset"));
 		String content = params.valueOf("content");
 		
-		Map<String, String> headers = Map.of(
-			"Cache-Control", "no-cache, no-store, must-revalidate",
-			"Pragma", "no-cache",
-			"Expires", "0",
-			"X-Requested-With", "XMLHttpRequest"
+		Map<String, List<String>> headers = Map.of(
+			"Cache-Control", List.of("no-cache, no-store, must-revalidate"),
+			"Pragma", List.of("no-cache"),
+			"Expires", List.of("0"),
+			"X-Requested-With", List.of("XMLHttpRequest")
 		);
 		
 		// The offset can be negative, therefore we can use it to obtain the first page
@@ -163,7 +163,7 @@ public final class MarkizaPlusEngine implements MediaEngine {
 				timeoutException = null;
 				
 				try {
-					pageContent = Web.request(new GetRequest(Net.url(pageURL), Shared.USER_AGENT, headers)).content;
+					pageContent = Web.request(Request.of(Net.uri(pageURL)).headers(headers).GET()).body();
 				} catch(SocketTimeoutException ex) {
 					timeoutException = ex;
 				}
@@ -173,7 +173,7 @@ public final class MarkizaPlusEngine implements MediaEngine {
 			if(timeoutException != null) throw timeoutException;
 			
 			if(pageContent == null) continue;
-			Document doc = Utils.parseDocument(pageContent, Net.baseURI(Net.uri(pageURL)));
+			Document doc = HTML.parse(pageContent, Net.baseURI(Net.uri(pageURL)));
 			elItems = doc.select(SEL_EPISODES);
 			
 			offset += itemsPerPage;
@@ -247,7 +247,7 @@ public final class MarkizaPlusEngine implements MediaEngine {
 	@Override
 	public ListTask<Program> getPrograms() throws Exception {
 		return ListTask.of((task) -> {
-			Document document = Utils.document(URL_PROGRAMS);
+			Document document = HTML.from(Net.uri(URL_PROGRAMS));
 			
 			for(Element elProgram : document.select(SEL_PROGRAMS)) {
 				String programURL = elProgram.absUrl("href");
@@ -267,10 +267,10 @@ public final class MarkizaPlusEngine implements MediaEngine {
 			for(String urlPath : List.of("videa/cele-epizody")) {
 				URI uri = Net.uri(Net.uriConcat(program.uri().toString(), urlPath));
 				
-				StringResponse response = Web.request(new GetRequest(Net.url(uri), Shared.USER_AGENT));
-				if(response.code != 200) continue; // Probably does not exist, ignore
+				Response.OfString response = Web.request(Request.of(uri).GET());
+				if(response.statusCode() != 200) continue; // Probably does not exist, ignore
 				
-				Document document = Utils.parseDocument(response.content, uri);
+				Document document = HTML.parse(response.body(), uri);
 				if(parseEpisodesPage(task, program, document, false) != 0) {
 					return;
 				}
@@ -279,10 +279,10 @@ public final class MarkizaPlusEngine implements MediaEngine {
 			// If no episodes were found, try to obtain them from the All videos page.
 			if(task.isEmpty()) {
 				URI uri = Net.uri(Net.uriConcat(program.uri().toString(), "videa"));
-				StringResponse response = Web.request(new GetRequest(Net.url(uri), Shared.USER_AGENT));
+				Response.OfString response = Web.request(Request.of(uri).GET());
 				
-				if(response.code == 200) {
-					Document document = Utils.parseDocument(response.content, uri);
+				if(response.statusCode() == 200) {
+					Document document = HTML.parse(response.body(), uri);
 					
 					if(parseEpisodesPage(task, program, document, true) != 0) {
 						return;
@@ -295,7 +295,7 @@ public final class MarkizaPlusEngine implements MediaEngine {
 	@Override
 	public ListTask<Media> getMedia(URI uri, Map<String, Object> data) throws Exception {
 		return ListTask.of((task) -> {
-			Document document = Utils.document(uri);
+			Document document = HTML.from(uri);
 			Element iframe = document.selectFirst(SEL_PLAYER_IFRAME);
 			
 			if(iframe == null) {
@@ -303,7 +303,7 @@ public final class MarkizaPlusEngine implements MediaEngine {
 			}
 			
 			String iframeUrl = iframe.absUrl("data-src");
-			String content = Web.request(new GetRequest(Net.url(iframeUrl), Shared.USER_AGENT)).content;
+			String content = Web.request(Request.of(Net.uri(iframeUrl)).GET()).body();
 			
 			if(content != null && !content.isEmpty()) {
 				int begin = content.indexOf(TXT_PLAYER_CONFIG_BEGIN) + TXT_PLAYER_CONFIG_BEGIN.length() - 1;

@@ -11,7 +11,6 @@ import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 
 import javafx.scene.image.Image;
-import sune.app.mediadown.Shared;
 import sune.app.mediadown.entity.Episode;
 import sune.app.mediadown.entity.MediaEngine;
 import sune.app.mediadown.entity.Program;
@@ -20,17 +19,17 @@ import sune.app.mediadown.media.MediaLanguage;
 import sune.app.mediadown.media.MediaMetadata;
 import sune.app.mediadown.media.MediaSource;
 import sune.app.mediadown.media.MediaUtils;
+import sune.app.mediadown.net.HTML;
 import sune.app.mediadown.net.Net;
 import sune.app.mediadown.net.Net.QueryArgument;
+import sune.app.mediadown.net.Web;
+import sune.app.mediadown.net.Web.Request;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.task.ListTask;
 import sune.app.mediadown.util.JavaScript;
 import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
-import sune.app.mediadown.util.Web;
-import sune.app.mediadown.util.Web.GetRequest;
-import sune.app.mediadown.util.Web.StringResponse;
 import sune.util.ssdf2.SSDCollection;
 
 public final class TNCZEngine implements MediaEngine {
@@ -127,7 +126,7 @@ public final class TNCZEngine implements MediaEngine {
 	@Override
 	public ListTask<Program> getPrograms() throws Exception {
 		return ListTask.of((task) -> {
-			Document document = Utils.document(URL_PROGRAMS);
+			Document document = HTML.from(Net.uri(URL_PROGRAMS));
 			
 			for(Element elProgram : document.select(SEL_PROGRAMS)) {
 				String programURL = elProgram.absUrl("href");
@@ -144,7 +143,7 @@ public final class TNCZEngine implements MediaEngine {
 	@Override
 	public ListTask<Episode> getEpisodes(Program program) throws Exception {
 		return ListTask.of((task) -> {
-			Document document = Utils.document(program.uri());
+			Document document = HTML.from(program.uri());
 			
 			// Always parse the episodes page itself
 			if(!parseEpisodeList(task, program, document)) {
@@ -178,8 +177,7 @@ public final class TNCZEngine implements MediaEngine {
 						"content", content
 					);
 					
-					StringResponse response = Web.request(new GetRequest(Net.url(url), Shared.USER_AGENT));
-					document = Utils.parseDocument(response.content, url);
+					document = HTML.from(Net.uri(url));
 					
 					if(!parseEpisodeList(task, program, document)) {
 						return; // Do not continue
@@ -194,7 +192,7 @@ public final class TNCZEngine implements MediaEngine {
 	@Override
 	public ListTask<Media> getMedia(URI uri, Map<String, Object> data) throws Exception {
 		return ListTask.of((task) -> {
-			Document document = Utils.document(uri);
+			Document document = HTML.from(uri);
 			Element iframe = document.selectFirst(SEL_PLAYER_IFRAME);
 			
 			if(iframe == null) {
@@ -202,7 +200,7 @@ public final class TNCZEngine implements MediaEngine {
 			}
 			
 			String iframeURL = iframe.absUrl("src");
-			String content = Web.request(new GetRequest(Net.url(iframeURL), Shared.USER_AGENT)).content;
+			String content = Web.request(Request.of(Net.uri(iframeURL)).GET()).body();
 			
 			if(content != null && !content.isEmpty()) {
 				int begin = content.indexOf(TXT_PLAYER_CONFIG_BEGIN) + TXT_PLAYER_CONFIG_BEGIN.length() - 1;

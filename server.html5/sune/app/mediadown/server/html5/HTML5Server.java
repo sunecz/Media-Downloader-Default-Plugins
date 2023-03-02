@@ -1,15 +1,15 @@
 package sune.app.mediadown.server.html5;
 
 import java.net.URI;
-import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 
 import javafx.scene.image.Image;
-import sune.app.mediadown.Shared;
 import sune.app.mediadown.entity.Server;
 import sune.app.mediadown.media.Media;
 import sune.app.mediadown.media.MediaFormat;
@@ -17,14 +17,14 @@ import sune.app.mediadown.media.MediaMetadata;
 import sune.app.mediadown.media.MediaQuality;
 import sune.app.mediadown.media.MediaSource;
 import sune.app.mediadown.media.VideoMedia;
+import sune.app.mediadown.net.HTML;
 import sune.app.mediadown.net.Net;
+import sune.app.mediadown.net.Web;
+import sune.app.mediadown.net.Web.Request;
+import sune.app.mediadown.net.Web.Response;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.task.ListTask;
-import sune.app.mediadown.util.Utils;
-import sune.app.mediadown.util.Web;
-import sune.app.mediadown.util.Web.GetRequest;
-import sune.app.mediadown.util.Web.StringResponse;
 
 public class HTML5Server implements Server {
 	
@@ -43,10 +43,10 @@ public class HTML5Server implements Server {
 	}
 	
 	private final Document getDocument(String url, Map<String, Object> data) throws Exception {
-		Map<String, String> headers = new LinkedHashMap<>();
-		data.forEach((k, v) -> headers.put(k, v != null ? v.toString() : ""));
-		StringResponse response = Web.request(new GetRequest(Net.url(url), Shared.USER_AGENT, headers));
-		return Utils.parseDocument(response.content, url);
+		Map<String, List<String>> headers = data.entrySet().stream()
+			.collect(Collectors.toMap(Map.Entry::getKey, (v) -> List.of(String.valueOf(v.getValue()))));
+		Response.OfString response = Web.request(Request.of(Net.uri(url)).headers(headers).GET());
+		return HTML.parse(response.body(), Net.uri(url));
 	}
 	
 	@Override

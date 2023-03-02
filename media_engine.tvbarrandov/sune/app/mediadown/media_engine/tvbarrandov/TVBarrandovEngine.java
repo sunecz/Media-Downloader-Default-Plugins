@@ -1,29 +1,16 @@
 package sune.app.mediadown.media_engine.tvbarrandov;
 
-import java.net.CookieManager;
 import java.net.URI;
-import java.net.URLEncoder;
-import java.net.http.HttpClient;
-import java.net.http.HttpClient.Redirect;
-import java.net.http.HttpClient.Version;
-import java.net.http.HttpRequest;
-import java.net.http.HttpRequest.BodyPublisher;
-import java.net.http.HttpRequest.BodyPublishers;
-import java.net.http.HttpResponse;
-import java.net.http.HttpResponse.BodyHandlers;
-import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
-import java.util.stream.Stream;
 
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -43,8 +30,6 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 import javafx.scene.text.Font;
 import sune.app.mediadown.MediaDownloader;
-import sune.app.mediadown.Shared;
-import sune.app.mediadown.concurrent.Threads;
 import sune.app.mediadown.configuration.Configuration.ConfigurationProperty;
 import sune.app.mediadown.entity.Episode;
 import sune.app.mediadown.entity.MediaEngine;
@@ -62,21 +47,21 @@ import sune.app.mediadown.media.MediaSource;
 import sune.app.mediadown.media.MediaType;
 import sune.app.mediadown.media.MediaUtils;
 import sune.app.mediadown.media.VideoMedia;
+import sune.app.mediadown.net.HTML;
 import sune.app.mediadown.net.Net;
+import sune.app.mediadown.net.Web;
+import sune.app.mediadown.net.Web.Request;
+import sune.app.mediadown.net.Web.Response;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginConfiguration;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.task.ListTask;
-import sune.app.mediadown.util.CheckedSupplier;
 import sune.app.mediadown.util.FXUtils;
 import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.JavaScript;
-import sune.app.mediadown.util.Reflection2;
-import sune.app.mediadown.util.Reflection3;
 import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Utils.Ignore;
-import sune.app.mediadown.util.Web;
 import sune.util.ssdf2.SSDCollection;
 
 public final class TVBarrandovEngine implements MediaEngine {
@@ -147,7 +132,7 @@ public final class TVBarrandovEngine implements MediaEngine {
 	@Override
 	public ListTask<Program> getPrograms() throws Exception {
 		return ListTask.of((task) -> {
-			Document document = FastWeb.document(Net.uri(URL_PROGRAMS), Map.of());
+			Document document = HTML.from(Net.uri(URL_PROGRAMS));
 			
 			for(Element elProgram : document.select(SELECTOR_PROGRAMS)) {
 				if(elProgram.selectFirst(".show-box") == null) continue;
@@ -166,7 +151,7 @@ public final class TVBarrandovEngine implements MediaEngine {
 	public ListTask<Episode> getEpisodes(Program program) throws Exception {
 		return ListTask.of((task) -> {
 			URI baseURI = program.uri();
-			Document document = FastWeb.document(baseURI.resolve(baseURI.getPath() + "/video?page=1"));
+			Document document = HTML.from(Net.resolve(baseURI, baseURI.getPath() + "/video?page=1"));
 			EpisodesObtainStrategy strategy;
 			
 			// Obtain the range of available pages
@@ -209,7 +194,7 @@ public final class TVBarrandovEngine implements MediaEngine {
 				throw new IllegalStateException("Unable to log in to the account");
 			}
 			
-			Document document = FastWeb.document(uri);
+			Document document = HTML.from(uri);
 			URI uriToProcess = null;
 			
 			// Check whether we've been redirected to the Premium Archive information page
@@ -235,8 +220,8 @@ public final class TVBarrandovEngine implements MediaEngine {
 					do {
 						// Construct the query URL for searching the term
 						URI requestURI = Net.uri(Utils.format(queryURL, "query", JavaScript.encodeURIComponent(query)));
-						HttpResponse<String> response = FastWeb.getRequest(requestURI, Map.of());
-						Document searchDocument = Utils.parseDocument(response.body(), response.uri());
+						Response.OfString response = Web.request(Request.of(requestURI).GET());
+						Document searchDocument = HTML.parse(response.body(), response.uri());
 						boolean isSearchPage = true;
 						
 						// If a consent page is shown, automatically bypass it
@@ -245,7 +230,7 @@ public final class TVBarrandovEngine implements MediaEngine {
 							
 							Element elMeta = searchDocument.selectFirst("noscript > meta");
 							URI consentURI = Net.uri(Utils.unquote(elMeta.attr("content").split(";", 2)[1].split("=", 2)[1]));
-							Document consentDocument = FastWeb.document(consentURI, Map.of());
+							Document consentDocument = HTML.from(consentURI);
 							Map<String, Object> args = new LinkedHashMap<>();
 							
 							forms:
@@ -273,17 +258,17 @@ public final class TVBarrandovEngine implements MediaEngine {
 								if(eom) break;
 							}
 							
-							Map<String, String> headers = Map.of(
-								"Content-Type", "application/x-www-form-urlencoded",
-								"Referer", consentURI.toString()
+							Map<String, List<String>> headers = Map.of(
+								"Referer", List.of(consentURI.toString())
 							);
 							
+							String body = Net.queryString(args);
 							URI postURI = Net.uri("https://consent.youtube.com/save");
-							response = FastWeb.postRequest(postURI, headers, args);
+							response = Web.request(Request.of(postURI).headers(headers).POST(body));
 							
 							// Retry the previous search request but now with rejecting the consent
-							response = FastWeb.getRequest(requestURI, Map.of());
-							searchDocument = Utils.parseDocument(response.body(), response.uri());
+							response = Web.request(Request.of(requestURI).GET());
+							searchDocument = HTML.parse(response.body(), response.uri());
 							isSearchPage = !response.uri().getHost().equals("consent.youtube.com");
 						}
 						
@@ -505,7 +490,7 @@ public final class TVBarrandovEngine implements MediaEngine {
 					i.compareTo(t) <= 0;
 					i = i.plusDays(1L)) {
 				long seconds = i.toEpochSecond(ZoneOffset.UTC);
-				Document doc = FastWeb.document(baseURI.resolve(baseURI.getPath() + "/video?showDay=" + seconds));
+				Document doc = HTML.from(Net.resolve(baseURI, baseURI.getPath() + "/video?showDay=" + seconds));
 				if(!parseEpisodesPage(task, program, doc))
 					return; // Aborted, do not continue
 			}
@@ -544,7 +529,7 @@ public final class TVBarrandovEngine implements MediaEngine {
 			// since more simultaneous connections result in higher times.
 			// As far as I know, there is no API to return all episodes at once.
 			for(int i = from; i <= to; ++i) {
-				Document doc = FastWeb.document(baseURI.resolve(baseURI.getPath() + "/video?page=" + i));
+				Document doc = HTML.from(Net.resolve(baseURI, baseURI.getPath() + "/video?page=" + i));
 				if(!parseEpisodesPage(task, program, doc))
 					return; // Aborted, do not continue
 			}
@@ -734,9 +719,8 @@ public final class TVBarrandovEngine implements MediaEngine {
 			if(username.isEmpty() || password.isEmpty())
 				return false;
 			
-			Map<String, String> headers = Map.of(
-	 			"Content-Type", "application/x-www-form-urlencoded",
-	 			"Referer", URL_REFERER
+			Map<String, List<String>> headers = Map.of(
+	 			"Referer", List.of(URL_REFERER)
 	 		);
 			
 			Map<String, Object> args = Map.of(
@@ -746,139 +730,9 @@ public final class TVBarrandovEngine implements MediaEngine {
 	            "prihlasit", ""
 	        );
 			
-			HttpResponse<String> response = FastWeb.postRequest(Net.uri(URL_LOGIN), headers, args);
+			String body = Net.queryString(args);
+			Response.OfString response = Web.request(Request.of(Net.uri(URL_LOGIN)).headers(headers).POST(body));
 			return response.uri().toString().equals(URL_REDIRECT);
-		}
-	}
-	
-	private static final class FastWeb {
-		
-		private static final ConcurrentVarLazyLoader<CookieManager> cookieManager
-			= ConcurrentVarLazyLoader.of(FastWeb::ensureCookieManager);
-		private static final ConcurrentVarLazyLoader<HttpClient> httpClient
-			= ConcurrentVarLazyLoader.of(FastWeb::buildHttpClient);
-		private static final ConcurrentVarLazyLoader<HttpRequest.Builder> httpRequestBuilder
-			= ConcurrentVarLazyLoader.of(FastWeb::buildHttpRequestBuilder);
-		
-		// Forbid anyone to create an instance of this class
-		private FastWeb() {
-		}
-		
-		private static final CookieManager ensureCookieManager() throws Exception {
-			Reflection3.invokeStatic(Web.class, "ensureCookieManager");
-			return (CookieManager) Reflection2.getField(Web.class, null, "COOKIE_MANAGER");
-		}
-		
-		private static final HttpClient buildHttpClient() throws Exception {
-			return HttpClient.newBuilder()
-						.connectTimeout(Duration.ofMillis(5000))
-						.executor(Threads.Pools.newWorkStealing())
-						.followRedirects(Redirect.NORMAL)
-						.cookieHandler(cookieManager.value())
-						.version(Version.HTTP_2)
-						.build();
-		}
-		
-		private static final HttpRequest.Builder buildHttpRequestBuilder() throws Exception {
-			return HttpRequest.newBuilder()
-						.setHeader("User-Agent", Shared.USER_AGENT);
-		}
-		
-		private static final HttpRequest.Builder maybeAddHeaders(HttpRequest.Builder request, Map<String, String> headers) {
-			if(!headers.isEmpty()) {
-				request.headers(
-					headers.entrySet().stream()
-						.flatMap((e) -> Stream.of(e.getKey(), e.getValue()))
-						.toArray(String[]::new)
-				);
-			}
-			return request;
-		}
-		
-		public static final String bodyString(Map<String, Object> data) {
-			StringBuilder sb = new StringBuilder();
-			
-			boolean first = true;
-			for(Entry<String, Object> e : data.entrySet()) {
-				if(first) first = false; else sb.append('&');
-				sb.append(URLEncoder.encode(e.getKey(), Shared.CHARSET))
-				  .append('=')
-				  .append(URLEncoder.encode(Objects.toString(e.getValue()), Shared.CHARSET));
-			}
-			
-			return sb.toString();
-		}
-		
-		public static final HttpResponse<String> getRequest(URI uri, Map<String, String> headers) throws Exception {
-			HttpRequest request = maybeAddHeaders(httpRequestBuilder.value().copy().GET().uri(uri), headers).build();
-			HttpResponse<String> response = httpClient.value().sendAsync(request, BodyHandlers.ofString(Shared.CHARSET)).join();
-			return response;
-		}
-		
-		@SuppressWarnings("unused")
-		public static final String get(URI uri, Map<String, String> headers) throws Exception {
-			return getRequest(uri, headers).body();
-		}
-		
-		public static final Document document(URI uri, Map<String, String> headers) throws Exception {
-			HttpResponse<String> response = getRequest(uri, headers);
-			return Utils.parseDocument(response.body(), response.uri());
-		}
-		
-		public static final Document document(URI uri) throws Exception {
-			return document(uri, Map.of());
-		}
-		
-		public static final HttpResponse<String> postRequest(URI uri, Map<String, String> headers,
-				Map<String, Object> data) throws Exception {
-			BodyPublisher body = BodyPublishers.ofString(bodyString(data), Shared.CHARSET);
-			HttpRequest request = maybeAddHeaders(httpRequestBuilder.value().copy().POST(body).uri(uri), headers).build();
-			HttpResponse<String> response = httpClient.value().sendAsync(request, BodyHandlers.ofString(Shared.CHARSET)).join();
-			return response;
-		}
-		
-		private static final class ConcurrentVarLazyLoader<T> {
-			
-			private final AtomicBoolean isSet = new AtomicBoolean();
-			private final AtomicBoolean isSetting = new AtomicBoolean();
-			private volatile T value;
-			
-			private final CheckedSupplier<T> supplier;
-			
-			private ConcurrentVarLazyLoader(CheckedSupplier<T> supplier) {
-				this.supplier = Objects.requireNonNull(supplier);
-			}
-			
-			public static final <T> ConcurrentVarLazyLoader<T> of(CheckedSupplier<T> supplier) {
-				return new ConcurrentVarLazyLoader<>(supplier);
-			}
-			
-			public final T value() throws Exception {
-				if(isSet.get()) return value; // Already set
-				
-				while(!isSet.get()
-							&& !isSetting.compareAndSet(false, true)) {
-					synchronized(isSetting) {
-						try {
-							isSetting.wait();
-						} catch(InterruptedException ex) {
-							// Ignore
-						}
-					}
-					if(isSet.get()) return value; // Already set
-				}
-				
-				try {
-					value = supplier.get();
-					isSet.set(true);
-					return value;
-				} finally {
-					isSetting.set(false);
-					synchronized(isSetting) {
-						isSetting.notifyAll();
-					}
-				}
-			}
 		}
 	}
 	

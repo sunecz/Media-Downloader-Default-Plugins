@@ -6,7 +6,6 @@ import java.lang.ref.SoftReference;
 import java.lang.reflect.Constructor;
 import java.math.BigInteger;
 import java.net.URI;
-import java.net.URL;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -30,7 +29,6 @@ import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 
 import javafx.scene.image.Image;
-import sune.app.mediadown.Shared;
 import sune.app.mediadown.concurrent.Threads;
 import sune.app.mediadown.entity.Episode;
 import sune.app.mediadown.entity.MediaEngine;
@@ -43,7 +41,11 @@ import sune.app.mediadown.media.MediaMetadata;
 import sune.app.mediadown.media.MediaSource;
 import sune.app.mediadown.media.MediaUtils;
 import sune.app.mediadown.media.SubtitlesMedia;
+import sune.app.mediadown.net.HTML;
 import sune.app.mediadown.net.Net;
+import sune.app.mediadown.net.Web;
+import sune.app.mediadown.net.Web.Request;
+import sune.app.mediadown.net.Web.Response;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.task.ListTask;
@@ -54,12 +56,6 @@ import sune.app.mediadown.util.Reflection;
 import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Utils.Ignore;
-import sune.app.mediadown.util.Web;
-import sune.app.mediadown.util.Web.GetRequest;
-import sune.app.mediadown.util.Web.PostRequest;
-import sune.app.mediadown.util.Web.Request;
-import sune.app.mediadown.util.Web.StreamResponse;
-import sune.app.mediadown.util.Web.StringResponse;
 import sune.util.ssdf2.SSDCollection;
 import sune.util.ssdf2.SSDF;
 import sune.util.ssdf2.SSDObject;
@@ -120,7 +116,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 	public ListTask<Episode> getEpisodes(Program program) throws Exception {
 		return ListTask.of((task) -> {
 			// We need to get the IDEC of the given program first
-			Document document = Utils.document(program.uri());
+			Document document = HTML.from(program.uri());
 			WebMediaMetadata metadata = WebMediaMetadataExtractor.extract(document);
 			API.getEpisodes(task, program, metadata.IDEC());
 		});
@@ -134,7 +130,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			CT ct = Arrays.stream(SUPPORTED_WEBS).filter((c) -> c.isCompatible(uri)).findFirst().orElse(null);
 			
 			if(ct != null) {
-				ct.getExtractJobs(Utils.document(uri), jobs);
+				ct.getExtractJobs(HTML.from(uri), jobs);
 			}
 			
 			for(ExtractJob job : jobs) {
@@ -146,12 +142,12 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 						
 						if(info != null) {
 							PlaylistData playlistData = PlaylistDataGetter.get(videoURL, info);
-							Map<String, String> headers = Utils.toMap("X-Requested-With", "XMLHttpRequest");
-							Request request = new GetRequest(Net.url(playlistData.url), Shared.USER_AGENT, headers);
+							Map<String, List<String>> headers = Map.of("X-Requested-With", List.of("XMLHttpRequest"));
+							Request request = Request.of(Net.uri(playlistData.url)).headers(headers).GET();
 							
 							SSDCollection json;
-							try(StreamResponse response = Web.requestStream(request)) {
-								json = SSDF.readJSON(response.stream);
+							try(Response.OfStream response = Web.requestStream(request)) {
+								json = SSDF.readJSON(response.stream());
 							}
 							
 							SSDCollection playlist = json.getDirectCollection("playlist");
@@ -429,11 +425,18 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		
 		private static final SSDCollection doOperation(String operationName, String query, Object... variables) throws Exception {
 			String body = createRequestBody(operationName, query, variables);
-			Map<String, String> headers = Map.of("Content-Type", "application/json", "Referer", REFERER);
-			StringResponse response = Web.request(new PostRequest(Net.url(URL), Shared.USER_AGENT, null, headers).toBodyRequest(body));
-			if(response.code != 200)
-				throw new IllegalStateException("API returned non-OK code: " + response.code + ". Body: " + response.content);
-			return JSON.read(response.content);
+			String contentType = "application/json";
+			Map<String, List<String>> headers = Map.of("Referer", List.of(REFERER));
+			try(Response.OfStream response = Web.requestStream(Request.of(Net.uri(URL)).headers(headers).POST(body, contentType))) {
+				if(response.statusCode() != 200) {
+					throw new IllegalStateException(
+						"API returned non-OK code: " + response.statusCode() + ".\n" +
+						"Body: " + Utils.streamToString(response.stream())
+					);
+				}
+				
+				return JSON.read(response.stream());
+			}
 		}
 		
 		public static final CollectionAPIResult getProgramsWithCategory(int categoryId, int offset, int length) throws Exception {
@@ -681,7 +684,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		}
 		
 		public static final SourceInfo acquire(String url) {
-			Document document = Utils.document(url);
+			Document document = HTML.from(Net.uri(url));
 			SourceInfo info = new SourceInfo();
 			for(Element script : document.select("script:not([src])")) {
 				String content = script.html();
@@ -726,7 +729,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		public static PlaylistData get(String url, SourceInfo info) throws Exception {
 			String requestURLRelative = Net.url(url).getPath();
 			String endpointURL = BASE_URL + info.baseURL + "/ajax/get-client-playlist/" + info.wwwServerGet;
-			Map<String, String> params = Utils.toMap(
+			Map<String, Object> params = Utils.toMap(
 				"playlist[0][type]", info.type,
 				"playlist[0][id]", info.id,
 				"requestUrl", requestURLRelative,
@@ -734,19 +737,20 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 				"type", "html",
 				"canPlayDRM", "false"
 			);
-			Map<String, String> headers = Utils.toMap(
-				"X-Requested-With", "XMLHttpRequest",
-				"x-addr", "127.0.0.1"
+			Map<String, List<String>> headers = Utils.toMap(
+				"X-Requested-With", List.of("XMLHttpRequest"),
+				"x-addr", List.of("127.0.0.1")
 			);
-			Request request = new PostRequest(Net.url(endpointURL), Shared.USER_AGENT, params, headers);
+			String body = Net.queryString(params);
+			Request request = Request.of(Net.uri(endpointURL)).headers(headers).POST(body);
 			
 			SSDCollection json;
-			try(StreamResponse response = Web.requestStream(request)) {
-				if(response.code != 200) {
+			try(Response.OfStream response = Web.requestStream(request)) {
+				if(response.statusCode() != 200) {
 					return null;
 				}
 				
-				json = SSDF.readJSON(response.stream);
+				json = SSDF.readJSON(response.stream());
 			}
 			
 			PlaylistData data = new PlaylistData();
@@ -815,8 +819,8 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		}
 		
 		public static final String obtainHash() throws Exception {
-			StringResponse response = Web.request(new GetRequest(Net.url(URL_PLAYER_HASH), Shared.USER_AGENT));
-			return response != null ? response.content : null;
+			Response.OfString response = Web.request(Request.of(Net.uri(URL_PLAYER_HASH)).GET());
+			return response != null ? response.body() : null;
 		}
 		
 		public static final String getURL(String idec, String indexId) throws Exception {
@@ -1137,14 +1141,14 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			
 			// Obtain all the episodes to extract media sources from
 			ListTask<Episode> task = ListTask.of((t) -> {
-				API.getEpisodes(t, program, WebMediaMetadataExtractor.extract(Utils.document(program.uri())).IDEC());
+				API.getEpisodes(t, program, WebMediaMetadataExtractor.extract(HTML.from(program.uri())).IDEC());
 			});
 			
 			task.startAndWait();
 			
 			CT_Porady ctInstance = CT_Porady.getInstance();
 			for(Episode episode : task.list()) {
-				ctInstance.getExtractJobs(Utils.document(episode.uri()), jobs);
+				ctInstance.getExtractJobs(HTML.from(episode.uri()), jobs);
 			}
 		}
 		
@@ -1250,7 +1254,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 				}
 			}
 			
-			URL apiURL = Net.url(API_URL);
+			URI apiUri = Net.uri(API_URL);
 			for(SSDCollection item : items) {
 				// Construct the HTTP POST body as a JSON object
 				SSDCollection coll = SSDCollection.empty();
@@ -1262,10 +1266,11 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 				array.add(item);
 				coll.setDirect("contentType", type);
 				coll.setDirect("items", array);
-				Request request = new PostRequest(apiURL, Shared.USER_AGENT, Map.of("data", coll.toJSON(true)));
+				String body = Net.queryString("data", coll.toJSON(true));
+				Request request = Request.of(apiUri).POST(body);
 				// Do the request to obtain the stream URLs
-				try(StreamResponse response = Web.requestStream(request)) {
-					SSDCollection result = JSON.read(response.stream);
+				try(Response.OfStream response = Web.requestStream(request)) {
+					SSDCollection result = JSON.read(response.stream());
 					for(SSDCollection playlistItem : result.getCollection("RESULT.playlist").collectionsIterable()) {
 						String streamURL = playlistItem.getString("streamUrls.main");
 						jobs.add(new ExtractJob(streamURL, ExtractMethod.NONE, title));

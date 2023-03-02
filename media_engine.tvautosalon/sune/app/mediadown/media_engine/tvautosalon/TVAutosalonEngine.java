@@ -12,7 +12,6 @@ import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 
 import javafx.scene.image.Image;
-import sune.app.mediadown.Shared;
 import sune.app.mediadown.entity.Episode;
 import sune.app.mediadown.entity.MediaEngine;
 import sune.app.mediadown.entity.Program;
@@ -25,7 +24,10 @@ import sune.app.mediadown.media.MediaSource;
 import sune.app.mediadown.media.MediaType;
 import sune.app.mediadown.media.MediaUtils;
 import sune.app.mediadown.media.VideoMedia;
+import sune.app.mediadown.net.HTML;
 import sune.app.mediadown.net.Net;
+import sune.app.mediadown.net.Web;
+import sune.app.mediadown.net.Web.Request;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.task.ListTask;
@@ -35,8 +37,6 @@ import sune.app.mediadown.util.Pair;
 import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Utils.JS;
-import sune.app.mediadown.util.Web;
-import sune.app.mediadown.util.Web.GetRequest;
 import sune.util.ssdf2.SSDCollection;
 
 public final class TVAutosalonEngine implements MediaEngine {
@@ -156,7 +156,7 @@ public final class TVAutosalonEngine implements MediaEngine {
 		return ListTask.of((task) -> {
 			final Set<String> ignore = Set.of("/experti");
 			
-			Document document = Utils.document(URL_HOME);
+			Document document = HTML.from(Net.uri(URL_HOME));
 			for(Element elNavItemHeader : document.select(SELECTOR_PROGRAMS)) {
 				String title = elNavItemHeader.text();
 				
@@ -188,7 +188,7 @@ public final class TVAutosalonEngine implements MediaEngine {
 	@Override
 	public ListTask<Episode> getEpisodes(Program program) throws Exception {
 		return ListTask.of((task) -> {
-			Document document = Utils.document(program.uri());
+			Document document = HTML.from(program.uri());
 			List<Pair<URI, String>> seasons = new ArrayList<>();
 			
 			// Find all seasons, if any exist
@@ -206,7 +206,7 @@ public final class TVAutosalonEngine implements MediaEngine {
 			for(Pair<URI, String> season : seasons) {
 				URI baseURI = season.a != null ? season.a : program.uri();
 				String seasonTitle = season.b != null ? season.b + " - " : "";
-				Document doc = season.a != null ? Utils.document(season.a) : document;
+				Document doc = season.a != null ? HTML.from(season.a) : document;
 				boolean hasMorePages;
 				int page = 1;
 				
@@ -214,7 +214,7 @@ public final class TVAutosalonEngine implements MediaEngine {
 					hasMorePages = false;
 					
 					if(page > 1) {
-						doc = Utils.document(baseURI.resolve(baseURI.getPath() + '/' + page));
+						doc = HTML.from(Net.resolve(baseURI, baseURI.getPath() + '/' + page));
 					}
 					
 					for(Element elEpisode : doc.select(SELECTOR_EPISODES)) {
@@ -252,7 +252,7 @@ public final class TVAutosalonEngine implements MediaEngine {
 	@Override
 	public ListTask<Media> getMedia(URI uri, Map<String, Object> data) throws Exception {
 		return ListTask.of((task) -> {
-			Document document = Utils.document(uri);
+			Document document = HTML.from(uri);
 			Element elScript = document.selectFirst("#video > script");
 			String src = null;
 			
@@ -266,7 +266,7 @@ public final class TVAutosalonEngine implements MediaEngine {
 			}
 			
 			String frameURL = null;
-			String script = Web.request(new GetRequest(Net.url(src), Shared.USER_AGENT)).content;
+			String script = Web.request(Request.of(Net.uri(src)).GET()).body();
 			int index;
 			if((index = script.indexOf("{\"")) >= 0) {
 				String configContent = Utils.bracketSubstring(script, '{', '}', false, index, script.length());
@@ -303,8 +303,8 @@ public final class TVAutosalonEngine implements MediaEngine {
 			}
 
 			// Send the request to obtain the frame's content
-			Map<String, String> headers = Map.of("Referer", URL_REFERER);
-			String content = Web.request(new GetRequest(Net.url(frameURL), Shared.USER_AGENT, headers)).content;
+			Map<String, List<String>> headers = Map.of("Referer", List.of(URL_REFERER));
+			String content = Web.request(Request.of(Net.uri(frameURL)).headers(headers).GET()).body();
 			
 			SSDCollection playerVideos = null;
 			if((index = content.indexOf("var playerVideos")) >= 0) {

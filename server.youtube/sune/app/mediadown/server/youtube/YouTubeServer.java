@@ -17,7 +17,6 @@ import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 
 import javafx.scene.image.Image;
-import sune.app.mediadown.Shared;
 import sune.app.mediadown.download.segment.FileSegment;
 import sune.app.mediadown.download.segment.FileSegmentsHolder;
 import sune.app.mediadown.download.segment.RemoteFileSegment;
@@ -35,8 +34,11 @@ import sune.app.mediadown.media.MediaSource;
 import sune.app.mediadown.media.MediaType;
 import sune.app.mediadown.media.VideoMedia;
 import sune.app.mediadown.media.VideoMediaContainer;
+import sune.app.mediadown.net.HTML;
 import sune.app.mediadown.net.Net;
 import sune.app.mediadown.net.Net.QueryArgument;
+import sune.app.mediadown.net.Web;
+import sune.app.mediadown.net.Web.Request;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.task.ListTask;
@@ -47,10 +49,6 @@ import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Tuple;
 import sune.app.mediadown.util.UserAgent;
 import sune.app.mediadown.util.Utils;
-import sune.app.mediadown.util.Web;
-import sune.app.mediadown.util.Web.GetRequest;
-import sune.app.mediadown.util.Web.HeadRequest;
-import sune.app.mediadown.util.Web.StringResponse;
 import sune.util.ssdf2.SSDCollection;
 
 public class YouTubeServer implements Server {
@@ -83,8 +81,7 @@ public class YouTubeServer implements Server {
 	public ListTask<Media> getMedia(URI uri, Map<String, Object> data) throws Exception {
 		return ListTask.of((task) -> {
 			String url = maybeTransformEmbedURL(uri.toString());
-			StringResponse response = Web.request(new GetRequest(Net.url(url), Shared.USER_AGENT));
-			Document document = Utils.parseDocument(response.content, url);
+			Document document = HTML.from(Net.uri(url));
 			Signature.Context ctx = Signature.Extractor.extract(document);
 			Elements scripts = document.getElementsByTag("script");
 			Regex patternConfigVariable = Regex.of("var ytInitialPlayerResponse\\s+=\\s+\\{");
@@ -310,7 +307,7 @@ public class YouTubeServer implements Server {
 				String segUrl = url + "&sq=0";
 				
 				// (2) Read the first segment's content and extract information about segments
-				String content = Web.request(new GetRequest(Net.url(segUrl))).content;
+				String content = Web.request(Request.of(Net.uri(segUrl)).GET()).body();
 				Matcher matcher = REGEX_OTF_SEGMENTS.matcher(content);
 				
 				if(!matcher.find()) {
@@ -340,7 +337,7 @@ public class YouTubeServer implements Server {
 					.orElse(MediaConstants.UNKNOWN_SIZE);
 				
 				if(clen == MediaConstants.UNKNOWN_SIZE) {
-					clen = Web.size(new HeadRequest(Net.url(url), UserAgent.CHROME));
+					clen = Web.size(Request.of(Net.uri(url)).userAgent(UserAgent.CHROME).HEAD());
 				}
 				
 				List<RemoteFileSegment> segments = new ArrayList<>();
@@ -522,9 +519,9 @@ public class YouTubeServer implements Server {
 		private static final String obtainBaseJSContent(Document document) throws Exception {
 			Element script;
 			return (script = document.selectFirst("script[src*=\"player_ias\"]")) != null
-						? Web.request(new GetRequest(Net.url("https://youtube.com" + script.attr("src")),
-						                             UserAgent.CHROME))
-						     .content
+						? Web.request(Request.of(Net.uri("https://youtube.com" + script.attr("src")))
+						                     .userAgent(UserAgent.CHROME).GET())
+						     .body()
 						: null;
 		}
 		

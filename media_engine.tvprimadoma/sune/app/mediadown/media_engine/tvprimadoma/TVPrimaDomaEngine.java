@@ -9,7 +9,6 @@ import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 
 import javafx.scene.image.Image;
-import sune.app.mediadown.Shared;
 import sune.app.mediadown.entity.Episode;
 import sune.app.mediadown.entity.MediaEngine;
 import sune.app.mediadown.entity.MediaGetter;
@@ -24,7 +23,10 @@ import sune.app.mediadown.media.MediaSource;
 import sune.app.mediadown.media.MediaType;
 import sune.app.mediadown.media.MediaUtils;
 import sune.app.mediadown.media.VideoMedia;
+import sune.app.mediadown.net.HTML;
 import sune.app.mediadown.net.Net;
+import sune.app.mediadown.net.Web;
+import sune.app.mediadown.net.Web.Request;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.task.ListTask;
@@ -32,8 +34,6 @@ import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.JavaScript;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Utils.JS;
-import sune.app.mediadown.util.Web;
-import sune.app.mediadown.util.Web.GetRequest;
 import sune.util.ssdf2.SSDCollection;
 
 public final class TVPrimaDomaEngine implements MediaEngine {
@@ -81,7 +81,7 @@ public final class TVPrimaDomaEngine implements MediaEngine {
 	@Override
 	public ListTask<Program> getPrograms() throws Exception {
 		return ListTask.of((task) -> {
-			Document document = Utils.document(Net.url(URL_PROGRAMS));
+			Document document = HTML.from(Net.uri(URL_PROGRAMS));
 			
 			for(Element elProgram : document.select(SELECTOR_PROGRAMS)) {
 				Element elTitle = elProgram.selectFirst("h3");
@@ -99,7 +99,7 @@ public final class TVPrimaDomaEngine implements MediaEngine {
 	@Override
 	public ListTask<Episode> getEpisodes(Program program) throws Exception {
 		return ListTask.of((task) -> {
-			Document document = Utils.document(program.uri());
+			Document document = HTML.from(program.uri());
 			
 			for(Element elContainer : document.select(SELECTOR_EPISODES_CONTAINERS)) {
 				Element elContainerTitle = elContainer.selectFirst("h2");
@@ -128,7 +128,7 @@ public final class TVPrimaDomaEngine implements MediaEngine {
 					.absUrl("href").replaceFirst("\\?page=\\d+", "?page=%{page}d");
 				
 				for(int page = 2; page <= maxPage; ++page) {
-					Document pageDocument = Utils.document(Utils.format(urlBase, "page", page));
+					Document pageDocument = HTML.from(Net.uri(Utils.format(urlBase, "page", page)));
 					Element elContainer = pageDocument.selectFirst(SELECTOR_EPISODES_CONTAINERS);
 					
 					if(!parseEpisodesList(task, elContainer, program)) {
@@ -142,7 +142,7 @@ public final class TVPrimaDomaEngine implements MediaEngine {
 	@Override
 	public ListTask<Media> getMedia(URI uri, Map<String, Object> data) throws Exception {
 		return ListTask.of((task) -> {
-			Document document = Utils.document(uri);
+			Document document = HTML.from(uri);
 			
 			// The video can be embedded from Stream.cz
 			Element elIframe = document.selectFirst(".container div > iframe");
@@ -152,7 +152,7 @@ public final class TVPrimaDomaEngine implements MediaEngine {
 				// The video can also be embedded from Stream.cz
 				if(iframeSrc.startsWith("https://www.stream.cz")) {
 					// Must transform the URL first to the canonical (one visited directly from Stream.cz)
-					Document iframeDocument = Utils.document(iframeSrc);
+					Document iframeDocument = HTML.from(Net.uri(iframeSrc));
 					String canonicalUrl = iframeDocument.selectFirst("link[rel='canonical']").absUrl("href");
 					URI canonicalUri = Net.uri(canonicalUrl);
 					
@@ -294,7 +294,7 @@ public final class TVPrimaDomaEngine implements MediaEngine {
 		
 		public static final SSDCollection videoList(String url) throws Exception {
 			String frameURL = null;
-			String script = Web.request(new GetRequest(Net.url(url), Shared.USER_AGENT)).content;
+			String script = Web.request(Request.of(Net.uri(url)).GET()).body();
 			int index;
 			if((index = script.indexOf("{\"")) >= 0) {
 				String configContent = Utils.bracketSubstring(script, '{', '}', false, index, script.length());
@@ -331,8 +331,8 @@ public final class TVPrimaDomaEngine implements MediaEngine {
 			}
 
 			// Send the request to obtain the frame's content
-			Map<String, String> headers = Map.of("Referer", URL_REFERER);
-			String content = Web.request(new GetRequest(Net.url(frameURL), Shared.USER_AGENT, headers)).content;
+			Map<String, List<String>> headers = Map.of("Referer", List.of(URL_REFERER));
+			String content = Web.request(Request.of(Net.uri(frameURL)).headers(headers).GET()).body();
 			
 			SSDCollection playerVideos = null;
 			if((index = content.indexOf("var playerVideos")) >= 0) {

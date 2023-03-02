@@ -1,6 +1,5 @@
 package sune.app.mediadown.drm_engine.novavoyo;
 
-import java.net.CookieManager;
 import java.net.CookieStore;
 import java.net.HttpCookie;
 import java.net.URI;
@@ -16,15 +15,14 @@ import java.util.stream.Collectors;
 import org.cef.browser.CefFrame;
 import org.cef.network.CefCookie;
 import org.cef.network.CefCookieManager;
-import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 
 import io.netty.handler.codec.http.FullHttpRequest;
 import sune.app.mediadown.media.Media;
+import sune.app.mediadown.net.HTML;
 import sune.app.mediadown.net.Net;
-import sune.app.mediadown.util.Reflection2;
+import sune.app.mediadown.net.Web;
 import sune.app.mediadown.util.Reflection3;
-import sune.app.mediadown.util.Web;
 import sune.app.mediadownloader.drm.DRMBrowser;
 import sune.app.mediadownloader.drm.DRMContext;
 import sune.app.mediadownloader.drm.DRMEngine;
@@ -44,16 +42,6 @@ public class NovaVoyoDRMEngine implements DRMEngine {
 		return (boolean) Reflection3.invokeStatic(clazz, "login");
 	}
 	
-	private static final Document document(URI uri) throws Exception {
-		Class<?> clazz = Class.forName("sune.app.mediadown.media_engine.novavoyo.NovaVoyoServer$FastWeb");
-		return (Document) Reflection3.invokeStatic(clazz, "document", new Class[] { URI.class }, uri);
-	}
-	
-	private static final CookieManager ensureCookieManager() throws Exception {
-		Reflection3.invokeStatic(Web.class, "ensureCookieManager");
-		return (CookieManager) Reflection2.getField(Web.class, null, "COOKIE_MANAGER");
-	}
-	
 	private static final List<HttpCookie> savedCookies() throws Exception {
 		URI uri = Net.uri("https://voyo.nova.cz/muj-profil");
 		
@@ -66,7 +54,7 @@ public class NovaVoyoDRMEngine implements DRMEngine {
 		domain = parts[i] + '.' + parts[i + 1];
 		
 		String tlDomain = domain;
-		CookieStore cookieStore = ensureCookieManager().getCookieStore();
+		CookieStore cookieStore = Web.cookieManager().getCookieStore();
 		return cookieStore.getCookies().stream()
 			.filter((c) -> c.getDomain().endsWith(tlDomain))
 			.collect(Collectors.toList());
@@ -182,7 +170,7 @@ public class NovaVoyoDRMEngine implements DRMEngine {
 					setCefCookies(url, savedCookies());
 					
 					// Obtain the iframe element and get its URL
-					Element elIframe = document(Net.uri(url)).selectFirst(".js-detail-player .iframe-wrap iframe");
+					Element elIframe = HTML.from(Net.uri(url)).selectFirst(".js-detail-player .iframe-wrap iframe");
 					if(elIframe != null) {
 						embedUrl = elIframe.absUrl("src");
 					}

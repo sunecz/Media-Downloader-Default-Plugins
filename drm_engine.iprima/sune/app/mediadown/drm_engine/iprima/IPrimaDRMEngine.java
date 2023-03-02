@@ -1,6 +1,5 @@
 package sune.app.mediadown.drm_engine.iprima;
 
-import java.net.CookieManager;
 import java.net.CookieStore;
 import java.net.HttpCookie;
 import java.net.URI;
@@ -23,10 +22,8 @@ import sune.app.mediadown.media.Media;
 import sune.app.mediadown.media_engine.iprima.IPrimaAuthenticator;
 import sune.app.mediadown.media_engine.iprima.IPrimaAuthenticator.SessionData;
 import sune.app.mediadown.net.Net;
+import sune.app.mediadown.net.Web;
 import sune.app.mediadown.util.JSON;
-import sune.app.mediadown.util.Reflection2;
-import sune.app.mediadown.util.Reflection3;
-import sune.app.mediadown.util.Web;
 import sune.app.mediadownloader.drm.DRMBrowser;
 import sune.app.mediadownloader.drm.DRMContext;
 import sune.app.mediadownloader.drm.DRMEngine;
@@ -46,11 +43,6 @@ public class IPrimaDRMEngine implements DRMEngine {
 		return IPrimaAuthenticator.getSessionData();
 	}
 	
-	private static final CookieManager ensureCookieManager() throws Exception {
-		Reflection3.invokeStatic(Web.class, "ensureCookieManager");
-		return (CookieManager) Reflection2.getField(Web.class, null, "COOKIE_MANAGER");
-	}
-	
 	private static final List<HttpCookie> savedCookies(URI uri) throws Exception {
 		// Get the top-level domain so that all the cookies are included
 		String domain = uri.getHost();
@@ -61,7 +53,7 @@ public class IPrimaDRMEngine implements DRMEngine {
 		domain = parts[i] + '.' + parts[i + 1];
 		
 		String tlDomain = domain;
-		CookieStore cookieStore = ensureCookieManager().getCookieStore();
+		CookieStore cookieStore = Web.cookieManager().getCookieStore();
 		return cookieStore.getCookies().stream()
 			.filter((c) -> c.getDomain().endsWith(tlDomain))
 			.collect(Collectors.toList());
