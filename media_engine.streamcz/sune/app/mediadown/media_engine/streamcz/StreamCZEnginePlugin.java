@@ -7,7 +7,7 @@ import sune.app.mediadown.plugin.PluginBase;
 
 @Plugin(name          = "media_engine.streamcz",
 	    title         = "plugin.media_engine.streamcz.title",
-	    version       = "00.02.08-0004",
+	    version       = "00.02.08-0005",
 	    author        = "Sune",
 	    updateBaseURL = "https://app.sune.tech/mediadown/dat/plugin/0002/media_engine/streamcz/",
 	    updatable     = true,
