@@ -32,13 +32,16 @@ public final class WMSDownloaderPlugin extends PluginBase {
 		
 		builder.addProperty(ConfigurationProperty.ofInteger("maxRetryAttempts")
 			.inGroup(ApplicationConfigurationAccessor.GROUP_DOWNLOAD)
-			.withDefaultValue(DEFAULT_MAX_RETRY_ATTEMPTS));
+			.withDefaultValue(DEFAULT_MAX_RETRY_ATTEMPTS)
+			.withOrder(60));
 		builder.addProperty(ConfigurationProperty.ofBoolean("asyncTotalSize")
 			.inGroup(ApplicationConfigurationAccessor.GROUP_DOWNLOAD)
-			.withDefaultValue(DEFAULT_ASYNC_TOTAL_SIZE));
+			.withDefaultValue(DEFAULT_ASYNC_TOTAL_SIZE)
+			.withOrder(31));
 		builder.addProperty(ConfigurationProperty.ofInteger("waitOnRetryMs")
 			.inGroup(ApplicationConfigurationAccessor.GROUP_DOWNLOAD)
-			.withDefaultValue(DEFAULT_WAIT_ON_RETRY_MS));
+			.withDefaultValue(DEFAULT_WAIT_ON_RETRY_MS)
+			.withOrder(80));
 		
 		configuration = builder;
 	}
