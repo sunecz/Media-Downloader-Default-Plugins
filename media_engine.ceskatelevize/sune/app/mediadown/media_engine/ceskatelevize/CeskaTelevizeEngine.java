@@ -126,13 +126,15 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 	@Override
 	public ListTask<Media> getMedia(URI uri, Map<String, Object> data) throws Exception {
 		return ListTask.of((task) -> {
-			List<ExtractJob> jobs = new ArrayList<>();
-			MediaSource source = MediaSource.of(this);
 			CT ct = Arrays.stream(SUPPORTED_WEBS).filter((c) -> c.isCompatible(uri)).findFirst().orElse(null);
 			
-			if(ct != null) {
-				ct.getExtractJobs(HTML.from(uri), jobs);
+			if(ct == null) {
+				return; // Not supported
 			}
+			
+			List<ExtractJob> jobs = new ArrayList<>();
+			MediaSource source = MediaSource.of(this);
+			ct.getExtractJobs(HTML.from(uri), jobs);
 			
 			for(ExtractJob job : jobs) {
 				String videoURL = job.url;
@@ -141,71 +143,79 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 					case SOURCE_INFO: {
 						SourceInfo info = SourceInfoExtractor.acquire(videoURL);
 						
-						if(info != null) {
-							PlaylistData playlistData = PlaylistDataGetter.get(videoURL, info);
-							HttpHeaders headers = Web.Headers.ofSingle("X-Requested-With", "XMLHttpRequest");
-							Request request = Request.of(Net.uri(playlistData.url)).headers(headers).GET();
+						if(info == null) {
+							return; // Cannot obtain required information
+						}
+						
+						PlaylistData playlistData = PlaylistDataGetter.get(videoURL, info);
+						HttpHeaders headers = Web.Headers.ofSingle("X-Requested-With", "XMLHttpRequest");
+						Request request = Request.of(Net.uri(playlistData.url)).headers(headers).GET();
+						
+						SSDCollection json;
+						try(Response.OfStream response = Web.requestStream(request)) {
+							json = SSDF.readJSON(response.stream());
+						}
+						
+						SSDCollection playlist = json.getDirectCollection("playlist");
+						List<SSDCollection> mediaItems
+							= StreamSupport.stream(Spliterators.spliterator(playlist.collectionsIterator(),
+																			playlist.length(),
+																			Spliterator.ORDERED),
+												   false)
+										   .filter((item) -> !item.getString("type").equalsIgnoreCase("TRAILER"))
+										   .collect(Collectors.toList());
+						
+						for(SSDCollection mediaItem : mediaItems) {
+							String streamURL = mediaItem.getString("streamUrls.main", null);
 							
-							SSDCollection json;
-							try(Response.OfStream response = Web.requestStream(request)) {
-								json = SSDF.readJSON(response.stream());
+							if(streamURL == null) {
+								continue; // Invalid URL
 							}
 							
-							SSDCollection playlist = json.getDirectCollection("playlist");
-							List<SSDCollection> mediaItems
-								= StreamSupport.stream(Spliterators.spliterator(playlist.collectionsIterator(),
-																				playlist.length(),
-																				Spliterator.ORDERED),
-													   false)
-											   .filter((item) -> !item.getString("type").equalsIgnoreCase("TRAILER"))
-											   .collect(Collectors.toList());
+							List<Media.Builder<?, ?>> media = MediaUtils.createMediaBuilders(source,
+								Net.uri(streamURL), uri, job.title, MediaLanguage.UNKNOWN,
+								MediaMetadata.empty());
 							
-							for(SSDCollection mediaItem : mediaItems) {
-								String streamURL = mediaItem.getString("streamUrls.main", null);
-								
-								if(streamURL != null) {
-									List<Media.Builder<?, ?>> media = MediaUtils.createMediaBuilders(source,
-										Net.uri(streamURL), uri, job.title, MediaLanguage.UNKNOWN,
-										MediaMetadata.empty());
-									
-									// Check, if the media has some additional subtitles
-									SSDCollection subtitlesArray;
-									if((subtitlesArray = Opt.of(mediaItem.getDirectCollection("subtitles", null))
-											.ifTrue(Objects::nonNull)
-											.orElseGet(SSDCollection::emptyArray)).length() > 0) {
-										// Parse the subtitles and add them to all obtained media
-										for(SSDCollection mediaSubtitles : subtitlesArray.collectionsIterable()) {
-											MediaLanguage subLanguage = MediaLanguage.ofCode(mediaSubtitles.getDirectString("code"));
-											String subURL = mediaSubtitles.getDirectString("url");
-											MediaFormat subFormat = MediaFormat.fromPath(subURL);
-											SubtitlesMedia.Builder<?, ?> subtitles = SubtitlesMedia.simple().source(source)
-													.uri(Net.uri(subURL)).format(subFormat).language(subLanguage);
-											media.forEach((m) -> MediaUtils.appendMedia((MediaContainer.Builder<?, ?>) m, subtitles));
-										}
-									}
-									
-									// Finally, add all the media
-									for(Media s : Utils.iterable(media.stream().map(Media.Builder::build).iterator())) {
-										if(!task.add(s)) {
-											return; // Do not continue
-										}
-									}
+							// Check, if the media has some additional subtitles
+							SSDCollection subtitlesArray;
+							if((subtitlesArray = Opt.of(mediaItem.getDirectCollection("subtitles", null))
+									.ifTrue(Objects::nonNull)
+									.orElseGet(SSDCollection::emptyArray)).length() > 0) {
+								// Parse the subtitles and add them to all obtained media
+								for(SSDCollection mediaSubtitles : subtitlesArray.collectionsIterable()) {
+									MediaLanguage subLanguage = MediaLanguage.ofCode(mediaSubtitles.getDirectString("code"));
+									String subURL = mediaSubtitles.getDirectString("url");
+									MediaFormat subFormat = MediaFormat.fromPath(subURL);
+									SubtitlesMedia.Builder<?, ?> subtitles = SubtitlesMedia.simple().source(source)
+											.uri(Net.uri(subURL)).format(subFormat).language(subLanguage);
+									media.forEach((m) -> MediaUtils.appendMedia((MediaContainer.Builder<?, ?>) m, subtitles));
 								}
 							}
-						}
-						break;
-					}
-					case NONE: {
-						if(videoURL != null) {
-							List<Media> media = MediaUtils.createMedia(source, Net.uri(videoURL), uri,
-								job.title, MediaLanguage.UNKNOWN, MediaMetadata.empty());
 							
-							for(Media s : media) {
+							// Finally, add all the media
+							for(Media s : Utils.iterable(media.stream().map(Media.Builder::build).iterator())) {
 								if(!task.add(s)) {
 									return; // Do not continue
 								}
 							}
 						}
+						
+						break;
+					}
+					case NONE: {
+						if(videoURL == null) {
+							return; // Invalid argument
+						}
+						
+						List<Media> media = MediaUtils.createMedia(source, Net.uri(videoURL), uri,
+							job.title, MediaLanguage.UNKNOWN, MediaMetadata.empty());
+						
+						for(Media s : media) {
+							if(!task.add(s)) {
+								return; // Do not continue
+							}
+						}
+						
 						break;
 					}
 				}
