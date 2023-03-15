@@ -44,6 +44,7 @@ import sune.app.mediadown.media.MediaUtils;
 import sune.app.mediadown.media.SubtitlesMedia;
 import sune.app.mediadown.net.HTML;
 import sune.app.mediadown.net.Net;
+import sune.app.mediadown.net.Net.QueryArgument;
 import sune.app.mediadown.net.Web;
 import sune.app.mediadown.net.Web.Request;
 import sune.app.mediadown.net.Web.Response;
@@ -141,21 +142,15 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 				switch(job.method()) {
 					case SOURCE_INFO: {
 						VOD.Playlist playlist = null;
+						SourceInfo info = job.source();
 						
-						switch(job.type()) {
-							case ExtractJob.SOURCE_TYPE_EXTERNAL:
-								// Always try the new API first, the old one just as a fallback
-								for(VOD.API api : List.of(VOD.v1(), VOD.v0())) {
-									playlist = api.ofExternal(job.idec());
-									
-									if(playlist != null) {
-										break; // Successfully obtained
-									}
-								}
-								
-								break;
-							default:
-								throw new IllegalStateException("Unsupported source type: " + job.type());
+						// Always try the new API first, the old one just as a fallback
+						for(VOD.API api : List.of(VOD.v1(), VOD.v0())) {
+							playlist = api.ofExternal(info);
+							
+							if(playlist != null) {
+								break; // Successfully obtained
+							}
 						}
 						
 						if(playlist == null) {
@@ -653,26 +648,21 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 	
 	private static final class ExtractJob {
 		
-		public static final String SOURCE_TYPE_EXTERNAL = "external";
-		
 		private final URI uri;
 		private final ExtractMethod method;
-		private final String type;
-		private final String idec;
+		private final SourceInfo source;
 		private final String title;
 		
-		public ExtractJob(URI uri, ExtractMethod method, String type, String idec, String title) {
+		public ExtractJob(URI uri, ExtractMethod method, SourceInfo source, String title) {
 			this.uri = Objects.requireNonNull(uri);
 			this.method = Objects.requireNonNull(method);
-			this.type = Objects.requireNonNull(type);
-			this.idec = Objects.requireNonNull(idec);
+			this.source = Objects.requireNonNull(source);
 			this.title = Objects.requireNonNull(title);
 		}
 		
 		public URI uri() { return uri; }
 		public ExtractMethod method() { return method; }
-		public String type() { return type; }
-		public String idec() { return idec; }
+		public SourceInfo source() { return source; }
 		public String title() { return title; }
 	}
 	
@@ -715,6 +705,28 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		}
 	}
 	
+	private static final class SourceInfo {
+		
+		private final String type;
+		private final String idec;
+		
+		private SourceInfo(String type, String idec) {
+			this.type = Objects.requireNonNull(type);
+			this.idec = Objects.requireNonNull(idec);
+		}
+		
+		public static final SourceInfo ofEpisode(String idec) {
+			return new SourceInfo("episode", idec);
+		}
+		
+		public static final SourceInfo ofBonus(String idec) {
+			return new SourceInfo("bonus", idec);
+		}
+		
+		public String type() { return type; }
+		public String idec() { return idec; }
+	}
+	
 	// Note: Based on https://player.ceskatelevize.cz/_next/static/chunks/695-cede098ec19ef364.js
 	private static final class VOD {
 		
@@ -732,14 +744,12 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			private static final String REQUEST_URI;
 			private static final String REQUEST_SOURCE;
 			private static final String STREAM_PROTOCOL;
-			private static final String VOD_TYPE;
 			
 			static {
 				ENDPOINT = Net.uri("https://www.ceskatelevize.cz/ivysilani/ajax/get-client-playlist/");
 				REQUEST_URI = "/ivysilani/embed/iFramePlayer.php";
 				REQUEST_SOURCE = "iVysilani";
 				STREAM_PROTOCOL = "dash"; // Either dash or hls
-				VOD_TYPE = "episode"; // Constant for now
 			}
 			
 			private V0() {}
@@ -787,10 +797,10 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			}
 			
 			@Override
-			public final Playlist ofExternal(String idec) throws Exception {
+			public final Playlist ofExternal(SourceInfo source) throws Exception {
 				String body = Net.queryString(
-					"playlist[0][type]", VOD_TYPE,
-					"playlist[0][id]", idec,
+					"playlist[0][type]", source.type(),
+					"playlist[0][id]", source.idec(),
 					"requestUrl", REQUEST_URI,
 					"requestSource", REQUEST_SOURCE,
 					"type", "html",
@@ -852,7 +862,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 				try(Response.OfStream response = Web.requestStream(Request.of(uri).GET())) {
 					SSDCollection json = JSON.read(response.stream());
 					
-					if(json.hasDirect("error")) {
+					if(json.hasDirect("error") || json.hasDirect("message")) {
 						return null; // Do not throw exception
 					}
 					
@@ -875,14 +885,14 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			}
 			
 			@Override
-			public final Playlist ofExternal(String idec) throws Exception {
-				return parsePlaylist(Net.resolve(ENDPOINT, Utils.format(PATH_EXTERNAL, "idec", idec)));
+			public final Playlist ofExternal(SourceInfo source) throws Exception {
+				return parsePlaylist(Net.resolve(ENDPOINT, Utils.format(PATH_EXTERNAL, "idec", source.idec())));
 			}
 		}
 		
 		protected static interface API {
 			
-			Playlist ofExternal(String idec) throws Exception;
+			Playlist ofExternal(SourceInfo source) throws Exception;
 		}
 		
 		protected static final class Playlist {
@@ -1178,8 +1188,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 				return; // Unable to obtain the ID
 			}
 			
-			String type = ExtractJob.SOURCE_TYPE_EXTERNAL;
-			String idec = metadata.idec();
+			SourceInfo source = SourceInfo.ofEpisode(metadata.idec());
 			
 			// Try to obtain the media title from its linking data and document
 			LinkingData ld = LinkingData.from(document).stream()
@@ -1188,7 +1197,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			String title = LinkingDataTitle.ofTVEpisode(ld, document.title());
 			
 			URI uri = Net.uri(document.baseUri());
-			jobs.add(new ExtractJob(uri, ExtractMethod.SOURCE_INFO, type, idec, title));
+			jobs.add(new ExtractJob(uri, ExtractMethod.SOURCE_INFO, source, title));
 		}
 		
 		@Override
@@ -1214,8 +1223,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 				return; // Unable to obtain the ID
 			}
 			
-			String type = ExtractJob.SOURCE_TYPE_EXTERNAL;
-			String idec = metadata.idec();
+			SourceInfo source = SourceInfo.ofEpisode(metadata.idec());
 			
 			// Try to obtain the media title from its linking data and document
 			LinkingData ld = LinkingData.from(document).stream()
@@ -1223,8 +1231,8 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 				.findFirst().orElseGet(LinkingData::empty);
 			String title = LinkingDataTitle.ofTVEpisode(ld, document.title());
 			
-			URI uri = Net.uri(IFrameHelper.getURL(ORIGIN, idec));
-			jobs.add(new ExtractJob(uri, ExtractMethod.SOURCE_INFO, type, idec, title));
+			URI uri = Net.uri(IFrameHelper.getURL(ORIGIN, source.idec()));
+			jobs.add(new ExtractJob(uri, ExtractMethod.SOURCE_INFO, source, title));
 		}
 		
 		@Override
@@ -1322,8 +1330,8 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			}
 			
 			if(playerHash != null) {
-				String type = ExtractJob.SOURCE_TYPE_EXTERNAL;
-				String idec = null; // TODO
+				// The data-idec attribute contains spaces and slashes, we must remove them manually
+				Regex regexSanitizeIdec = Regex.of("[\\s/]+");
 				
 				// Try to obtain the media title from its linking data and document
 				LinkingData ld = LinkingData.from(document).stream()
@@ -1333,8 +1341,9 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 				
 				// Add all the videos on the page
 				for(Element elVideo : document.select(SELECTOR_VIDEO)) {
+					SourceInfo source = SourceInfo.ofEpisode(regexSanitizeIdec.replaceAll(elVideo.attr("data-idec"), ""));
 					URI uri = Net.uri(Utils.format(URL_PLAYER_IFRAME, "url", elVideo.attr("data-url"), "hash", playerHash));
-					jobs.add(new ExtractJob(uri, ExtractMethod.SOURCE_INFO, type, idec, title));
+					jobs.add(new ExtractJob(uri, ExtractMethod.SOURCE_INFO, source, title));
 				}
 			}
 		}
@@ -1362,8 +1371,12 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			List<SSDCollection> items = new ArrayList<>();
 			Set<String> ids = new HashSet<>();
 			
+			// Sometimes the data-ctcomp-data attribute has incorrectly escaped HTML entities,
+			// therefore we must fix it manually. Currently, the only issue are quotes.
+			Regex regexFixAttr = Regex.of("&u?o?t?;");
+			
 			for(Element elVideo : document.select(SELECTOR_VIDEO)) {
-				SSDCollection data = JSON.read(elVideo.attr("data-ctcomp-data"));
+				SSDCollection data = JSON.read(regexFixAttr.replaceAll(elVideo.attr("data-ctcomp-data"), "\""));
 				
 				List<SSDCollection> children = new ArrayList<>();
 				if(data.hasDirectCollection("items")) { // VideoGallery
@@ -1418,16 +1431,14 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 				String body = Net.queryString("data", coll.toJSON(true));
 				Request request = Request.of(apiUri).POST(body);
 				
-				String type = ExtractJob.SOURCE_TYPE_EXTERNAL;
-				String idec = null; // TODO
-				
 				// Do the request to obtain the stream URLs
 				try(Response.OfStream response = Web.requestStream(request)) {
 					SSDCollection result = JSON.read(response.stream());
 					
 					for(SSDCollection playlistItem : result.getCollection("RESULT.playlist").collectionsIterable()) {
+						SourceInfo source = SourceInfo.ofEpisode(playlistItem.getDirectString("id"));
 						URI uri = Net.uri(playlistItem.getString("streamUrls.main"));
-						jobs.add(new ExtractJob(uri, ExtractMethod.NONE, type, idec, title));
+						jobs.add(new ExtractJob(uri, ExtractMethod.NONE, source, title));
 					}
 				}
 			}
@@ -1449,9 +1460,6 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		
 		@Override
 		public final void getExtractJobs(Document document, List<ExtractJob> jobs) throws Exception {
-			String type = ExtractJob.SOURCE_TYPE_EXTERNAL;
-			String idec = null; // TODO
-			
 			// Try to obtain the document's title from meta tags first, then from the title tag
 			String title = Opt.of(document.selectFirst("meta[property='og:title']"))
 				.ifTrue(Objects::nonNull)
@@ -1462,7 +1470,16 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			// Extract all the videos on the page
 			for(Element elVideo : document.select(SELECTOR_VIDEO)) {
 				URI uri = Net.uri(Net.uriFix(elVideo.attr("href")));
-				jobs.add(new ExtractJob(uri, ExtractMethod.SOURCE_INFO, type, idec, title));
+				
+				QueryArgument query = Net.queryDestruct(uri);
+				QueryArgument bonus = query.argumentOf("bonus");
+				
+				if(bonus == null) {
+					continue; // Unsupported
+				}
+				
+				SourceInfo source = SourceInfo.ofBonus(bonus.value());
+				jobs.add(new ExtractJob(uri, ExtractMethod.SOURCE_INFO, source, title));
 			}
 		}
 		
@@ -1483,9 +1500,6 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		
 		@Override
 		public final void getExtractJobs(Document document, List<ExtractJob> jobs) throws Exception {
-			String type = ExtractJob.SOURCE_TYPE_EXTERNAL;
-			String idec = null; // TODO
-			
 			// Try to obtain the document's title from linking data first, then from the title tag
 			String title = Opt.of(LinkingData.from(document).stream()
 			                        .filter((l) -> l.type().equals("VideoObject"))
@@ -1505,8 +1519,9 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 					                                              : e.getKey().toLowerCase()) + '='
 					          + JavaScript.encodeURIComponent(e.getValue()))
 					.reduce("", (a, b) -> a + '&' + b);
+				SourceInfo source = SourceInfo.ofEpisode(elVideo.attr("data-idec"));
 				URI uri = Net.uri(URL + endpoint + '?' + urlData.substring(1));
-				jobs.add(new ExtractJob(uri, ExtractMethod.SOURCE_INFO, type, idec, title));
+				jobs.add(new ExtractJob(uri, ExtractMethod.SOURCE_INFO, source, title));
 			}
 		}
 		
