@@ -1103,11 +1103,14 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			do {
 				result = API.getEpisodes(programIDEC, offset, API.MAX_ITEMS_PER_PAGE, seasonId);
 				
-				for(SSDCollection item : result.items().collectionsIterable()) {
+				SSDCollection items = result.items();
+				ctr = items.length() - 1; // Index in reverse
+				
+				for(SSDCollection item : items.collectionsIterable()) {
 					String id = item.getDirectString("id", "");
 					episodes.add(id); // Put to the cache
 					if(id.equals(episodeId)) index = ctr; // Do not break from the loop due to caching
-					++ctr;
+					--ctr; // Index in reverse
 				}
 				
 				if(total < 0) {
