@@ -140,15 +140,26 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 				
 				switch(job.method()) {
 					case SOURCE_INFO: {
-						VOD.Playlist playlist;
-						VOD.API api = VOD.v1();
+						VOD.Playlist playlist = null;
 						
 						switch(job.type()) {
 							case ExtractJob.SOURCE_TYPE_EXTERNAL:
-								playlist = api.ofExternal(job.idec());
+								// Always try the new API first, the old one just as a fallback
+								for(VOD.API api : List.of(VOD.v1(), VOD.v0())) {
+									playlist = api.ofExternal(job.idec());
+									
+									if(playlist != null) {
+										break; // Successfully obtained
+									}
+								}
+								
 								break;
 							default:
 								throw new IllegalStateException("Unsupported source type: " + job.type());
+						}
+						
+						if(playlist == null) {
+							continue; // Unsuccessful, try another job, if any
 						}
 						
 						for(VOD.Playlist.Stream stream : playlist.streams()) {
@@ -157,8 +168,6 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 							try(Response.OfStream response = Web.peek(Request.of(stream.uri()).HEAD())) {
 								finalUri = response.uri();
 							}
-							
-							// TODO: Fix issues with MPD parser
 							
 							List<Media.Builder<?, ?>> media = MediaUtils.createMediaBuilders(
 								source, finalUri, uri, job.title(), MediaLanguage.UNKNOWN, MediaMetadata.empty()
@@ -706,12 +715,100 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		}
 	}
 	
+	// Note: Based on https://player.ceskatelevize.cz/_next/static/chunks/695-cede098ec19ef364.js
 	private static final class VOD {
 		
 		private VOD() {}
 		
+		public static final API v0() { return V0.instance(); }
 		public static final API v1() { return V1.instance(); }
 		
+		// The old API that uses the iFramePlayer.php
+		private static final class V0 implements API {
+			
+			private static final VarLoader<API> instance = VarLoader.of(V0::new);
+			
+			private static final URI ENDPOINT;
+			private static final String REQUEST_URI;
+			private static final String REQUEST_SOURCE;
+			private static final String STREAM_PROTOCOL;
+			private static final String VOD_TYPE;
+			
+			static {
+				ENDPOINT = Net.uri("https://www.ceskatelevize.cz/ivysilani/ajax/get-client-playlist/");
+				REQUEST_URI = "/ivysilani/embed/iFramePlayer.php";
+				REQUEST_SOURCE = "iVysilani";
+				STREAM_PROTOCOL = "dash"; // Either dash or hls
+				VOD_TYPE = "episode"; // Constant for now
+			}
+			
+			private V0() {}
+			
+			private static final Playlist.Stream parseStream(SSDCollection collection) {
+				URI uri = Net.uri(collection.getString("streamUrls.main"));
+				
+				if(!collection.hasDirectCollection("subtitles")) {
+					return new Playlist.Stream(uri, Map.of());
+				}
+				
+				Map<MediaLanguage, List<URI>> subtitles = new LinkedHashMap<>();
+				
+				for(SSDCollection item : collection.getDirectCollection("subtitles").collectionsIterable()) {
+					MediaLanguage language = MediaLanguage.ofCode(item.getDirectString("code"));
+					List<URI> uris = List.of(Net.uri(item.getDirectString("url")));
+					subtitles.put(language, uris);
+				}
+				
+				return new Playlist.Stream(uri, subtitles);
+			}
+			
+			private static final Playlist parsePlaylist(URI uri) throws Exception {
+				List<Playlist.Stream> streams = new ArrayList<>();
+				
+				try(Response.OfStream response = Web.requestStream(Request.of(uri).GET())) {
+					SSDCollection json = JSON.read(response.stream());
+					
+					for(SSDCollection item : json.getDirectCollection("playlist").collectionsIterable()) {
+						Playlist.Stream stream = parseStream(item);
+						
+						if(stream == null) {
+							continue;
+						}
+						
+						streams.add(stream);
+					}
+				}
+				
+				return new Playlist(streams);
+			}
+			
+			public static final API instance() {
+				return instance.value();
+			}
+			
+			@Override
+			public final Playlist ofExternal(String idec) throws Exception {
+				String body = Net.queryString(
+					"playlist[0][type]", VOD_TYPE,
+					"playlist[0][id]", idec,
+					"requestUrl", REQUEST_URI,
+					"requestSource", REQUEST_SOURCE,
+					"type", "html",
+					"canPlayDRM", "false",
+					"streamingProtocol", STREAM_PROTOCOL
+				);
+				
+				URI uri;
+				try(Response.OfStream response = Web.requestStream(Request.of(ENDPOINT).POST(body))) {
+					SSDCollection json = JSON.read(response.stream());
+					uri = Net.uri(json.getDirectString("url"));
+				}
+				
+				return parsePlaylist(uri);
+			}
+		}
+		
+		// The new API that uses the new playlist-vod endpoint (not always supported)
 		private static final class V1 implements API {
 			
 			private static final VarLoader<API> instance = VarLoader.of(V1::new);
@@ -754,6 +851,10 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 				
 				try(Response.OfStream response = Web.requestStream(Request.of(uri).GET())) {
 					SSDCollection json = JSON.read(response.stream());
+					
+					if(json.hasDirect("error")) {
+						return null; // Do not throw exception
+					}
 					
 					for(SSDCollection item : json.getDirectCollection("streams").collectionsIterable()) {
 						Playlist.Stream stream = parseStream(item);
