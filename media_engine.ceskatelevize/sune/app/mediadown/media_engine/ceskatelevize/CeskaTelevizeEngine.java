@@ -11,13 +11,13 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.Spliterator;
-import java.util.Spliterators;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -31,11 +31,11 @@ import org.jsoup.nodes.Element;
 
 import javafx.scene.image.Image;
 import sune.app.mediadown.concurrent.Threads;
+import sune.app.mediadown.concurrent.VarLoader;
 import sune.app.mediadown.entity.Episode;
 import sune.app.mediadown.entity.MediaEngine;
 import sune.app.mediadown.entity.Program;
 import sune.app.mediadown.media.Media;
-import sune.app.mediadown.media.MediaContainer;
 import sune.app.mediadown.media.MediaFormat;
 import sune.app.mediadown.media.MediaLanguage;
 import sune.app.mediadown.media.MediaMetadata;
@@ -58,7 +58,6 @@ import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Utils.Ignore;
 import sune.util.ssdf2.SSDCollection;
-import sune.util.ssdf2.SSDF;
 import sune.util.ssdf2.SSDObject;
 
 public final class CeskaTelevizeEngine implements MediaEngine {
@@ -119,7 +118,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			// We need to get the IDEC of the given program first
 			Document document = HTML.from(program.uri());
 			WebMediaMetadata metadata = WebMediaMetadataExtractor.extract(document);
-			API.getEpisodes(task, program, metadata.IDEC());
+			API.getEpisodes(task, program, metadata.idec());
 		});
 	}
 	
@@ -137,58 +136,51 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			ct.getExtractJobs(HTML.from(uri), jobs);
 			
 			for(ExtractJob job : jobs) {
-				String videoURL = job.url;
+				URI videoUri = job.uri();
 				
-				switch(job.method) {
+				switch(job.method()) {
 					case SOURCE_INFO: {
-						SourceInfo info = SourceInfoExtractor.acquire(videoURL);
+						VOD.Playlist playlist;
+						VOD.API api = VOD.v1();
 						
-						if(info == null) {
-							return; // Cannot obtain required information
+						switch(job.type()) {
+							case ExtractJob.SOURCE_TYPE_EXTERNAL:
+								playlist = api.ofExternal(job.idec());
+								break;
+							default:
+								throw new IllegalStateException("Unsupported source type: " + job.type());
 						}
 						
-						PlaylistData playlistData = PlaylistDataGetter.get(videoURL, info);
-						HttpHeaders headers = Web.Headers.ofSingle("X-Requested-With", "XMLHttpRequest");
-						Request request = Request.of(Net.uri(playlistData.url)).headers(headers).GET();
-						
-						SSDCollection json;
-						try(Response.OfStream response = Web.requestStream(request)) {
-							json = SSDF.readJSON(response.stream());
-						}
-						
-						SSDCollection playlist = json.getDirectCollection("playlist");
-						List<SSDCollection> mediaItems
-							= StreamSupport.stream(Spliterators.spliterator(playlist.collectionsIterator(),
-																			playlist.length(),
-																			Spliterator.ORDERED),
-												   false)
-										   .filter((item) -> !item.getString("type").equalsIgnoreCase("TRAILER"))
-										   .collect(Collectors.toList());
-						
-						for(SSDCollection mediaItem : mediaItems) {
-							String streamURL = mediaItem.getString("streamUrls.main", null);
+						for(VOD.Playlist.Stream stream : playlist.streams()) {
+							URI finalUri;
 							
-							if(streamURL == null) {
-								continue; // Invalid URL
+							try(Response.OfStream response = Web.peek(Request.of(stream.uri()).HEAD())) {
+								finalUri = response.uri();
 							}
 							
-							List<Media.Builder<?, ?>> media = MediaUtils.createMediaBuilders(source,
-								Net.uri(streamURL), uri, job.title, MediaLanguage.UNKNOWN,
-								MediaMetadata.empty());
+							// TODO: Fix issues with MPD parser
 							
-							// Check, if the media has some additional subtitles
-							SSDCollection subtitlesArray;
-							if((subtitlesArray = Opt.of(mediaItem.getDirectCollection("subtitles", null))
-									.ifTrue(Objects::nonNull)
-									.orElseGet(SSDCollection::emptyArray)).length() > 0) {
-								// Parse the subtitles and add them to all obtained media
-								for(SSDCollection mediaSubtitles : subtitlesArray.collectionsIterable()) {
-									MediaLanguage subLanguage = MediaLanguage.ofCode(mediaSubtitles.getDirectString("code"));
-									String subURL = mediaSubtitles.getDirectString("url");
-									MediaFormat subFormat = MediaFormat.fromPath(subURL);
-									SubtitlesMedia.Builder<?, ?> subtitles = SubtitlesMedia.simple().source(source)
-											.uri(Net.uri(subURL)).format(subFormat).language(subLanguage);
-									media.forEach((m) -> MediaUtils.appendMedia((MediaContainer.Builder<?, ?>) m, subtitles));
+							List<Media.Builder<?, ?>> media = MediaUtils.createMediaBuilders(
+								source, finalUri, uri, job.title(), MediaLanguage.UNKNOWN, MediaMetadata.empty()
+							);
+							
+							for(Entry<MediaLanguage, List<URI>> entry : stream.subtitles().entrySet()) {
+								MediaLanguage language = entry.getKey();
+								
+								for(URI subtitleUri : entry.getValue()) {
+									if(!subtitleUri.getPath().endsWith("vtt")) {
+										continue;
+									}
+									
+									MediaFormat format = MediaFormat.VTT;
+									SubtitlesMedia.Builder<?, ?> subtitles = SubtitlesMedia.simple()
+										.source(source)
+										.uri(subtitleUri)
+										.format(format)
+										.language(language);
+									
+									media.forEach((m) -> MediaUtils.appendMedia(Utils.cast(m), subtitles));
+									break; // Keep only VTT for now
 								}
 							}
 							
@@ -203,12 +195,9 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 						break;
 					}
 					case NONE: {
-						if(videoURL == null) {
-							return; // Invalid argument
-						}
-						
-						List<Media> media = MediaUtils.createMedia(source, Net.uri(videoURL), uri,
-							job.title, MediaLanguage.UNKNOWN, MediaMetadata.empty());
+						List<Media> media = MediaUtils.createMedia(
+							source, videoUri, uri, job.title(), MediaLanguage.UNKNOWN, MediaMetadata.empty()
+						);
 						
 						for(Media s : media) {
 							if(!task.add(s)) {
@@ -655,163 +644,61 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 	
 	private static final class ExtractJob {
 		
-		public final String url;
-		public final ExtractMethod method;
-		public final String title;
+		public static final String SOURCE_TYPE_EXTERNAL = "external";
 		
-		public ExtractJob(String url, ExtractMethod method, String title) {
-			this.url = url;
-			this.method = method;
-			this.title = title;
-		}
-	}
-	
-	private static final class SourceInfo {
+		private final URI uri;
+		private final ExtractMethod method;
+		private final String type;
+		private final String idec;
+		private final String title;
 		
-		public String type;
-		public String id;
-		public String baseURL;
-		public String wwwServerGet;
-		public String requestSource;
-		
-		public boolean isValid() {
-			return Arrays.stream(Utils.array(type, id, baseURL, wwwServerGet, requestSource))
-						 .allMatch(Objects::nonNull);
-		}
-	}
-	
-	private static final class SourceInfoExtractor {
-		
-		private static final Regex REGEX_VAR_REQUEST_SOURCE;
-		private static final Regex REGEX_VAR_BASE_URL;
-		private static final Regex REGEX_VAR_WWW_SERVER_GET;
-		private static final Regex REGEX_CALL_GET_PLAYLIST_URL;
-		
-		static {
-			REGEX_VAR_REQUEST_SOURCE = Regex.of("var\\s+requestSource\\s*=\\s*[\"']([^\"']+)[\"']\\s*[^;]+;");
-			REGEX_VAR_BASE_URL = Regex.of("var\\s+baseUrl\\s*=\\s*[\"']([^\"']+)[\"'];");
-			REGEX_VAR_WWW_SERVER_GET = Regex.of("var\\s+wwwServerGet\\s*=\\s*[\"']([^\"']*)[\"'];");
-			REGEX_CALL_GET_PLAYLIST_URL = Regex.of("getPlaylistUrl\\(\\s*(\\[[^;]+\\]),[^;]+\\);");
+		public ExtractJob(URI uri, ExtractMethod method, String type, String idec, String title) {
+			this.uri = Objects.requireNonNull(uri);
+			this.method = Objects.requireNonNull(method);
+			this.type = Objects.requireNonNull(type);
+			this.idec = Objects.requireNonNull(idec);
+			this.title = Objects.requireNonNull(title);
 		}
 		
-		public static final SourceInfo acquire(String url) throws Exception {
-			Document document = HTML.from(Net.uri(url));
-			SourceInfo info = new SourceInfo();
-			for(Element script : document.select("script:not([src])")) {
-				String content = script.html();
-				Matcher matcher;
-				if((matcher = REGEX_VAR_REQUEST_SOURCE.matcher(content)).find()) {
-					info.requestSource = matcher.group(1);
-					// Both variables are in the same script tag
-					if((matcher = REGEX_VAR_WWW_SERVER_GET.matcher(content)).find()) {
-						info.wwwServerGet = matcher.group(1);
-					}
-				} else if((matcher = REGEX_VAR_BASE_URL.matcher(content)).find()) {
-					info.baseURL = matcher.group(1);
-				} else if((matcher = REGEX_CALL_GET_PLAYLIST_URL.matcher(content)).find()) {
-					SSDCollection data = JavaScript.readObject(matcher.group(1)).getCollection(0, SSDCollection.empty());
-					info.type = data.getDirectString("type", null);
-					info.id = data.getDirectString("id", null);
-				}
-			}
-			return info.isValid() ? info : null;
-		}
-		
-		// Forbid anyone to create an instance of this class
-		private SourceInfoExtractor() {
-		}
-	}
-	
-	private static final class PlaylistData {
-		
-		public String streamingProtocol;
-		public String url;
-		
-		public boolean isValid() {
-			return Arrays.stream(Utils.array(streamingProtocol, url))
-						 .allMatch(Objects::nonNull);
-		}
-	}
-	
-	private static final class PlaylistDataGetter {
-		
-		private static final String BASE_URL = "https://www.ceskatelevize.cz";
-		
-		public static PlaylistData get(String url, SourceInfo info) throws Exception {
-			String requestURLRelative = Net.url(url).getPath();
-			String endpointURL = BASE_URL + info.baseURL + "/ajax/get-client-playlist/" + info.wwwServerGet;
-			Map<String, Object> params = Utils.toMap(
-				"playlist[0][type]", info.type,
-				"playlist[0][id]", info.id,
-				"requestUrl", requestURLRelative,
-				"requestSource", info.requestSource,
-				"type", "html",
-				"canPlayDRM", "false"
-			);
-			HttpHeaders headers = Web.Headers.ofSingle(
-				"X-Requested-With", "XMLHttpRequest",
-				"x-addr", "127.0.0.1"
-			);
-			String body = Net.queryString(params);
-			Request request = Request.of(Net.uri(endpointURL)).headers(headers).POST(body);
-			
-			SSDCollection json;
-			try(Response.OfStream response = Web.requestStream(request)) {
-				if(response.statusCode() != 200) {
-					return null;
-				}
-				
-				json = SSDF.readJSON(response.stream());
-			}
-			
-			PlaylistData data = new PlaylistData();
-			data.streamingProtocol = json.getDirectString("streamingProtocol", null);
-			data.url = json.getDirectString("url", null);
-			return data.isValid() ? data : null;
-		}
-		
-		// Forbid anyone to create an instance of this class
-		private PlaylistDataGetter() {
-		}
+		public URI uri() { return uri; }
+		public ExtractMethod method() { return method; }
+		public String type() { return type; }
+		public String idec() { return idec; }
+		public String title() { return title; }
 	}
 	
 	private static final class WebMediaMetadata {
 		
 		private final String idec;
-		private final String indexId;
 		
-		public WebMediaMetadata(String idec, String indexId) {
+		public WebMediaMetadata(String idec) {
 			this.idec = idec;
-			this.indexId = indexId;
 		}
 		
-		public String IDEC() {
+		public String idec() {
 			return idec;
-		}
-		
-		public String indexId() {
-			return indexId;
 		}
 	}
 	
 	private static final class WebMediaMetadataExtractor {
 		
 		private static final String SELECTOR_SCRIPT = "script#__NEXT_DATA__";
-		private static final Regex PATTERN_IDEC = Regex.of("\"idec\":\"([^\"]+)\"");
-		private static final Regex PATTERN_INDEX_ID = Regex.of("\"indexId\":\"([^\"]+)\"");
+		private static final Regex PATTERN_IDEC = Regex.of("\"idec\":\"(?<idec>[^\"]+)\"");
 		
 		public static final WebMediaMetadata extract(Document document) {
 			Element elScript = document.selectFirst(SELECTOR_SCRIPT);
-			if(elScript == null) return null; // No metadata script content available
-			Matcher matcher = PATTERN_IDEC.matcher(elScript.html());
-			if(!matcher.find()) return null; // Content does not contain the needed metadata
-			String idec = matcher.group(1);
-			String indexId = null;
-			// Also check for the index ID, if present
-			if((matcher = PATTERN_INDEX_ID.matcher(elScript.html())).find()) {
-				indexId = matcher.group(1);
+			
+			if(elScript == null) {
+				return null; // No metadata script content available
 			}
-			return new WebMediaMetadata(idec, indexId);
+			
+			Matcher matcher = PATTERN_IDEC.matcher(elScript.html());
+			
+			if(!matcher.find()) {
+				return null; // Content does not contain the needed metadata
+			}
+			
+			return new WebMediaMetadata(matcher.group("idec"));
 		}
 		
 		// Forbid anyone to create an instance of this class
@@ -819,24 +706,120 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		}
 	}
 	
+	private static final class VOD {
+		
+		private VOD() {}
+		
+		public static final API v1() { return V1.instance(); }
+		
+		private static final class V1 implements API {
+			
+			private static final VarLoader<API> instance = VarLoader.of(V1::new);
+			
+			private static final URI ENDPOINT;
+			private static final String PATH_EXTERNAL;
+			
+			static {
+				ENDPOINT = Net.uri("https://api.ceskatelevize.cz/video/v1/playlist-vod/v1/");
+				PATH_EXTERNAL = "stream-data/media/external/%{idec}s";
+			}
+			
+			private V1() {}
+			
+			private static final Playlist.Stream parseStream(SSDCollection collection) {
+				URI uri = Net.uri(collection.getDirectString("url"));
+				
+				if(!collection.hasDirectCollection("subtitles")) {
+					return new Playlist.Stream(uri, Map.of());
+				}
+				
+				Map<MediaLanguage, List<URI>> subtitles = new LinkedHashMap<>();
+				
+				for(SSDCollection item : collection.getDirectCollection("subtitles").collectionsIterable()) {
+					MediaLanguage language = MediaLanguage.ofCode(item.getDirectString("language"));
+					List<URI> uris = new ArrayList<>();
+					
+					for(SSDCollection file : item.getDirectCollection("files").collectionsIterable()) {
+						uris.add(Net.uri(file.getDirectString("url")));
+					}
+					
+					subtitles.put(language, uris);
+				}
+				
+				return new Playlist.Stream(uri, subtitles);
+			}
+			
+			private static final Playlist parsePlaylist(URI uri) throws Exception {
+				List<Playlist.Stream> streams = new ArrayList<>();
+				
+				try(Response.OfStream response = Web.requestStream(Request.of(uri).GET())) {
+					SSDCollection json = JSON.read(response.stream());
+					
+					for(SSDCollection item : json.getDirectCollection("streams").collectionsIterable()) {
+						Playlist.Stream stream = parseStream(item);
+						
+						if(stream == null) {
+							continue;
+						}
+						
+						streams.add(stream);
+					}
+				}
+				
+				return new Playlist(streams);
+			}
+			
+			public static final API instance() {
+				return instance.value();
+			}
+			
+			@Override
+			public final Playlist ofExternal(String idec) throws Exception {
+				return parsePlaylist(Net.resolve(ENDPOINT, Utils.format(PATH_EXTERNAL, "idec", idec)));
+			}
+		}
+		
+		protected static interface API {
+			
+			Playlist ofExternal(String idec) throws Exception;
+		}
+		
+		protected static final class Playlist {
+			
+			private final List<Stream> streams;
+			
+			private Playlist(List<Stream> streams) {
+				this.streams = Objects.requireNonNull(streams);
+			}
+			
+			public List<Stream> streams() { return streams; }
+			
+			public static final class Stream {
+				
+				private final URI uri;
+				private final Map<MediaLanguage, List<URI>> subtitles;
+				
+				private Stream(URI uri, Map<MediaLanguage, List<URI>> subtitles) {
+					this.uri = Objects.requireNonNull(uri);
+					this.subtitles = Objects.requireNonNull(subtitles);
+				}
+				
+				public URI uri() { return uri; }
+				public Map<MediaLanguage, List<URI>> subtitles() { return subtitles; }
+			}
+		}
+	}
+	
 	private static final class IFrameHelper {
 		
 		private static final String URL_IFRAME;
-		private static final String URL_PLAYER_HASH;
 		
 		static {
-			URL_IFRAME = "https://www.ceskatelevize.cz/ivysilani/embed/iFramePlayer.php?hash=%{hash}s&IDEC=%{idec}s%{index}s";
-			URL_PLAYER_HASH = "https://www.ceskatelevize.cz/v-api/iframe-hash/";
+			URL_IFRAME = "https://player.ceskatelevize.cz/?origin=%{origin}s&IDEC=%{idec}s";
 		}
 		
-		public static final String obtainHash() throws Exception {
-			Response.OfString response = Web.request(Request.of(Net.uri(URL_PLAYER_HASH)).GET());
-			return response != null ? response.body() : null;
-		}
-		
-		public static final String getURL(String idec, String indexId) throws Exception {
-			String strIndex = indexId != null ? "&index=" + indexId : "";
-			return Utils.format(URL_IFRAME, "hash", obtainHash(), "idec", idec, "index", strIndex);
+		public static final String getURL(String origin, String idec) throws Exception {
+			return Utils.format(URL_IFRAME, "origin", origin, "idec", idec);
 		}
 		
 		// Forbid anyone to create an instance of this class
@@ -924,9 +907,11 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 				SSDCollection mediaData = JavaScript.readObject(elData.html());
 				SSDCollection meta = mediaData.getCollection("props.pageProps.data.mediaMeta");
 				SSDCollection seasons = meta.getCollection("show.seasons", null);
+				
 				// Try to obtain the season number
 				if(seasons != null) {
 					String activeSeasonId = meta.getDirectString("activeSeasonId", null);
+					
 					if(activeSeasonId == null || activeSeasonId.equals("null")) {
 						// Some episodes can be visible only on the All episodes page. No season
 						// can therefore be found so just use some invalid value.
@@ -936,8 +921,10 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 								.filter((c) -> c.getDirectString("id", "").equals(activeSeasonId))
 								.map((c) -> c.getDirectString("title", ""))
 								.findFirst().orElse(null);
+						
 						if(textSeason != null) {
 							Matcher matcherSeason = REGEX_SEASON.matcher(textSeason);
+							
 							if(matcherSeason.matches()) {
 								int num; String numString = matcherSeason.group(1);
 								if(numString.matches("\\d+")) num = Integer.valueOf(numString);
@@ -986,8 +973,9 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			int offset = 0, total = -1, ctr = 0, index = -1;
 			
 			// Only create the cache if needed
-			if(cache == null)
+			if(cache == null) {
 				cache = new HashMap<>();
+			}
 			
 			String key = programSeasonKey(programIDEC, seasonId);
 			List<String> episodes = cache.computeIfAbsent(key, (k) -> new ArrayList<>());
@@ -1003,14 +991,18 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			API.CollectionAPIResult result;
 			do {
 				result = API.getEpisodes(programIDEC, offset, API.MAX_ITEMS_PER_PAGE, seasonId);
+				
 				for(SSDCollection item : result.items().collectionsIterable()) {
 					String id = item.getDirectString("id", "");
 					episodes.add(id); // Put to the cache
 					if(id.equals(episodeId)) index = ctr; // Do not break from the loop due to caching
 					++ctr;
 				}
-				if(total < 0)
+				
+				if(total < 0) {
 					total = result.total();
+				}
+				
 				offset += API.MAX_ITEMS_PER_PAGE;
 			} while(index < 0 && offset < total);
 			
@@ -1042,6 +1034,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 						 .map(StackFrame::getDeclaringClass)
 						 .findFirst().get();
 			});
+			
 			return instances.computeIfAbsent(clazz, _Singleton::new).instance();
 		}
 		
@@ -1056,6 +1049,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			} catch(Exception ex) {
 				// Assume, the class is instantiable
 			}
+			
 			// This should not happen
 			return null;
 		}
@@ -1077,12 +1071,23 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		
 		@Override
 		public final void getExtractJobs(Document document, List<ExtractJob> jobs) throws Exception {
+			WebMediaMetadata metadata = WebMediaMetadataExtractor.extract(document);
+			
+			if(metadata == null) {
+				return; // Unable to obtain the ID
+			}
+			
+			String type = ExtractJob.SOURCE_TYPE_EXTERNAL;
+			String idec = metadata.idec();
+			
 			// Try to obtain the media title from its linking data and document
 			LinkingData ld = LinkingData.from(document).stream()
 					.filter((d) -> d.type().equals("TVEpisode"))
 					.findFirst().orElseGet(LinkingData::empty);
 			String title = LinkingDataTitle.ofTVEpisode(ld, document.title());
-			jobs.add(new ExtractJob(document.baseUri(), ExtractMethod.SOURCE_INFO, title));
+			
+			URI uri = Net.uri(document.baseUri());
+			jobs.add(new ExtractJob(uri, ExtractMethod.SOURCE_INFO, type, idec, title));
 		}
 		
 		@Override
@@ -1095,6 +1100,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		
 		private static final String SUBDOMAIN = "www";
 		private static final String PATH_PREFIX = "/porady/";
+		private static final String ORIGIN = "iVysilani";
 		
 		private CT_Porady() {}
 		public static final CT_Porady getInstance() { return _Singleton.getInstance(); }
@@ -1102,14 +1108,22 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		@Override
 		public final void getExtractJobs(Document document, List<ExtractJob> jobs) throws Exception {
 			WebMediaMetadata metadata = WebMediaMetadataExtractor.extract(document);
-			if(metadata == null) return; // Unable to obtain the ID
-			String url = IFrameHelper.getURL(metadata.IDEC(), metadata.indexId());
+			
+			if(metadata == null) {
+				return; // Unable to obtain the ID
+			}
+			
+			String type = ExtractJob.SOURCE_TYPE_EXTERNAL;
+			String idec = metadata.idec();
+			
 			// Try to obtain the media title from its linking data and document
 			LinkingData ld = LinkingData.from(document).stream()
-					.filter((d) -> d.type().equals("TVEpisode"))
-					.findFirst().orElseGet(LinkingData::empty);
+				.filter((d) -> d.type().equals("TVEpisode"))
+				.findFirst().orElseGet(LinkingData::empty);
 			String title = LinkingDataTitle.ofTVEpisode(ld, document.title());
-			jobs.add(new ExtractJob(url, ExtractMethod.SOURCE_INFO, title));
+			
+			URI uri = Net.uri(IFrameHelper.getURL(ORIGIN, idec));
+			jobs.add(new ExtractJob(uri, ExtractMethod.SOURCE_INFO, type, idec, title));
 		}
 		
 		@Override
@@ -1134,16 +1148,25 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			// on the page when the page is loaded and other episodes are loaded dynamically using AJAX.
 			// Instead we obtain the show's code and obtain all episodes from Porady show's page. This way
 			// we can use the already existing procedures and it also returns complete results.
-			
 			String url = document.baseUri();
+			
 			if(url == null || url.isBlank()) {
 				Element elURL = document.selectFirst("meta[property='og:url']");
-				if(elURL != null) url = elURL.attr("content") + "/";
+				
+				if(elURL != null) {
+					url = elURL.attr("content") + "/";
+				}
 			}
 			
-			if(url == null || url.isBlank()) return; // Invalid URL
+			if(url == null || url.isBlank()) {
+				return; // Invalid URL
+			}
+			
 			Matcher matcherURL = REGEX_SHOW_CODE.matcher(url);
-			if(!matcherURL.matches()) return; // Cannot obtain the show code
+			
+			if(!matcherURL.matches()) {
+				return; // Cannot obtain the show code
+			}
 			
 			String showCode = matcherURL.group(1);
 			String showId = API.getShowId(showCode);
@@ -1152,7 +1175,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			
 			// Obtain all the episodes to extract media sources from
 			ListTask<Episode> task = ListTask.of((t) -> {
-				API.getEpisodes(t, program, WebMediaMetadataExtractor.extract(HTML.from(program.uri())).IDEC());
+				API.getEpisodes(t, program, WebMediaMetadataExtractor.extract(HTML.from(program.uri())).idec());
 			});
 			
 			task.startAndWait();
@@ -1187,24 +1210,30 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		@Override
 		public final void getExtractJobs(Document document, List<ExtractJob> jobs) throws Exception {
 			String playerHash = null;
+			
 			for(Element elScript : document.select("script")) {
-				String content = elScript.html();
-				Matcher matcher = REGEX_PLAYER_HASH.matcher(content);
+				Matcher matcher = REGEX_PLAYER_HASH.matcher(elScript.html());
+				
 				if(matcher.find()) {
 					playerHash = matcher.group(1);
 					break;
 				}
 			}
+			
 			if(playerHash != null) {
+				String type = ExtractJob.SOURCE_TYPE_EXTERNAL;
+				String idec = null; // TODO
+				
 				// Try to obtain the media title from its linking data and document
 				LinkingData ld = LinkingData.from(document).stream()
 						.filter((d) -> d.type().equals("Article"))
 						.findFirst().orElseGet(LinkingData::empty);
 				String title = LinkingDataTitle.ofArticle(ld, document.title());
+				
 				// Add all the videos on the page
 				for(Element elVideo : document.select(SELECTOR_VIDEO)) {
-					String url = Utils.format(URL_PLAYER_IFRAME, "url", elVideo.attr("data-url"), "hash", playerHash);
-					jobs.add(new ExtractJob(url, ExtractMethod.SOURCE_INFO, title));
+					URI uri = Net.uri(Utils.format(URL_PLAYER_IFRAME, "url", elVideo.attr("data-url"), "hash", playerHash));
+					jobs.add(new ExtractJob(uri, ExtractMethod.SOURCE_INFO, type, idec, title));
 				}
 			}
 		}
@@ -1246,11 +1275,17 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 				
 				for(SSDCollection child : children) {
 					SSDCollection playlist = child.getCollection("source.playlist");
+					
 					// Collect individual playlist item's information
 					for(SSDCollection item : playlist.collectionsIterable()) {
 						String id = item.getDirectString("id", "");
-						if(ids.contains(id)) continue;
+						
+						if(ids.contains(id)) {
+							continue;
+						}
+						
 						ids.add(id);
+						
 						SSDCollection newItem = SSDCollection.empty();
 						String type = item.getDirectString("type", "vod").toLowerCase();
 						newItem.setDirect("type", type);
@@ -1260,6 +1295,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 						StreamSupport.stream(item.objectsIterable().spliterator(), false)
 									 .filter((o) -> allowedNames.contains(o.getName()))
 									 .forEach((o) -> newItem.setDirect(o.getName(), o));
+						
 						items.add(newItem);
 					}
 				}
@@ -1270,21 +1306,27 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 				// Construct the HTTP POST body as a JSON object
 				SSDCollection coll = SSDCollection.empty();
 				SSDCollection array = SSDCollection.emptyArray();
-				String type = item.getDirectString("type");
+				String contentType = item.getDirectString("type");
 				String title = item.getDirectString("title");
 				item.removeDirect("type");
 				item.removeDirect("title");
 				array.add(item);
-				coll.setDirect("contentType", type);
+				coll.setDirect("contentType", contentType);
 				coll.setDirect("items", array);
+				
 				String body = Net.queryString("data", coll.toJSON(true));
 				Request request = Request.of(apiUri).POST(body);
+				
+				String type = ExtractJob.SOURCE_TYPE_EXTERNAL;
+				String idec = null; // TODO
+				
 				// Do the request to obtain the stream URLs
 				try(Response.OfStream response = Web.requestStream(request)) {
 					SSDCollection result = JSON.read(response.stream());
+					
 					for(SSDCollection playlistItem : result.getCollection("RESULT.playlist").collectionsIterable()) {
-						String streamURL = playlistItem.getString("streamUrls.main");
-						jobs.add(new ExtractJob(streamURL, ExtractMethod.NONE, title));
+						URI uri = Net.uri(playlistItem.getString("streamUrls.main"));
+						jobs.add(new ExtractJob(uri, ExtractMethod.NONE, type, idec, title));
 					}
 				}
 			}
@@ -1306,16 +1348,20 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		
 		@Override
 		public final void getExtractJobs(Document document, List<ExtractJob> jobs) throws Exception {
+			String type = ExtractJob.SOURCE_TYPE_EXTERNAL;
+			String idec = null; // TODO
+			
 			// Try to obtain the document's title from meta tags first, then from the title tag
 			String title = Opt.of(document.selectFirst("meta[property='og:title']"))
-					.ifTrue(Objects::nonNull)
-					.map((e) -> e.attr("content"))
-					.ifTrue((t) -> t != null && !t.isBlank())
-					.orElseGet(document::title);
+				.ifTrue(Objects::nonNull)
+				.map((e) -> e.attr("content"))
+				.ifTrue((t) -> t != null && !t.isBlank())
+				.orElseGet(document::title);
+			
 			// Extract all the videos on the page
 			for(Element elVideo : document.select(SELECTOR_VIDEO)) {
-				String url = Net.uriFix(elVideo.attr("href"));
-				jobs.add(new ExtractJob(url, ExtractMethod.SOURCE_INFO, title));
+				URI uri = Net.uri(Net.uriFix(elVideo.attr("href")));
+				jobs.add(new ExtractJob(uri, ExtractMethod.SOURCE_INFO, type, idec, title));
 			}
 		}
 		
@@ -1336,6 +1382,9 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		
 		@Override
 		public final void getExtractJobs(Document document, List<ExtractJob> jobs) throws Exception {
+			String type = ExtractJob.SOURCE_TYPE_EXTERNAL;
+			String idec = null; // TODO
+			
 			// Try to obtain the document's title from linking data first, then from the title tag
 			String title = Opt.of(LinkingData.from(document).stream()
 			                        .filter((l) -> l.type().equals("VideoObject"))
@@ -1343,6 +1392,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			                  .ifTrue(Objects::nonNull)
 			                  .map((l) -> l.data().getDirectString("name"))
 			                  .orElseGet(document::title);
+			
 			// Extract all the videos on the page
 			for(Element elVideo : document.select(SELECTOR_VIDEO)) {
 				Map<String, String> data = elVideo.attributes().dataset();
@@ -1354,8 +1404,8 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 					                                              : e.getKey().toLowerCase()) + '='
 					          + JavaScript.encodeURIComponent(e.getValue()))
 					.reduce("", (a, b) -> a + '&' + b);
-				String url = URL + endpoint + '?' + urlData.substring(1);
-				jobs.add(new ExtractJob(url, ExtractMethod.SOURCE_INFO, title));
+				URI uri = Net.uri(URL + endpoint + '?' + urlData.substring(1));
+				jobs.add(new ExtractJob(uri, ExtractMethod.SOURCE_INFO, type, idec, title));
 			}
 		}
 		
