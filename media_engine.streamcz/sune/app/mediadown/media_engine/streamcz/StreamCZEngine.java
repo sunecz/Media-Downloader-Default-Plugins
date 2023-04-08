@@ -1,10 +1,6 @@
 package sune.app.mediadown.media_engine.streamcz;
 
-import java.lang.invoke.MethodHandle;
-import java.lang.invoke.MethodHandles;
-import java.lang.reflect.Method;
 import java.net.URI;
-import java.net.http.HttpHeaders;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -22,7 +18,6 @@ import org.jsoup.nodes.Element;
 
 import javafx.scene.image.Image;
 import sune.app.mediadown.concurrent.Threads;
-import sune.app.mediadown.download.segment.FileSegmentsHolder;
 import sune.app.mediadown.entity.Episode;
 import sune.app.mediadown.entity.MediaEngine;
 import sune.app.mediadown.entity.Program;
@@ -38,24 +33,19 @@ import sune.app.mediadown.media.MediaResolution;
 import sune.app.mediadown.media.MediaSource;
 import sune.app.mediadown.media.MediaType;
 import sune.app.mediadown.media.MediaUtils;
-import sune.app.mediadown.media.MediaUtils.Parser.FormatParserData;
 import sune.app.mediadown.media.SubtitlesMedia;
 import sune.app.mediadown.media.VideoMedia;
 import sune.app.mediadown.media.VideoMediaContainer;
-import sune.app.mediadown.media.format.M3U;
-import sune.app.mediadown.media.format.M3U.M3UFile;
 import sune.app.mediadown.net.HTML;
 import sune.app.mediadown.net.Net;
 import sune.app.mediadown.net.Web;
 import sune.app.mediadown.net.Web.Request;
-import sune.app.mediadown.net.Web.Response;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.task.ListTask;
 import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.JavaScript;
 import sune.app.mediadown.util.Opt;
-import sune.app.mediadown.util.Reflection;
 import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Utils.Ignore;
@@ -322,7 +312,7 @@ public final class StreamCZEngine implements MediaEngine {
 				URI mediaUri = Net.isRelativeURI(strUrl) ? splUri.resolve(strUrl) : Net.uri(strUrl);
 				MediaLanguage language = MediaLanguage.UNKNOWN;
 				MediaMetadata metadata = MediaMetadata.empty();
-				List<Media.Builder<?, ?>> media = Hotfix.createMediaBuilders(source, mediaUri, sourceURI, title, language, metadata);
+				List<Media.Builder<?, ?>> media = MediaUtils.createMediaBuilders(source, mediaUri, sourceURI, title, language, metadata);
 				
 				// Add additional subtitles, if any
 				if(!subtitlesMedia.isEmpty()) {
@@ -641,95 +631,6 @@ public final class StreamCZEngine implements MediaEngine {
 			
 			public String urlName() {
 				return urlName;
-			}
-		}
-	}
-	
-	private static final class Hotfix {
-		
-		private static final MethodHandle mh_FPD_result;
-		private static final MethodHandle mh_FPD_mediaData;
-		
-		static {
-			// Obtain all the needed method handles
-			try {
-				Method m_FPD_result = FormatParserData.class.getDeclaredMethod("result", Object.class);
-				Method m_FPD_mediaData = FormatParserData.class.getDeclaredMethod("mediaData", MediaMetadata.Builder.class);
-				Reflection.setAccessible(m_FPD_result, true);
-				Reflection.setAccessible(m_FPD_mediaData, true);
-				
-				MethodHandles.Lookup lookup = MethodHandles.lookup();
-				mh_FPD_result = lookup.unreflect(m_FPD_result);
-				mh_FPD_mediaData = lookup.unreflect(m_FPD_mediaData);
-			} catch(Exception ex) {
-				throw new IllegalStateException(ex);
-			}
-		}
-		
-		private static final Media.Builder<?, ?> mapperM3U(FormatParserData<M3UFile> parserData, String title,
-				MediaLanguage language, MediaSource source) {
-			M3UFile result = parserData.result();
-			MediaMetadata metadata = parserData.mediaData().add(parserData.data()).title(title).build();
-			return VideoMediaContainer.combined().format(MediaFormat.M3U8).media(
-				VideoMedia.segmented().source(source)
-					.uri(result.uri()).format(MediaFormat.MP4)
-					.quality(MediaQuality.fromResolution(result.resolution()))
-					.segments(Utils.<List<FileSegmentsHolder<?>>>cast(result.segmentsHolders()))
-					.resolution(result.resolution()).duration(result.duration())
-					.metadata(metadata),
-				AudioMedia.simple().source(source)
-					.uri(result.uri()).format(MediaFormat.M4A)
-					.quality(MediaQuality.UNKNOWN)
-					.language(language).duration(result.duration())
-					.metadata(metadata)
-			);
-		}
-		
-		private static final <T> FormatParserData<T> setData(FormatParserData<T> parserData, T result,
-				MediaMetadata.Builder mediaData) {
-			try {
-				mh_FPD_result.invoke(parserData, result);
-				mh_FPD_mediaData.invoke(parserData, mediaData);
-				return parserData;
-			} catch(Throwable tw) {
-				throw new IllegalStateException(tw);
-			}
-		}
-		
-		private static final List<Media.Builder<?, ?>> parse(URI uri, MediaFormat format, Request request,
-				URI sourceURI, Map<String, Object> data, long size, String title, MediaLanguage language,
-				MediaSource source) throws Exception {
-			if(format == MediaFormat.M3U8) {
-				FormatParserData<M3UFile> parserData = new FormatParserData<>(uri, format, request, sourceURI, data, size);
-				List<Media.Builder<?, ?>> media = new ArrayList<>();
-				
-				for(M3UFile result : M3U.parse(request)) {
-					boolean isProtected = result.getKey().isPresent();
-					MediaMetadata.Builder mediaData = MediaMetadata.builder().isProtected(isProtected).sourceURI(sourceURI);
-					Media.Builder<?, ?> m = mapperM3U(setData(parserData, result, mediaData), title, language, source);
-					if(m != null) media.add(m);
-				}
-				
-				return media;
-			}
-			
-			return List.of();
-		}
-		
-		private static final List<String> contentType(HttpHeaders headers) {
-			return headers.allValues("content-type");
-		}
-		
-		public static final List<Media.Builder<?, ?>> createMediaBuilders(MediaSource source, URI uri, URI sourceURI,
-				String title, MediaLanguage language, MediaMetadata data) throws Exception {
-			Request request = Request.of(uri).GET();
-			try(Response.OfStream response = Web.peek(request)) {
-				MediaFormat format = Opt.of(contentType(response.headers()))
-					.ifTrue(Objects::nonNull).map(List::stream).orElseGet(Stream::empty)
-					.map(MediaFormat::fromMimeType).filter(Objects::nonNull).findFirst()
-					.orElse(MediaFormat.UNKNOWN);
-				return parse(uri, format, request, sourceURI, data.data(), Web.size(response.headers()),
-				             title, language, source);
 			}
 		}
 	}
