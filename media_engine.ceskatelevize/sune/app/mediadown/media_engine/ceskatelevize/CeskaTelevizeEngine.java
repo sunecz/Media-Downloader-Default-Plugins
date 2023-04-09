@@ -833,7 +833,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			
 			private V1() {}
 			
-			private static final Playlist.Stream parseStream(SSDCollection collection) {
+			private static final Playlist.Stream parseStream(SSDCollection collection, String idec) {
 				URI uri = Net.uri(collection.getDirectString("url"));
 				
 				if(!collection.hasDirectCollection("subtitles")) {
@@ -853,10 +853,44 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 					subtitles.put(language, uris);
 				}
 				
+				// Fix: Sometimes the obtained subtitles files may not actually exist,
+				//      therefore we must check the availability and if they do not exist,
+				//      use an alternative method.
+				for(Entry<MediaLanguage, List<URI>> entry : subtitles.entrySet()) {
+					// It is sufficient to check only one of the URIs, if either one of them
+					// does not exist all of them do not exist.
+					URI subtitleUri = entry.getValue().get(0);
+					
+					try(Response.OfStream response = Web.peek(Request.of(subtitleUri).HEAD())) {
+						// Existing subtitles return status code of 200 and non-existent return 400,
+						// but check for 'OK' status rather than 'Not found' status.
+						if(response.statusCode() == 200) {
+							continue;
+						}
+						
+						// This simulates a call to the V0 fallback without actually using the V0 fallback.
+						// It should be fine to do so, since the only non-existent subtitles in the V1 API
+						// so far are the hidden subtitles and they are the only ones.
+						URI fallbackUri = Net.uri(Utils.format(
+							"https://imgct.ceskatelevize.cz/cache/data/ivysilani/subtitles/%{idec_prefix}s/%{idec}s/sub.vtt",
+							"idec", idec,
+							"idec_prefix", idec.substring(0, 3)
+						));
+						
+						// Just replace the old subtitles with the fallback ones. Do not check their
+						// existance to speed things up. If they do not exist, then the situation is
+						// actually the same as if we did not do this fallback procedure at all, so
+						// it should be fine.
+						entry.setValue(List.of(fallbackUri));
+					} catch(Exception ex) {
+						// Something went wrong, just ignore it since we cannot probably do anything with it
+					}
+				}
+				
 				return new Playlist.Stream(uri, subtitles);
 			}
 			
-			private static final Playlist parsePlaylist(URI uri) throws Exception {
+			private static final Playlist parsePlaylist(URI uri, String idec) throws Exception {
 				List<Playlist.Stream> streams = new ArrayList<>();
 				
 				try(Response.OfStream response = Web.requestStream(Request.of(uri).GET())) {
@@ -867,7 +901,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 					}
 					
 					for(SSDCollection item : json.getDirectCollection("streams").collectionsIterable()) {
-						Playlist.Stream stream = parseStream(item);
+						Playlist.Stream stream = parseStream(item, idec);
 						
 						if(stream == null) {
 							continue;
@@ -886,7 +920,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			
 			@Override
 			public final Playlist ofExternal(SourceInfo source) throws Exception {
-				return parsePlaylist(Net.resolve(ENDPOINT, Utils.format(PATH_EXTERNAL, "idec", source.idec())));
+				return parsePlaylist(Net.resolve(ENDPOINT, Utils.format(PATH_EXTERNAL, "idec", source.idec())), source.idec());
 			}
 		}
 		
