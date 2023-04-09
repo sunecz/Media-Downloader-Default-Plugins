@@ -15,16 +15,23 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import sune.app.mediadown.MediaDownloader;
 import sune.app.mediadown.concurrent.Threads;
 import sune.app.mediadown.entity.Episode;
 import sune.app.mediadown.entity.Program;
 import sune.app.mediadown.media.Media;
+import sune.app.mediadown.media.MediaFormat;
 import sune.app.mediadown.media.MediaLanguage;
 import sune.app.mediadown.media.MediaMetadata;
 import sune.app.mediadown.media.MediaSource;
+import sune.app.mediadown.media.MediaType;
 import sune.app.mediadown.media.MediaUtils;
+import sune.app.mediadown.media.SubtitlesMedia;
+import sune.app.mediadown.media.VideoMedia;
+import sune.app.mediadown.media.VideoMediaContainer;
+import sune.app.mediadown.media.type.SeparatedVideoMediaContainer;
 import sune.app.mediadown.media_engine.iprima.IPrimaEngine.IPrima;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper.ProgramWrapper;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper.ThreadedSpawnableTaskQueue;
@@ -432,25 +439,86 @@ final class PrimaPlus implements IPrima {
 				if(numEpisode != null && numEpisode.isEmpty()) numEpisode = null;
 				
 				String title = MediaUtils.mediaTitle(programName, numSeason, numEpisode, episodeName, false);
+				URI sourceURI = uri;
+				MediaSource source = MediaSource.of(engine);
 				
-				// Collect all available stream infos
 				SSDCollection streamInfos = SSDCollection.emptyArray();
+				List<Media.Builder<?, ?>> subtitles = new ArrayList<>();
+				
 				for(SSDCollection configItem : configData.collectionsIterable()) {
 					for(SSDCollection streamInfo : configItem.getDirectCollection("streamInfos").collectionsIterable()) {
 						streamInfos.add(streamInfo);
 					}
+					
+					if(!configItem.hasDirectCollection("subInfos")) {
+						continue; // Skip extraction of subtitles
+					}
+					
+					for(SSDCollection subInfo : configItem.getDirectCollection("subInfos").collectionsIterable()) {
+						MediaLanguage subtitleLanguage = MediaLanguage.ofCode(subInfo.getString("lang.key"));
+						URI subtitleUri = Net.uri(subInfo.getDirectString("url"));
+						MediaFormat subtitleFormat = MediaFormat.fromPath(subtitleUri.toString());
+						
+						SubtitlesMedia.Builder<?, ?> subtitle = SubtitlesMedia.simple()
+							.source(source)
+							.uri(subtitleUri)
+							.format(subtitleFormat)
+							.language(subtitleLanguage);
+						
+						subtitles.add(subtitle);
+					}
 				}
 				
-				URI sourceURI = uri;
-				MediaSource source = MediaSource.of(engine);
-				
 				for(SSDCollection streamInfo : streamInfos.collectionsIterable()) {
-					String src = streamInfo.getDirectString("url");
+					URI src = Net.uri(streamInfo.getDirectString("url"));
 					MediaLanguage language = MediaLanguage.ofCode(streamInfo.getString("lang.key"));
-					List<Media> media = MediaUtils.createMedia(source, Net.uri(src), sourceURI, title,
-						language, MediaMetadata.empty());
+					List<Media.Builder<?, ?>> media = MediaUtils.createMediaBuilders(
+						source, src, sourceURI, title, language, MediaMetadata.empty()
+					);
 					
-					for(Media m : media) {
+					if(!subtitles.isEmpty()) {
+						String type = streamInfo.getDirectString("type");
+						
+						switch(type.toLowerCase()) {
+							case "hls": {
+								// Must wrap the combined video container in a separated video container,
+								// otherwise the subtitles will not be downloaded correctly.
+								for(ListIterator<Media.Builder<?, ?>> it = media.listIterator(); it.hasNext();) {
+									VideoMediaContainer.Builder<?, ?> builder = Utils.cast(it.next());
+									
+									VideoMedia.Builder<?, ?> video = Utils.cast(
+										builder.media().stream()
+											.filter((b) -> b.type().is(MediaType.VIDEO))
+											.findFirst().get()
+									);
+									
+									// Create a new separated video container with the same properties but
+									// with all the available subtitles as well.
+									Media.Builder<?, ?> separatedMedia = SeparatedVideoMediaContainer.builder()
+										.source(video.source()).uri(video.uri()).quality(video.quality())
+										.format(builder.format()).size(video.size()).metadata(video.metadata())
+										.bandwidth(video.bandwidth()).codecs(video.codecs())
+										.duration(video.duration()).frameRate(video.frameRate())
+										.resolution(video.resolution())
+										.media(
+										       Stream.concat(Stream.of(builder), subtitles.stream())
+										             .collect(Collectors.toList())
+										);
+									
+									// Replace the old media builder with the separated one
+									it.set(separatedMedia);
+								}
+								
+								break;
+							}
+							default: {
+								media.forEach((m) -> MediaUtils.appendMedia(Utils.cast(m), subtitles));
+								break;
+							}
+						}
+					}
+					
+					for(Media m : Utils.iterable(media.stream().map(Media.Builder::build).iterator())) {
 						if(!task.add(m)) {
 							return; // Do not continue
 						}
