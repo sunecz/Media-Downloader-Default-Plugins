@@ -45,9 +45,11 @@ import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
 import sune.util.ssdf2.SSDCollection;
+import sune.util.ssdf2.SSDCollectionType;
 import sune.util.ssdf2.SSDF;
 import sune.util.ssdf2.SSDNode;
 import sune.util.ssdf2.SSDObject;
+import sune.util.ssdf2.SSDType;
 
 final class PrimaPlus implements IPrima {
 	
@@ -105,6 +107,8 @@ final class PrimaPlus implements IPrima {
 		private static final int MAX_OFFSET = 1000;
 		
 		private final IPrima iprima;
+		private IPrimaAuthenticator.SessionData sessionData;
+		private HttpHeaders sessionHeaders;
 		
 		public API(IPrima iprima) {
 			this.iprima = Objects.requireNonNull(iprima);
@@ -200,19 +204,114 @@ final class PrimaPlus implements IPrima {
 			return new ProgramWrapper(stripItemToProgram(item));
 		}
 		
-		private final HttpHeaders logIn() {
-			// It is important to specify the referer, otherwise the response code is 403.
-			Map<String, String> mutRequestHeaders = Utils.toMap("Referer", "https://www.iprima.cz/");
-			try {
-				// Try to log in to the iPrima website using the internal account to have HD sources available.
-				IPrimaAuthenticator.SessionData sessionData = IPrimaAuthenticator.getSessionData();
-				Utils.merge(mutRequestHeaders, sessionData.requestHeaders());
-			} catch(Exception ex) {
-				// Notify the user that the HD sources may not be available due to inability to log in.
-				MediaDownloader.error(new IllegalStateException("Unable to log in to the iPrima website.", ex));
+		private final List<Season> listSeasons(String programId) throws Exception {
+			final String method = "vdm.frontend.season.list.hbbtv";
+			
+			List<Season> seasons = new ArrayList<>();
+			SSDCollection result = doRequest(
+				method,
+				"_accessToken", accessToken(),
+				"id", programId,
+				"pager", Map.of(
+					"limit", 999,
+					"offset", 0
+				)
+			);
+			
+			for(SSDCollection seasonData : result.getDirectCollection("data").collectionsIterable()) {
+				String id = seasonData.getDirectString("id");
+				String title = seasonData.getDirectString("title", "");
+				int number = seasonData.getDirectInt("seasonNumber");
+				seasons.add(new Season(id, title, number));
 			}
 			
-			return Web.Headers.ofSingleMap(mutRequestHeaders);
+			return seasons;
+		}
+		
+		private final List<Episode> listEpisodes(Program program, String seasonId) throws Exception {
+			final String method = "vdm.frontend.episodes.list.hbbtv";
+			
+			List<Episode> episodes = new ArrayList<>();
+			SSDCollection result = doRequest(
+				method,
+				"_accessToken", accessToken(),
+				"id", seasonId,
+				"pager", Map.of(
+					"limit", 999,
+					"offset", 0
+				),
+				"ordering", Map.of(
+					"field", "episodeNumber",
+					"direction", "desc"
+				)
+			);
+			
+			int numSeason = result.getInt("data.seasonNumber", 0);
+			String programTitle = program.title();
+			Regex regexEpisodeName = Regex.of("Epizoda\\s+\\d+|^" + Regex.quote(programTitle) + "\\s+\\(\\d+\\)$");
+			
+			for(SSDCollection episodeData : result.getCollection("data.episodes").collectionsIterable()) {
+				SSDNode nodeUpsell = episodeData.get("distribution.upsell", null);
+				if(nodeUpsell != null && nodeUpsell.isCollection()) {
+					continue; // Not playable with the current account tier
+				}
+				
+				String title = episodeData.getDirectString("title");
+				String uri = episodeData.getString("additionals.webUrl");
+				
+				title = Utils.replaceUnicodeEscapeSequences(title);
+				uri = Utils.replaceUnicodeEscapeSequences(uri);
+				
+				int numEpisode = episodeData.getInt("additionals.episodeNumber");
+				
+				StringBuilder fullTitle = new StringBuilder();
+				fullTitle.append(programTitle);
+				fullTitle.append(" (").append(numSeason).append(". sezóna)");
+				fullTitle.append(" - ").append(numEpisode).append(". epizoda");
+				
+				if(!regexEpisodeName.matcher(title).matches()) {
+					fullTitle.append(" - ").append(title);
+				}
+				
+				Episode episode = new Episode(program, Net.uri(uri), fullTitle.toString());
+				episodes.add(episode);
+			}
+			
+			return episodes;
+		}
+		
+		private final IPrimaAuthenticator.SessionData logIn() {
+			if(sessionData == null) {
+				try {
+					// Try to log in to the iPrima website using the internal account to have HD sources available.
+					sessionData = IPrimaAuthenticator.getSessionData();
+				} catch(Exception ex) {
+					// Notify the user that the HD sources may not be available due to inability to log in.
+					MediaDownloader.error(new IllegalStateException("Unable to log in to the iPrima website.", ex));
+				}
+			}
+			
+			return sessionData;
+		}
+		
+		private final HttpHeaders logInHeaders() {
+			if(sessionHeaders == null) {
+				// It is important to specify the referer, otherwise the response code is 403.
+				Map<String, String> mutRequestHeaders = Utils.toMap("Referer", "https://www.iprima.cz/");
+				
+				IPrimaAuthenticator.SessionData sessionData = logIn();
+				if(sessionData != null) {
+					Utils.merge(mutRequestHeaders, sessionData.requestHeaders());
+					sessionHeaders = Web.Headers.ofSingleMap(mutRequestHeaders);
+				}
+			}
+			
+			return sessionHeaders;
+		}
+		
+		private final String accessToken() {
+			IPrimaAuthenticator.SessionData sessionData = logIn();
+			return sessionData != null ? sessionData.accessToken() : null;
 		}
 		
 		public final ListTask<Program> getPrograms(IPrimaEngine engine) throws Exception {
@@ -329,7 +428,7 @@ final class PrimaPlus implements IPrima {
 					return; // Do not continue
 				}
 				
-				HttpHeaders requestHeaders = logIn();
+				HttpHeaders requestHeaders = logInHeaders();
 				String html = Web.request(Request.of(program.uri()).headers(requestHeaders).GET()).body();
 				Nuxt nuxt = Nuxt.extract(html);
 				
@@ -341,46 +440,10 @@ final class PrimaPlus implements IPrima {
 					.filter((c) -> c.hasCollection("title"))
 					.findFirst().get().getName();
 				
-				SSDCollection seasons = nuxt.getCollection(dataName + ".title.seasons");
-				String programTitle = program.title();
+				String programId = nuxt.getResolved(dataName + ".title.id");
 				
-				Regex regexEpisodeName = Regex.of("Epizoda\\s+\\d+|^" + Regex.quote(programTitle) + "\\s+\\(\\d+\\)$");
-				
-				List<SSDCollection> collSeasons = List.copyOf(seasons.collections());
-				
-				int numSeason = collSeasons.size();
-				for(ListIterator<SSDCollection> itSeason = collSeasons.listIterator(numSeason);
-						itSeason.hasPrevious(); --numSeason) {
-					SSDCollection seasonData = itSeason.previous();
-					List<SSDCollection> collEpisodes = List.copyOf(seasonData.getDirectCollection("episodes").collections());
-					
-					int numEpisode = collEpisodes.size();
-					for(ListIterator<SSDCollection> itEpisode = collEpisodes.listIterator(numEpisode);
-							itEpisode.hasPrevious(); --numEpisode) {
-						SSDCollection episodeData = itEpisode.previous();
-						
-						SSDNode nodeUpsell = episodeData.get("distribution.upsell", null);
-						if(nodeUpsell != null && nodeUpsell.isCollection()) {
-							continue; // Not playable with the current account tier
-						}
-						
-						String title = nuxt.resolve(episodeData.getDirectString("title"));
-						String uri = nuxt.resolve(episodeData.getString("additionals.webUrl"));
-						
-						title = Utils.replaceUnicodeEscapeSequences(title);
-						uri = Utils.replaceUnicodeEscapeSequences(uri);
-						
-						StringBuilder fullTitle = new StringBuilder();
-						fullTitle.append(programTitle);
-						fullTitle.append(" (").append(numSeason).append(". sezóna)");
-						fullTitle.append(" - ").append(numEpisode).append(". epizoda");
-						
-						if(!regexEpisodeName.matcher(title).matches()) {
-							fullTitle.append(" - ").append(title);
-						}
-						
-						Episode episode = new Episode(program, Net.uri(uri), fullTitle.toString());
-						
+				for(Season season : listSeasons(programId)) {
+					for(Episode episode : listEpisodes(program, season.id())) {
 						if(!task.add(episode)) {
 							return; // Do not continue
 						}
@@ -392,7 +455,7 @@ final class PrimaPlus implements IPrima {
 		public final ListTask<Media> getMedia(IPrimaEngine engine, URI uri) throws Exception {
 			return ListTask.of((task) -> {
 				// Always log in first to ensure the data are correct
-				HttpHeaders requestHeaders = logIn();
+				HttpHeaders requestHeaders = logInHeaders();
 				
 				String html = Web.request(Request.of(uri).GET()).body();
 				Nuxt nuxt = Nuxt.extract(html);
@@ -597,6 +660,25 @@ final class PrimaPlus implements IPrima {
 			}
 		}
 		
+		private static final class Season {
+			
+			private final String id;
+			private final String title;
+			private final int number;
+			
+			public Season(String id, String title, int number) {
+				this.id = id;
+				this.title = title;
+				this.number = number;
+			}
+			
+			public String id() { return id; }
+			@SuppressWarnings("unused")
+			public String title() { return title; }
+			@SuppressWarnings("unused")
+			public int number() { return number; }
+		}
+		
 		private static final class Nuxt {
 			
 			private final SSDCollection data;
@@ -713,8 +795,53 @@ final class PrimaPlus implements IPrima {
 				return new Nuxt(data, mapArgs, isPremium);
 			}
 			
+			@SuppressWarnings("unused")
 			public SSDCollection getCollection(String name) {
 				return data.getCollection(name);
+			}
+			
+			private final SSDCollection resolveCollection(SSDCollection original) {
+				boolean isArray = original.getType() == SSDCollectionType.ARRAY;
+				SSDCollection resolved = isArray ? SSDF.emptyArray() : SSDF.empty();
+				
+				if(isArray) {
+					for(SSDNode node : original) {
+						if(node.isCollection()) {
+							resolved.add(resolveCollection((SSDCollection) node));
+						} else {
+							SSDObject object = (SSDObject) node;
+							
+							if(object.getType() == SSDType.UNKNOWN) {
+								resolved.add(resolve(object.getValue().stringValue()));
+							} else {
+								resolved.add(object);
+							}
+						}
+					}
+				} else {
+					for(SSDNode node : original) {
+						String name = node.getName();
+						
+						if(node.isCollection()) {
+							resolved.set(name, resolveCollection((SSDCollection) node));
+						} else {
+							SSDObject object = (SSDObject) node;
+							
+							if(object.getType() == SSDType.UNKNOWN) {
+								resolved.set(name, resolve(object.getValue().stringValue()));
+							} else {
+								resolved.set(name, object);
+							}
+						}
+					}
+				}
+				
+				return resolved;
+			}
+			
+			@SuppressWarnings("unused")
+			public SSDCollection getResolvedCollection(String name) {
+				return resolveCollection(data.getCollection(name));
 			}
 			
 			public String resolve(String value) {
