@@ -41,7 +41,7 @@ public final class IPrimaAuthenticator {
 		URL_OAUTH_LOGIN = "https://auth.iprima.cz/oauth2/login";
 		URL_OAUTH_TOKEN = "https://auth.iprima.cz/oauth2/token";
 		URL_OAUTH_AUTHORIZE = "https://auth.iprima.cz/oauth2/authorize";
-		URL_USER_AUTH = "https://www.iprima.cz/?auth_token_code=%{code}s";
+		URL_USER_AUTH = "https://www.iprima.cz/sso/login?auth_token_code=%{code}s";
 		URL_PROFILE_SELECT = "https://auth.iprima.cz/user/profile-select-perform/%{profile_id}s?continueUrl=/user/login";
 	}
 	

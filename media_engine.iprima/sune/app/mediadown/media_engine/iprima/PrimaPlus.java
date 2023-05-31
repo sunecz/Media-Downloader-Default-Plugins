@@ -391,6 +391,9 @@ final class PrimaPlus implements IPrima {
 		
 		public final ListTask<Media> getMedia(IPrimaEngine engine, URI uri) throws Exception {
 			return ListTask.of((task) -> {
+				// Always log in first to ensure the data are correct
+				HttpHeaders requestHeaders = logIn();
+				
 				String html = Web.request(Request.of(uri).GET()).body();
 				Nuxt nuxt = Nuxt.extract(html);
 				
@@ -407,7 +410,6 @@ final class PrimaPlus implements IPrima {
 					throw new IllegalStateException("Unable to extract video play ID");
 				}
 				
-				HttpHeaders requestHeaders = logIn();
 				URI configUri = Net.uri(Utils.format(URL_API_PLAY, "play_id", videoPlayId));
 				String content = Web.request(Request.of(configUri).headers(requestHeaders).GET()).body();
 				
@@ -607,18 +609,75 @@ final class PrimaPlus implements IPrima {
 				this.isPremium = isPremium;
 			}
 			
+			/**
+			 * @return 0 if an opening bracket, 1 if a closing bracket, -1 if neither.
+			 */
+			private static final int isBracketChar(int c) {
+				return c <= ')' ? ((c = c - '(') >= 0           ? 0b000 | (c)      : -1) :
+					   c <= ']' ? ((c = c - '[') >= 0 && c != 1 ? 0b010 | (c >> 1) : -1) :
+					   c <= '}' ? ((c = c - '{') >= 0 && c != 1 ? 0b100 | (c >> 1) : -1) :
+					   -1;
+			}
+			
+			private static final boolean isVarContentClosingChar(int c) {
+				return c == ';' || c == '<'; // '<' for HTML script tag
+			}
+			
+			private static final int varContentEndIndex(String string, int start) {
+				int end = string.length();
+				
+				int[] brackets = new int[3];
+				boolean escaped = false;
+				boolean sq = false;
+				boolean dq = false;
+				
+				loop:
+				for(int i = start, l = string.length(), c, v; i < l; ++i) {
+					c = string.codePointAt(i);
+					
+					if(escaped) {
+						escaped = false;
+					} else {
+						switch(c) {
+							case '\\': escaped = true; break;
+							case '\"': if(!sq) dq = !dq; break;
+							case '\'': if(!dq) sq = !sq; break;
+							default:
+								if(!sq && !dq) {
+									if((v = isBracketChar(c)) >= 0) {
+										// Adds either 1 (opening) or -1 (closing) to the bracket counter
+										brackets[v >> 1] += ((2 - ((v & 0b1) + 1)) << 1) - 1;
+									} else if(isVarContentClosingChar(c)
+													&& brackets[0] == 0
+													&& brackets[1] == 0
+													&& brackets[2] == 0) {
+										end = i;
+										break loop;
+									}
+								}
+								break;
+						}
+					}
+				}
+				
+				return end;
+			}
+			
 			public static final Nuxt extract(String html) {
 				int indexVar;
 				if((indexVar = html.indexOf("window.__NUXT__")) < 0) {
 					throw new IllegalStateException("Nuxt object does not exist");
 				}
 				
+				// Find the end of the Nuxt variable's content, so that we can extract information
+				// only from the actual data and not somewhere else.
+				final int end = varContentEndIndex(html, indexVar);
+				
 				int indexReturn;
 				if((indexReturn = html.indexOf("return", indexVar)) < 0) {
-					throw new IllegalStateException("Nuxt object has unsupported format");
+					throw new IllegalStateException("Nuxt object has an unsupported format");
 				}
 				
-				final int end = html.length();
 				String content = Utils.bracketSubstring(html, '{', '}', false, indexReturn, end);
 				
 				// Also parse the function arguments since some values are present there
@@ -647,8 +706,8 @@ final class PrimaPlus implements IPrima {
 				
 				String role = Utils.stream(state.collectionsIterable())
 					.filter((c) -> c.hasDirectObject("role"))
-					.findFirst().get()
-					.getDirectString("role").toLowerCase();
+					.findFirst().orElseGet(SSDCollection::empty)
+					.getDirectString("role", "").toLowerCase();
 				boolean isPremium = role.equals("premium");
 				
 				return new Nuxt(data, mapArgs, isPremium);
