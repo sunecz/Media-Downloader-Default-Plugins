@@ -67,7 +67,6 @@ final class IPrimaHelper {
 	private static final int CALLBACK_EXIT = -1;
 	private static final String FORMAT_EPISODE_TITLE = "%{season}s - %{episode}s";
 	private static final Regex REGEX_EPISODE_NAME = Regex.of("^\\d+\\.[^\\-]+-\\s+(.*)$");
-	private static final Regex REGEX_COMPARE_SPLIT = Regex.of("(?<=\\d+)(?!\\d)|(?<!\\d)(?=\\d+)");
 	
 	private static final String internal_request(URI uri, HttpHeaders headers) throws Exception {
 		return Web.request(Request.of(uri).headers(headers).GET()).body();
@@ -124,29 +123,8 @@ final class IPrimaHelper {
 	}
 	
 	public static final int compareNatural(String a, String b) {
-		// See: https://stackoverflow.com/posts/comments/13599980
-		String[] sa = REGEX_COMPARE_SPLIT.split(a);
-		String[] sb = REGEX_COMPARE_SPLIT.split(b);
-		
-		int la = sa.length, lb = sb.length;
-		for(int i = 0, l = Math.min(la, lb), cmp; i < l; ++i) {
-			if(sa[i].isEmpty()) {
-				cmp = sb[i].isEmpty() ? 0 : -1;
-			} else if(Character.isDigit(sa[i].codePointAt(0))
-						&& Character.isDigit(sb[i].codePointAt(0))) {
-				int ia = Integer.parseInt(sa[i]);
-				int ib = Integer.parseInt(sb[i]);
-				// Reverse the integer comparing, so that the latest
-				// episodes are first.
-				cmp = Integer.compare(ib, ia);
-			} else {
-				cmp = sa[i].compareTo(sb[i]);
-			}
-			
-			if(cmp != 0) return cmp;
-		}
-		
-		return Integer.compare(la, lb);
+		// Delegate to the new more performant method for natural comparison
+		return Utils.compareNatural(a, b);
 	}
 	
 	public static final void setPlugin(PluginBase plugin) {
