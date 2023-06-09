@@ -42,14 +42,13 @@ import sune.app.mediadown.net.Web.Request;
 import sune.app.mediadown.net.Web.Response;
 import sune.app.mediadown.task.ListTask;
 import sune.app.mediadown.util.JSON;
+import sune.app.mediadown.util.JSON.JSONCollection;
+import sune.app.mediadown.util.JSON.JSONNode;
+import sune.app.mediadown.util.JSON.JSONObject;
+import sune.app.mediadown.util.JSON.JSONType;
+import sune.app.mediadown.util.JavaScript;
 import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
-import sune.util.ssdf2.SSDCollection;
-import sune.util.ssdf2.SSDCollectionType;
-import sune.util.ssdf2.SSDF;
-import sune.util.ssdf2.SSDNode;
-import sune.util.ssdf2.SSDObject;
-import sune.util.ssdf2.SSDType;
 
 final class PrimaPlus implements IPrima {
 	
@@ -114,47 +113,47 @@ final class PrimaPlus implements IPrima {
 			this.iprima = Objects.requireNonNull(iprima);
 		}
 		
-		private static final SSDCollection doRawRequest(String body) throws Exception {
+		private static final JSONCollection doRawRequest(String body) throws Exception {
 			try(Response.OfStream response = Web.requestStream(Request.of(URL_ENDPOINT).headers(HEADERS).POST(body))) {
-				return JSON.read(response.stream()).getDirectCollection("result");
+				return JSON.read(response.stream()).getCollection("result");
 			}
 		}
 		
-		private static final SSDCollection doRequest(String method, Object... params) throws Exception {
+		private static final JSONCollection doRequest(String method, Object... params) throws Exception {
 			return doRequest(method, Utils.toMap(params));
 		}
 		
-		private static final SSDCollection doRequest(String method, Map<Object, Object> params) throws Exception {
-			SSDCollection json = APIRequest.bodyOf(method, params);
+		private static final JSONCollection doRequest(String method, Map<Object, Object> params) throws Exception {
+			JSONCollection json = APIRequest.bodyOf(method, params);
 			json.setNull("params.profileId");
-			return doRawRequest(json.toJSON(true));
+			return doRawRequest(json.toString(true));
 		}
 		
 		private final List<String> listGenres() throws Exception {
 			final String method = "vdm.frontend.genre.list";
 			
 			List<String> genres = new ArrayList<>();
-			SSDCollection result = doRequest(method);
+			JSONCollection result = doRequest(method);
 			
-			for(SSDCollection genre : result.getDirectCollection("data").collectionsIterable()) {
-				String type = genre.getDirectString("type");
+			for(JSONCollection genre : result.getCollection("data").collectionsIterable()) {
+				String type = genre.getString("type");
 				
 				if(!type.equals("static")) {
 					continue;
 				}
 				
-				genres.add(genre.getDirectString("title"));
+				genres.add(genre.getString("title"));
 			}
 			
 			return genres;
 		}
 		
-		private final SSDCollection listNextItems(String stripId, String recommId, int offset, int limit)
+		private final JSONCollection listNextItems(String stripId, String recommId, int offset, int limit)
 				throws Exception {
 			final String method = "strip.strip.nextItems.vdm";
 			final String deviceType = "WEB";
 			
-			SSDCollection result = doRequest(
+			JSONCollection result = doRequest(
 				method,
 				"deviceType", deviceType,
 				"stripId", stripId,
@@ -163,12 +162,12 @@ final class PrimaPlus implements IPrima {
 				"offset", offset
 			);
 			
-			return result.getDirectCollection("data");
+			return result.getCollection("data");
 		}
 		
-		private final <T, P> int parseItems(ListTask<P> task, SSDCollection items, Collection<T> list,
-				Function<SSDCollection, T> transformer, Function<T, P> unwrapper) throws Exception {
-			for(SSDCollection item : items.collectionsIterable()) {
+		private final <T, P> int parseItems(ListTask<P> task, JSONCollection items, Collection<T> list,
+				Function<JSONCollection, T> transformer, Function<T, P> unwrapper) throws Exception {
+			for(JSONCollection item : items.collectionsIterable()) {
 				T value = transformer.apply(item);
 				
 				list.add(value);
@@ -180,16 +179,16 @@ final class PrimaPlus implements IPrima {
 			return EXIT_SUCCESS;
 		}
 		
-		private final Program stripItemToProgram(SSDCollection item) {
-			String id = item.getDirectString("id");
-			String title = item.getDirectString("title");
-			String type = item.getDirectString("type");
+		private final Program stripItemToProgram(JSONCollection item) {
+			String id = item.getString("id");
+			String title = item.getString("title");
+			String type = item.getString("type");
 			String uri = item.getString("additionals.webUrl", null);
 			
 			// URI can be null when a non-premium user encounters premium
 			// tv show or movie.
 			if(uri == null) {
-				String slug = item.getDirectString("slug");
+				String slug = item.getString("slug");
 				
 				switch(type) {
 					case "movie":  uri = URL_BASE_MOVIE  + slug; break;
@@ -200,7 +199,7 @@ final class PrimaPlus implements IPrima {
 			return new Program(Net.uri(uri), title, "source", iprima, "id", id, "type", type);
 		}
 		
-		private final ProgramWrapper stripItemToProgramWrapper(SSDCollection item) {
+		private final ProgramWrapper stripItemToProgramWrapper(JSONCollection item) {
 			return new ProgramWrapper(stripItemToProgram(item));
 		}
 		
@@ -208,7 +207,7 @@ final class PrimaPlus implements IPrima {
 			final String method = "vdm.frontend.season.list.hbbtv";
 			
 			List<Season> seasons = new ArrayList<>();
-			SSDCollection result = doRequest(
+			JSONCollection result = doRequest(
 				method,
 				"_accessToken", accessToken(),
 				"id", programId,
@@ -218,10 +217,10 @@ final class PrimaPlus implements IPrima {
 				)
 			);
 			
-			for(SSDCollection seasonData : result.getDirectCollection("data").collectionsIterable()) {
-				String id = seasonData.getDirectString("id");
-				String title = seasonData.getDirectString("title", "");
-				int number = seasonData.getDirectInt("seasonNumber");
+			for(JSONCollection seasonData : result.getCollection("data").collectionsIterable()) {
+				String id = seasonData.getString("id");
+				String title = seasonData.getString("title", "");
+				int number = seasonData.getInt("seasonNumber");
 				seasons.add(new Season(id, title, number));
 			}
 			
@@ -232,7 +231,7 @@ final class PrimaPlus implements IPrima {
 			final String method = "vdm.frontend.episodes.list.hbbtv";
 			
 			List<Episode> episodes = new ArrayList<>();
-			SSDCollection result = doRequest(
+			JSONCollection result = doRequest(
 				method,
 				"_accessToken", accessToken(),
 				"id", seasonId,
@@ -250,13 +249,13 @@ final class PrimaPlus implements IPrima {
 			String programTitle = program.title();
 			Regex regexEpisodeName = Regex.of("Epizoda\\s+\\d+|^" + Regex.quote(programTitle) + "\\s+\\(\\d+\\)$");
 			
-			for(SSDCollection episodeData : result.getCollection("data.episodes").collectionsIterable()) {
-				SSDNode nodeUpsell = episodeData.get("distribution.upsell", null);
+			for(JSONCollection episodeData : result.getCollection("data.episodes").collectionsIterable()) {
+				JSONNode nodeUpsell = episodeData.get("distribution.upsell", null);
 				if(nodeUpsell != null && nodeUpsell.isCollection()) {
 					continue; // Not playable with the current account tier
 				}
 				
-				String title = episodeData.getDirectString("title");
+				String title = episodeData.getString("title");
 				String uri = episodeData.getString("additionals.webUrl");
 				
 				title = Utils.replaceUnicodeEscapeSequences(title);
@@ -351,8 +350,8 @@ final class PrimaPlus implements IPrima {
 					
 					@Override
 					protected Integer runTask(NextItemsTaskArgs args) throws Exception {
-						SSDCollection strip = listNextItems(args.stripId(), args.recommId(), args.offset(), perPage);
-						SSDCollection items = strip.getDirectCollection("items");
+						JSONCollection strip = listNextItems(args.stripId(), args.recommId(), args.offset(), perPage);
+						JSONCollection items = strip.getCollection("items");
 						
 						int result;
 						if((result = parseItems(task, items, programs, API.this::stripItemToProgramWrapper,
@@ -360,7 +359,7 @@ final class PrimaPlus implements IPrima {
 							return result;
 						}
 						
-						boolean hasNextItems = strip.getDirectBoolean("isNextItems");
+						boolean hasNextItems = strip.getBoolean("isNextItems");
 						
 						if(!shouldShutdown(result) && hasNextItems) {
 							int nextOffset = args.offset() + perPage;
@@ -383,7 +382,7 @@ final class PrimaPlus implements IPrima {
 				
 				for(StripGroup stripGroup : stripGroups) {
 					executor.submit(Utils.callable(() -> {
-						SSDCollection result = doRequest(
+						JSONCollection result = doRequest(
 							method,
 							"deviceType", deviceType,
 							"stripIds", stripGroup.stripIds(),
@@ -391,11 +390,11 @@ final class PrimaPlus implements IPrima {
 							"filter", stripGroup.filter()
 						);
 						
-						for(SSDCollection strip : result.getDirectCollection("data").collectionsIterable()) {
-							String stripId = strip.getName();
-							String recommId = strip.getDirectString("recommId");
-							boolean hasNextItems = strip.getDirectBoolean("isNextItems");
-							SSDCollection items = strip.getDirectCollection("items");
+						for(JSONCollection strip : result.getCollection("data").collectionsIterable()) {
+							String stripId = strip.name();
+							String recommId = strip.getString("recommId");
+							boolean hasNextItems = strip.getBoolean("isNextItems");
+							JSONCollection items = strip.getCollection("items");
 							
 							parseItems(task, items, programs, this::stripItemToProgramWrapper, ProgramWrapper::program);
 							
@@ -438,7 +437,7 @@ final class PrimaPlus implements IPrima {
 				
 				String dataName = Utils.stream(nuxt.data().collectionsIterable())
 					.filter((c) -> c.hasCollection("title"))
-					.findFirst().get().getName();
+					.findFirst().get().name();
 				
 				String programId = nuxt.getResolved(dataName + ".title.id");
 				
@@ -466,7 +465,7 @@ final class PrimaPlus implements IPrima {
 				
 				String dataName = Utils.stream(nuxt.data().collectionsIterable())
 					.filter((c) -> c.hasCollection("content"))
-					.findFirst().get().getName();
+					.findFirst().get().name();
 				String videoPlayId = nuxt.getResolved(dataName + ".content.additionals.videoPlayId");
 				
 				if(videoPlayId == null) {
@@ -480,7 +479,7 @@ final class PrimaPlus implements IPrima {
 					throw new IllegalStateException("Empty play configuration content");
 				}
 				
-				SSDCollection configData = JSON.read(content);
+				JSONCollection configData = JSON.read(content);
 				
 				// Get information for the media title
 				String programName = nuxt.getResolved(dataName + ".content.additionals.programTitle", "");
@@ -507,21 +506,21 @@ final class PrimaPlus implements IPrima {
 				URI sourceURI = uri;
 				MediaSource source = MediaSource.of(engine);
 				
-				SSDCollection streamInfos = SSDCollection.emptyArray();
+				JSONCollection streamInfos = JSONCollection.emptyArray();
 				List<Media.Builder<?, ?>> subtitles = new ArrayList<>();
 				
-				for(SSDCollection configItem : configData.collectionsIterable()) {
-					for(SSDCollection streamInfo : configItem.getDirectCollection("streamInfos").collectionsIterable()) {
+				for(JSONCollection configItem : configData.collectionsIterable()) {
+					for(JSONCollection streamInfo : configItem.getCollection("streamInfos").collectionsIterable()) {
 						streamInfos.add(streamInfo);
 					}
 					
-					if(!configItem.hasDirectCollection("subInfos")) {
+					if(!configItem.hasCollection("subInfos")) {
 						continue; // Skip extraction of subtitles
 					}
 					
-					for(SSDCollection subInfo : configItem.getDirectCollection("subInfos").collectionsIterable()) {
+					for(JSONCollection subInfo : configItem.getCollection("subInfos").collectionsIterable()) {
 						MediaLanguage subtitleLanguage = MediaLanguage.ofCode(subInfo.getString("lang.key"));
-						URI subtitleUri = Net.uri(subInfo.getDirectString("url"));
+						URI subtitleUri = Net.uri(subInfo.getString("url"));
 						MediaFormat subtitleFormat = MediaFormat.fromPath(subtitleUri.toString());
 						
 						SubtitlesMedia.Builder<?, ?> subtitle = SubtitlesMedia.simple()
@@ -534,15 +533,15 @@ final class PrimaPlus implements IPrima {
 					}
 				}
 				
-				for(SSDCollection streamInfo : streamInfos.collectionsIterable()) {
-					URI src = Net.uri(streamInfo.getDirectString("url"));
+				for(JSONCollection streamInfo : streamInfos.collectionsIterable()) {
+					URI src = Net.uri(streamInfo.getString("url"));
 					MediaLanguage language = MediaLanguage.ofCode(streamInfo.getString("lang.key"));
 					List<Media.Builder<?, ?>> media = MediaUtils.createMediaBuilders(
 						source, src, sourceURI, title, language, MediaMetadata.empty()
 					);
 					
 					if(!subtitles.isEmpty()) {
-						String type = streamInfo.getDirectString("type");
+						String type = streamInfo.getString("type");
 						
 						switch(type.toLowerCase()) {
 							case "hls": {
@@ -594,7 +593,7 @@ final class PrimaPlus implements IPrima {
 		
 		private static interface JSONSerializable {
 			
-			SSDNode toJSON();
+			JSONNode toJSON();
 		}
 		
 		private static final class Filter implements JSONSerializable {
@@ -608,10 +607,10 @@ final class PrimaPlus implements IPrima {
 			}
 			
 			@Override
-			public SSDNode toJSON() {
-				SSDCollection json = SSDCollection.empty();
-				json.setDirect("type", type);
-				json.setDirect("value", value);
+			public JSONNode toJSON() {
+				JSONCollection json = JSONCollection.empty();
+				json.set("type", type);
+				json.set("value", value);
 				return json;
 			}
 		}
@@ -681,11 +680,11 @@ final class PrimaPlus implements IPrima {
 		
 		private static final class Nuxt {
 			
-			private final SSDCollection data;
+			private final JSONCollection data;
 			private final Map<String, String> args;
 			private final boolean isPremium;
 			
-			private Nuxt(SSDCollection data, Map<String, String> args, boolean isPremium) {
+			private Nuxt(JSONCollection data, Map<String, String> args, boolean isPremium) {
 				this.data = Objects.requireNonNull(data);
 				this.args = Objects.requireNonNull(args);
 				this.isPremium = isPremium;
@@ -782,53 +781,53 @@ final class PrimaPlus implements IPrima {
 				content = regexJSCall.replaceAll(content, (m) -> "\"\"");
 				
 				// Cannot use JavaScript.readObject since the names are not quoted
-				SSDCollection object = SSDF.read(Utils.prefixUnicodeEscapeSequences(content, "\\\\\\"));
-				SSDCollection data = object.getDirectCollection("data");
-				SSDCollection state = object.getDirectCollection("state");
+				JSONCollection object = JavaScript.readObject(Utils.prefixUnicodeEscapeSequences(content, "\\\\\\"));
+				JSONCollection data = object.getCollection("data");
+				JSONCollection state = object.getCollection("state");
 				
 				String role = Utils.stream(state.collectionsIterable())
-					.filter((c) -> c.hasDirectObject("role"))
-					.findFirst().orElseGet(SSDCollection::empty)
-					.getDirectString("role", "").toLowerCase();
+					.filter((c) -> c.hasObject("role"))
+					.findFirst().orElseGet(JSONCollection::empty)
+					.getString("role", "").toLowerCase();
 				boolean isPremium = role.equals("premium");
 				
 				return new Nuxt(data, mapArgs, isPremium);
 			}
 			
 			@SuppressWarnings("unused")
-			public SSDCollection getCollection(String name) {
+			public JSONCollection getCollection(String name) {
 				return data.getCollection(name);
 			}
 			
-			private final SSDCollection resolveCollection(SSDCollection original) {
-				boolean isArray = original.getType() == SSDCollectionType.ARRAY;
-				SSDCollection resolved = isArray ? SSDF.emptyArray() : SSDF.empty();
+			private final JSONCollection resolveCollection(JSONCollection original) {
+				boolean isArray = original.type() == JSONType.ARRAY;
+				JSONCollection resolved = JSONCollection.empty(isArray);
 				
 				if(isArray) {
-					for(SSDNode node : original) {
+					for(JSONNode node : original) {
 						if(node.isCollection()) {
-							resolved.add(resolveCollection((SSDCollection) node));
+							resolved.add(resolveCollection((JSONCollection) node));
 						} else {
-							SSDObject object = (SSDObject) node;
+							JSONObject object = (JSONObject) node;
 							
-							if(object.getType() == SSDType.UNKNOWN) {
-								resolved.add(resolve(object.getValue().stringValue()));
+							if(object.type() == JSONType.UNKNOWN) {
+								resolved.add(resolve(object.stringValue()));
 							} else {
 								resolved.add(object);
 							}
 						}
 					}
 				} else {
-					for(SSDNode node : original) {
-						String name = node.getName();
+					for(JSONNode node : original) {
+						String name = node.name();
 						
 						if(node.isCollection()) {
-							resolved.set(name, resolveCollection((SSDCollection) node));
+							resolved.set(name, resolveCollection((JSONCollection) node));
 						} else {
-							SSDObject object = (SSDObject) node;
+							JSONObject object = (JSONObject) node;
 							
-							if(object.getType() == SSDType.UNKNOWN) {
-								resolved.set(name, resolve(object.getValue().stringValue()));
+							if(object.type() == JSONType.UNKNOWN) {
+								resolved.set(name, resolve(object.stringValue()));
 							} else {
 								resolved.set(name, object);
 							}
@@ -840,7 +839,7 @@ final class PrimaPlus implements IPrima {
 			}
 			
 			@SuppressWarnings("unused")
-			public SSDCollection getResolvedCollection(String name) {
+			public JSONCollection getResolvedCollection(String name) {
 				return resolveCollection(data.getCollection(name));
 			}
 			
@@ -858,16 +857,15 @@ final class PrimaPlus implements IPrima {
 			}
 			
 			public String getResolved(String name, String defaultValue) {
-				SSDObject object = data.getObject(name, null);
+				JSONObject object = data.getObject(name, null);
 				
 				if(object == null) {
 					return defaultValue;
 				}
 				
-				String value = object.getValue().stringValue();
+				String value = object.stringValue();
 				
-				switch(object.getType()) {
-					case STRING_VAR:
+				switch(object.type()) {
 					case UNKNOWN:
 						value = args.get(value);
 						break;
@@ -879,7 +877,7 @@ final class PrimaPlus implements IPrima {
 				return Utils.unquote(value);
 			}
 			
-			public SSDCollection data() {
+			public JSONCollection data() {
 				return data;
 			}
 			
@@ -894,22 +892,22 @@ final class PrimaPlus implements IPrima {
 			private APIRequest() {
 			}
 			
-			private static final void setHeader(SSDCollection json) {
+			private static final void setHeader(JSONCollection json) {
 				json.set("id", "1");
 				json.set("jsonrpc", "2.0");
 			}
 			
-			private static final void setPrimitiveParam(SSDCollection parent, String name, Object value) {
+			private static final void setPrimitiveParam(JSONCollection parent, String name, Object value) {
 				if(value == null) {
 					parent.setNull(name);
 					return;
 				}
 				
 				if(value instanceof JSONSerializable) {
-					SSDNode json = ((JSONSerializable) value).toJSON();
+					JSONNode json = ((JSONSerializable) value).toJSON();
 					
-					if(json instanceof SSDCollection) parent.set(name, (SSDCollection) json); else
-					if(json instanceof SSDObject)     parent.set(name, (SSDObject) json);
+					if(json instanceof JSONCollection) parent.set(name, (JSONCollection) json); else
+					if(json instanceof JSONObject)     parent.set(name, (JSONObject) json);
 					else                              parent.setNull(name);
 					
 					return;
@@ -917,28 +915,28 @@ final class PrimaPlus implements IPrima {
 				
 				Class<?> clazz = value.getClass();
 				
-				if(clazz == Boolean.class) 	 parent.setDirect(name, (Boolean) value); else
-		        if(clazz == Byte.class) 	 parent.setDirect(name, (Byte) value); else
-		        if(clazz == Character.class) parent.setDirect(name, (Character) value); else
-		        if(clazz == Short.class) 	 parent.setDirect(name, (Short) value); else
-		        if(clazz == Integer.class) 	 parent.setDirect(name, (Integer) value); else
-		        if(clazz == Long.class) 	 parent.setDirect(name, (Long) value); else
-		        if(clazz == Float.class) 	 parent.setDirect(name, (Float) value); else
-		        if(clazz == Double.class) 	 parent.setDirect(name, (Double) value);
-		        else                         parent.setDirect(name, String.valueOf(value));
+				if(clazz == Boolean.class) 	 parent.set(name, (Boolean) value); else
+		        if(clazz == Byte.class) 	 parent.set(name, (Byte) value); else
+		        if(clazz == Character.class) parent.set(name, (Character) value); else
+		        if(clazz == Short.class) 	 parent.set(name, (Short) value); else
+		        if(clazz == Integer.class) 	 parent.set(name, (Integer) value); else
+		        if(clazz == Long.class) 	 parent.set(name, (Long) value); else
+		        if(clazz == Float.class) 	 parent.set(name, (Float) value); else
+		        if(clazz == Double.class) 	 parent.set(name, (Double) value);
+		        else                         parent.set(name, String.valueOf(value));
 			}
 			
-			private static final void addPrimitiveParam(SSDCollection parent, Object value) {
+			private static final void addPrimitiveParam(JSONCollection parent, Object value) {
 				if(value == null) {
 					parent.addNull();
 					return;
 				}
 				
 				if(value instanceof JSONSerializable) {
-					SSDNode json = ((JSONSerializable) value).toJSON();
+					JSONNode json = ((JSONSerializable) value).toJSON();
 					
-					if(json instanceof SSDCollection) parent.add((SSDCollection) json); else
-					if(json instanceof SSDObject)     parent.add((SSDObject) json);
+					if(json instanceof JSONCollection) parent.add((JSONCollection) json); else
+					if(json instanceof JSONObject)     parent.add((JSONObject) json);
 					else                              parent.addNull();
 					
 					return;
@@ -957,8 +955,8 @@ final class PrimaPlus implements IPrima {
 		        else                         parent.add(String.valueOf(value));
 			}
 			
-			private static final SSDCollection constructMap(Map<?, ?> map) {
-				SSDCollection ssdMap = SSDCollection.empty();
+			private static final JSONCollection constructMap(Map<?, ?> map) {
+				JSONCollection ssdMap = JSONCollection.empty();
 				
 				for(Entry<?, ?> entry : map.entrySet()) {
 					setObjectParam(ssdMap, String.valueOf(entry.getKey()), entry.getValue());
@@ -967,8 +965,8 @@ final class PrimaPlus implements IPrima {
 				return ssdMap;
 			}
 			
-			private static final SSDCollection constructArray(List<?> list) {
-				SSDCollection ssdArray = SSDCollection.emptyArray();
+			private static final JSONCollection constructArray(List<?> list) {
+				JSONCollection ssdArray = JSONCollection.emptyArray();
 				
 				for(Object item : list) {
 					addObjectParam(ssdArray, item);
@@ -977,7 +975,7 @@ final class PrimaPlus implements IPrima {
 				return ssdArray;
 			}
 			
-			private static final void addObjectParam(SSDCollection parent, Object value) {
+			private static final void addObjectParam(JSONCollection parent, Object value) {
 				if(value instanceof Map) {
 					parent.add(constructMap((Map<?, ?>) value));
 				} else if(value instanceof List) {
@@ -987,18 +985,18 @@ final class PrimaPlus implements IPrima {
 				}
 			}
 			
-			private static final void setObjectParam(SSDCollection parent, String name, Object value) {
+			private static final void setObjectParam(JSONCollection parent, String name, Object value) {
 				if(value instanceof Map) {
-					parent.setDirect(name, constructMap((Map<?, ?>) value));
+					parent.set(name, constructMap((Map<?, ?>) value));
 				} else if(value instanceof List) {
-					parent.setDirect(name, constructArray((List<?>) value));
+					parent.set(name, constructArray((List<?>) value));
 				} else {
 					setPrimitiveParam(parent, name, value);
 				}
 			}
 			
-			private static final SSDCollection paramsOf(Map<Object, Object> params) {
-				SSDCollection json = SSDCollection.empty();
+			private static final JSONCollection paramsOf(Map<Object, Object> params) {
+				JSONCollection json = JSONCollection.empty();
 				
 				for(Entry<Object, Object> entry : params.entrySet()) {
 					setObjectParam(json, String.valueOf(entry.getKey()), entry.getValue());
@@ -1007,8 +1005,8 @@ final class PrimaPlus implements IPrima {
 				return json;
 			}
 			
-			public static final SSDCollection bodyOf(String method, Map<Object, Object> params) {
-				SSDCollection json = SSDCollection.empty();
+			public static final JSONCollection bodyOf(String method, Map<Object, Object> params) {
+				JSONCollection json = JSONCollection.empty();
 				setHeader(json);
 				json.set("method", method);
 				json.set("params", paramsOf(params));

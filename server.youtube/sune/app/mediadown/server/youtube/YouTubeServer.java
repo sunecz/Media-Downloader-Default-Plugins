@@ -43,13 +43,13 @@ import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.task.ListTask;
 import sune.app.mediadown.util.CheckedBiFunction;
+import sune.app.mediadown.util.JSON.JSONCollection;
 import sune.app.mediadown.util.JavaScript;
 import sune.app.mediadown.util.Pair;
 import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Tuple;
 import sune.app.mediadown.util.UserAgent;
 import sune.app.mediadown.util.Utils;
-import sune.util.ssdf2.SSDCollection;
 
 public class YouTubeServer implements Server {
 	
@@ -95,30 +95,30 @@ public class YouTubeServer implements Server {
 				}
 				
 				String playerConfig = Utils.bracketSubstring(scriptHTML, '{', '}', false, matcher.end() - 1, scriptHTML.length());
-				SSDCollection dataConfig = JavaScript.readObject(Utils.prefixUnicodeEscapeSequences(playerConfig, "\\\\\\"));
+				JSONCollection dataConfig = JavaScript.readObject(Utils.prefixUnicodeEscapeSequences(playerConfig, "\\\\\\"));
 				String title = JavaScript.replaceUnicodeEscapeSequences(dataConfig.getString("videoDetails.title"));
-				SSDCollection formatsConfig = dataConfig.getCollection("streamingData.adaptiveFormats");
+				JSONCollection formatsConfig = dataConfig.getCollection("streamingData.adaptiveFormats");
 				List<Tuple> videos = new ArrayList<>();
 				List<Tuple> audios = new ArrayList<>();
 				MediaFormat objFormat; MediaQuality objQuality; List<Tuple> list;
 				
 				// Parse the formats and obtains information about them
-				for(SSDCollection format : formatsConfig.collectionsIterable()) {
-					MediaMimeType mimeType = MediaMimeType.fromString(format.getDirectString("mimeType"));
+				for(JSONCollection format : formatsConfig.collectionsIterable()) {
+					MediaMimeType mimeType = MediaMimeType.fromString(format.getString("mimeType"));
 					String type = mimeType.type();
 					String typeAndSubtype = mimeType.typeAndSubtype();
-					double duration = Double.valueOf(format.getDirectString("approxDurationMs", "0.0")) / 1000.0;
+					double duration = Double.valueOf(format.getString("approxDurationMs", "0.0")) / 1000.0;
 					
 					if(type.startsWith("audio")) {
 						// Parse the audio's format
 						MediaFormat audioFormat = MediaFormat.fromMimeType(typeAndSubtype);
 						objFormat = audioFormat;
 						// Parse the audio's quality
-						String qualityLabel = format.getDirectString("audioQuality");
+						String qualityLabel = format.getString("audioQuality");
 						qualityLabel = qualityLabel.replace("AUDIO_QUALITY_", "");
 						objQuality = MediaQuality.fromString(qualityLabel, MediaType.AUDIO);
-						int bitRate = format.getDirectInt("bitrate", 0);
-						int sampleRate = format.getDirectInt("audioSampleRate", 0);
+						int bitRate = format.getInt("bitrate", 0);
+						int sampleRate = format.getInt("audioSampleRate", 0);
 						objQuality = objQuality.withValue(new MediaQuality.AudioQualityValue(0, sampleRate, bitRate, true));
 						// Set to which list this item should be added
 						list = audios;
@@ -127,7 +127,7 @@ public class YouTubeServer implements Server {
 						MediaFormat videoFormat = MediaFormat.fromMimeType(typeAndSubtype);
 						objFormat = videoFormat;
 						// Parse the video's quality
-						String qualityLabel = format.getDirectString("qualityLabel");
+						String qualityLabel = format.getString("qualityLabel");
 						objQuality = MediaQuality.fromString(qualityLabel, MediaType.VIDEO);
 						// Set to which list this item should be added
 						list = videos;
@@ -137,13 +137,13 @@ public class YouTubeServer implements Server {
 					String videoURL = null;
 					// Video's URL does not need to be signed
 					if(format.has("url")) {
-						videoURL = JavaScript.replaceUnicodeEscapeSequences(format.getDirectString("url"));
+						videoURL = JavaScript.replaceUnicodeEscapeSequences(format.getString("url"));
 					}
 					// Video's URL must be signed
 					else {
-						String cipher = format.getDirectString("cipher", null);
+						String cipher = format.getString("cipher", null);
 						if(cipher == null)
-							cipher = format.getDirectString("signatureCipher", null);
+							cipher = format.getString("signatureCipher", null);
 						// Cannot get the cipher, just skip the source
 						if(cipher == null)
 							continue;
@@ -156,7 +156,7 @@ public class YouTubeServer implements Server {
 					videoURL = YT.maybeDecipherRateBypass(videoURL, document);
 					
 					// Obtain the video/audio's size
-					long size = Long.valueOf(format.getDirectString("contentLength", "-1"));
+					long size = Long.valueOf(format.getString("contentLength", "-1"));
 					// Add the tuple with all information to the respective list
 					list.add(new Tuple(videoURL, objFormat, objQuality, size, mimeType.codecs(), duration));
 				}

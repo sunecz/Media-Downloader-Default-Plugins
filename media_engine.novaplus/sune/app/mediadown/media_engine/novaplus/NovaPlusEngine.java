@@ -31,10 +31,10 @@ import sune.app.mediadown.net.Web.Response;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.task.ListTask;
+import sune.app.mediadown.util.JSON.JSONCollection;
 import sune.app.mediadown.util.JavaScript;
 import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
-import sune.util.ssdf2.SSDCollection;
 
 public final class NovaPlusEngine implements MediaEngine {
 	
@@ -76,11 +76,11 @@ public final class NovaPlusEngine implements MediaEngine {
 	NovaPlusEngine() {
 	}
 	
-	private static final String mediaTitle(SSDCollection streamInfo) {
+	private static final String mediaTitle(JSONCollection streamInfo) {
 		// NovaPlus has weird naming, this is actually correct
-		String programName = streamInfo.getDirectString("episode", "");
-		String episodeText = streamInfo.getDirectString("programName", "");
-		int numSeason = streamInfo.getDirectInt("seasonNumber", 0);
+		String programName = streamInfo.getString("episode", "");
+		String episodeText = streamInfo.getString("programName", "");
+		int numSeason = streamInfo.getInt("seasonNumber", 0);
 		int numEpisode = -1;
 		String episodeName = ""; // Use empty string rather than null
 		
@@ -263,17 +263,17 @@ public final class NovaPlusEngine implements MediaEngine {
 		conScript = Utils.bracketSubstring(conScript, '{', '}', false, conScript.indexOf('{', 1), conScript.length());
 		
 		if(!conScript.isEmpty()) {
-			SSDCollection scriptData = JavaScript.readObject(conScript);
+			JSONCollection scriptData = JavaScript.readObject(conScript);
 			
 			if(scriptData != null) {
-				SSDCollection tracks = scriptData.getCollection("tracks");
+				JSONCollection tracks = scriptData.getCollection("tracks");
 				URI sourceURI = uri;
 				MediaSource source = MediaSource.of(this);
 				
-				for(SSDCollection node : tracks.collectionsIterable()) {
-					for(SSDCollection coll : ((SSDCollection) node).collectionsIterable()) {
-						String videoURL = coll.getDirectString("src");
-						MediaLanguage language = MediaLanguage.ofCode(coll.getDirectString("lang"));
+				for(JSONCollection node : tracks.collectionsIterable()) {
+					for(JSONCollection coll : ((JSONCollection) node).collectionsIterable()) {
+						String videoURL = coll.getString("src");
+						MediaLanguage language = MediaLanguage.ofCode(coll.getString("lang"));
 						String title = mediaTitle(scriptData.getCollection("plugins.measuring.streamInfo"));
 						List<Media> media = MediaUtils.createMedia(source, Net.uri(videoURL), sourceURI,
 							title, language, MediaMetadata.empty());

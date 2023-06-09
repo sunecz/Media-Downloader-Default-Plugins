@@ -52,14 +52,14 @@ import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.task.ListTask;
 import sune.app.mediadown.util.JSON;
+import sune.app.mediadown.util.JSON.JSONCollection;
+import sune.app.mediadown.util.JSON.JSONObject;
 import sune.app.mediadown.util.JavaScript;
 import sune.app.mediadown.util.Opt;
 import sune.app.mediadown.util.Reflection;
 import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Utils.Ignore;
-import sune.util.ssdf2.SSDCollection;
-import sune.util.ssdf2.SSDObject;
 
 public final class CeskaTelevizeEngine implements MediaEngine {
 	
@@ -394,40 +394,40 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			return program.uri() + id + "/";
 		}
 		
-		private static final Program parseProgram(SSDCollection data) {
-			String id = data.getDirectString("id");
-			String url = programSlugToURL(data.getDirectString("slug"));
-			String title = data.getDirectString("title");
+		private static final Program parseProgram(JSONCollection data) {
+			String id = data.getString("id");
+			String url = programSlugToURL(data.getString("slug"));
+			String title = data.getString("title");
 			return new Program(Net.uri(url), title, "id", id);
 		}
 		
-		private static final Episode parseEpisode(Program program, SSDCollection data) {
-			String id = data.getDirectString("id");
+		private static final Episode parseEpisode(Program program, JSONCollection data) {
+			String id = data.getString("id");
 			String url = episodeSlugToURL(program, id);
-			String title = data.getDirectString("title");
-			boolean playable = data.getDirectBoolean("playable");
+			String title = data.getString("title");
+			boolean playable = data.getBoolean("playable");
 			return new Episode(program, Net.uri(url), title, "id", id, "playable", playable);
 		}
 		
 		private static final String createRequestBody(String operationName, String query, Object... args) {
 			if((args.length & 1) != 0)
 				throw new IllegalArgumentException("Arguments length must be even.");
-			SSDCollection json = SSDCollection.empty();
+			JSONCollection json = JSONCollection.empty();
 			json.set("operationName", operationName);
 			json.set("query", query);
-			SSDCollection vars = SSDCollection.empty();
+			JSONCollection vars = JSONCollection.empty();
 			for(int i = 0, l = args.length; i < l; i += 2) {
 				String name = (String) args[i];
 				Object value = args[i + 1];
 				if(value != null) { // Do not permit null values
-					vars.set(name, SSDObject.of(name, value));
+					vars.set(name, JSONObject.of(value));
 				}
 			}
 			json.set("variables", vars);
-			return json.toJSON(true).replaceAll("\\n", "\\\\n");
+			return json.toString(true).replaceAll("\\n", "\\\\n");
 		}
 		
-		private static final SSDCollection doOperation(String operationName, String query, Object... variables) throws Exception {
+		private static final JSONCollection doOperation(String operationName, String query, Object... variables) throws Exception {
 			String body = createRequestBody(operationName, query, variables);
 			String contentType = "application/json";
 			HttpHeaders headers = Web.Headers.ofSingle("Referer", REFERER);
@@ -444,13 +444,13 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		}
 		
 		public static final CollectionAPIResult getProgramsWithCategory(int categoryId, int offset, int length) throws Exception {
-			SSDCollection json = doOperation("GetCategoryById", QUERY_GET_PROGRAMS_BY_CATEGORY,
+			JSONCollection json = doOperation("GetCategoryById", QUERY_GET_PROGRAMS_BY_CATEGORY,
 				"categoryId", String.valueOf(categoryId),
 				"limit", length,
 				"offset", offset,
 				"order", "asc",
 				"orderBy", "alphabet");
-			SSDCollection items = json.getCollection("data.showFindByGenre.items");
+			JSONCollection items = json.getCollection("data.showFindByGenre.items");
 			int total = json.getInt("data.showFindByGenre.totalCount");
 			return new CollectionAPIResult(items, total);
 		}
@@ -460,13 +460,13 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		}
 		
 		public static final CollectionAPIResult getEpisodes(String idec, int offset, int length, String seasonId) throws Exception {
-			SSDCollection json = doOperation("GetEpisodes", QUERY_GET_EPISODES,
+			JSONCollection json = doOperation("GetEpisodes", QUERY_GET_EPISODES,
 				"idec", idec,
 				"limit", length,
 				"offset", offset,
 				"orderBy", "newest",
 				"seasonId", seasonId);
-			SSDCollection items = json.getCollection("data.episodesPreviewFind.items");
+			JSONCollection items = json.getCollection("data.episodesPreviewFind.items");
 			int total = json.getInt("data.episodesPreviewFind.totalCount");
 			return new CollectionAPIResult(items, total);
 		}
@@ -480,7 +480,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 				do {
 					result = getProgramsWithCategory(categoryId, offset, MAX_ITEMS_PER_PAGE);
 					
-					for(SSDCollection item : result.items().collectionsIterable()) {
+					for(JSONCollection item : result.items().collectionsIterable()) {
 						Program program = parseProgram(item);
 						
 						if(!task.add(new ProgramWrapper(program))) {
@@ -505,7 +505,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			do {
 				result = getEpisodes(idec, offset, MAX_ITEMS_PER_PAGE);
 				
-				for(SSDCollection item : result.items().collectionsIterable()) {
+				for(JSONCollection item : result.items().collectionsIterable()) {
 					Episode episode = parseEpisode(program, item);
 					
 					if(!task.add(episode)) {
@@ -522,25 +522,25 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		}
 		
 		public static final CollectionAPIResult searchShows(String text, int offset, int limit) throws Exception {
-			SSDCollection json = doOperation(
+			JSONCollection json = doOperation(
 				"SearchShows", QUERY_SEARCH_SHOWS,
 				"limit", limit,
 				"offset", offset,
 				"search", text,
 				"onlyPlayable", false
 			);
-			SSDCollection items = json.getCollection("data.searchShows.items");
+			JSONCollection items = json.getCollection("data.searchShows.items");
 			int total = json.getInt("data.searchShows.totalCount");
 			return new CollectionAPIResult(items, total);
 		}
 		
 		public static final String getShowId(String showCode) throws Exception {
 			return Opt.of(Utils.stream(searchShows(showCode, 0, 1).items().collectionsIterable())
-			                   .filter((c) -> c.getDirectString("code").equals(showCode))
+			                   .filter((c) -> c.getString("code").equals(showCode))
 			                   .findFirst())
-					  .<Optional<SSDCollection>>castAny()
+					  .<Optional<JSONCollection>>castAny()
 					  .ifTrue(Optional::isPresent)
-					  .map((o) -> o.get().getDirectString("id"))
+					  .map((o) -> o.get().getString("id"))
 					  .orElse(null);
 		}
 		
@@ -550,15 +550,15 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		
 		static final class CollectionAPIResult {
 			
-			private final SSDCollection items;
+			private final JSONCollection items;
 			private final int total;
 			
-			public CollectionAPIResult(SSDCollection items, int total) {
+			public CollectionAPIResult(JSONCollection items, int total) {
 				this.items = items;
 				this.total = total;
 			}
 			
-			public SSDCollection items() {
+			public JSONCollection items() {
 				return items;
 			}
 			
@@ -754,18 +754,18 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			
 			private V0() {}
 			
-			private static final Playlist.Stream parseStream(SSDCollection collection) {
+			private static final Playlist.Stream parseStream(JSONCollection collection) {
 				URI uri = Net.uri(collection.getString("streamUrls.main"));
 				
-				if(!collection.hasDirectCollection("subtitles")) {
+				if(!collection.hasCollection("subtitles")) {
 					return new Playlist.Stream(uri, Map.of());
 				}
 				
 				Map<MediaLanguage, List<URI>> subtitles = new LinkedHashMap<>();
 				
-				for(SSDCollection item : collection.getDirectCollection("subtitles").collectionsIterable()) {
-					MediaLanguage language = MediaLanguage.ofCode(item.getDirectString("code"));
-					List<URI> uris = List.of(Net.uri(item.getDirectString("url")));
+				for(JSONCollection item : collection.getCollection("subtitles").collectionsIterable()) {
+					MediaLanguage language = MediaLanguage.ofCode(item.getString("code"));
+					List<URI> uris = List.of(Net.uri(item.getString("url")));
 					subtitles.put(language, uris);
 				}
 				
@@ -776,9 +776,9 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 				List<Playlist.Stream> streams = new ArrayList<>();
 				
 				try(Response.OfStream response = Web.requestStream(Request.of(uri).GET())) {
-					SSDCollection json = JSON.read(response.stream());
+					JSONCollection json = JSON.read(response.stream());
 					
-					for(SSDCollection item : json.getDirectCollection("playlist").collectionsIterable()) {
+					for(JSONCollection item : json.getCollection("playlist").collectionsIterable()) {
 						Playlist.Stream stream = parseStream(item);
 						
 						if(stream == null) {
@@ -810,8 +810,8 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 				
 				URI uri;
 				try(Response.OfStream response = Web.requestStream(Request.of(ENDPOINT).POST(body))) {
-					SSDCollection json = JSON.read(response.stream());
-					uri = Net.uri(json.getDirectString("url"));
+					JSONCollection json = JSON.read(response.stream());
+					uri = Net.uri(json.getString("url"));
 				}
 				
 				return parsePlaylist(uri);
@@ -833,21 +833,21 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			
 			private V1() {}
 			
-			private static final Playlist.Stream parseStream(SSDCollection collection, String idec) {
-				URI uri = Net.uri(collection.getDirectString("url"));
+			private static final Playlist.Stream parseStream(JSONCollection collection, String idec) {
+				URI uri = Net.uri(collection.getString("url"));
 				
-				if(!collection.hasDirectCollection("subtitles")) {
+				if(!collection.hasCollection("subtitles")) {
 					return new Playlist.Stream(uri, Map.of());
 				}
 				
 				Map<MediaLanguage, List<URI>> subtitles = new LinkedHashMap<>();
 				
-				for(SSDCollection item : collection.getDirectCollection("subtitles").collectionsIterable()) {
-					MediaLanguage language = MediaLanguage.ofCode(item.getDirectString("language"));
+				for(JSONCollection item : collection.getCollection("subtitles").collectionsIterable()) {
+					MediaLanguage language = MediaLanguage.ofCode(item.getString("language"));
 					List<URI> uris = new ArrayList<>();
 					
-					for(SSDCollection file : item.getDirectCollection("files").collectionsIterable()) {
-						uris.add(Net.uri(file.getDirectString("url")));
+					for(JSONCollection file : item.getCollection("files").collectionsIterable()) {
+						uris.add(Net.uri(file.getString("url")));
 					}
 					
 					subtitles.put(language, uris);
@@ -894,13 +894,13 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 				List<Playlist.Stream> streams = new ArrayList<>();
 				
 				try(Response.OfStream response = Web.requestStream(Request.of(uri).GET())) {
-					SSDCollection json = JSON.read(response.stream());
+					JSONCollection json = JSON.read(response.stream());
 					
-					if(json.hasDirect("error") || json.hasDirect("message")) {
+					if(json.has("error") || json.has("message")) {
 						return null; // Do not throw exception
 					}
 					
-					for(SSDCollection item : json.getDirectCollection("streams").collectionsIterable()) {
+					for(JSONCollection item : json.getCollection("streams").collectionsIterable()) {
 						Playlist.Stream stream = parseStream(item, idec);
 						
 						if(stream == null) {
@@ -977,7 +977,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		private static LinkingData EMPTY;
 		
 		private final Document document;
-		private final SSDCollection data;
+		private final JSONCollection data;
 		private final String type;
 		
 		private LinkingData() {
@@ -986,10 +986,10 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			this.type = "none";
 		}
 		
-		private LinkingData(Document document, SSDCollection data) {
+		private LinkingData(Document document, JSONCollection data) {
 			this.document = Objects.requireNonNull(document);
 			this.data = Objects.requireNonNull(data);
-			this.type = data.getDirectString("@type");
+			this.type = data.getString("@type");
 		}
 		
 		public static final LinkingData empty() {
@@ -1011,7 +1011,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			return document;
 		}
 		
-		public final SSDCollection data() {
+		public final JSONCollection data() {
 			return data;
 		}
 		
@@ -1029,10 +1029,10 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			if(ld.isEmpty()) return defaultValue;
 			
 			Document document = ld.document();
-			SSDCollection data = ld.data();
+			JSONCollection data = ld.data();
 			
 			String programName = data.getString("partOfTVSeries.name", "");
-			String episodeName = data.getDirectString("name", "");
+			String episodeName = data.getString("name", "");
 			String numSeason = "";
 			String numEpisode = "";
 			
@@ -1049,13 +1049,13 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			
 			Element elData = document.selectFirst("script#__NEXT_DATA__");
 			if(elData != null) {
-				SSDCollection mediaData = JavaScript.readObject(elData.html());
-				SSDCollection meta = mediaData.getCollection("props.pageProps.data.mediaMeta");
-				SSDCollection seasons = meta.getCollection("show.seasons", null);
+				JSONCollection mediaData = JavaScript.readObject(elData.html());
+				JSONCollection meta = mediaData.getCollection("props.pageProps.data.mediaMeta");
+				JSONCollection seasons = meta.getCollection("show.seasons", null);
 				
 				// Try to obtain the season number
 				if(seasons != null) {
-					String activeSeasonId = meta.getDirectString("activeSeasonId", null);
+					String activeSeasonId = meta.getString("activeSeasonId", null);
 					
 					if(activeSeasonId == null || activeSeasonId.equals("null")) {
 						// Some episodes can be visible only on the All episodes page. No season
@@ -1063,8 +1063,8 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 						numSeason = "";
 					} else {
 						String textSeason = Utils.stream(seasons.collectionsIterable())
-								.filter((c) -> c.getDirectString("id", "").equals(activeSeasonId))
-								.map((c) -> c.getDirectString("title", ""))
+								.filter((c) -> c.getString("id", "").equals(activeSeasonId))
+								.map((c) -> c.getString("title", ""))
 								.findFirst().orElse(null);
 						
 						if(textSeason != null) {
@@ -1102,7 +1102,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		}
 		
 		public static final String ofArticle(LinkingData ld, String defaultValue) throws Exception {
-			return !ld.isEmpty() ? ld.data().getDirectString("headline", defaultValue) : defaultValue;
+			return !ld.isEmpty() ? ld.data().getString("headline", defaultValue) : defaultValue;
 		}
 	}
 	
@@ -1137,11 +1137,11 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			do {
 				result = API.getEpisodes(programIDEC, offset, API.MAX_ITEMS_PER_PAGE, seasonId);
 				
-				SSDCollection items = result.items();
+				JSONCollection items = result.items();
 				ctr = items.length() - 1; // Index in reverse
 				
-				for(SSDCollection item : items.collectionsIterable()) {
-					String id = item.getDirectString("id", "");
+				for(JSONCollection item : items.collectionsIterable()) {
+					String id = item.getString("id", "");
 					episodes.add(id); // Put to the cache
 					if(id.equals(episodeId)) index = ctr; // Do not break from the loop due to caching
 					--ctr; // Index in reverse
@@ -1405,7 +1405,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		@Override
 		public final void getExtractJobs(Document document, List<ExtractJob> jobs) throws Exception {
 			Set<String> allowedNames = Set.of("id", "key", "date", "requestSource", "quality", "region", "title");
-			List<SSDCollection> items = new ArrayList<>();
+			List<JSONCollection> items = new ArrayList<>();
 			Set<String> ids = new HashSet<>();
 			
 			// Sometimes the data-ctcomp-data attribute has incorrectly escaped HTML entities,
@@ -1413,23 +1413,23 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			Regex regexFixAttr = Regex.of("&u?o?t?;");
 			
 			for(Element elVideo : document.select(SELECTOR_VIDEO)) {
-				SSDCollection data = JSON.read(regexFixAttr.replaceAll(elVideo.attr("data-ctcomp-data"), "\""));
+				JSONCollection data = JSON.read(regexFixAttr.replaceAll(elVideo.attr("data-ctcomp-data"), "\""));
 				
-				List<SSDCollection> children = new ArrayList<>();
-				if(data.hasDirectCollection("items")) { // VideoGallery
-					for(SSDCollection item : data.getDirectCollection("items").collectionsIterable()) {
+				List<JSONCollection> children = new ArrayList<>();
+				if(data.hasCollection("items")) { // VideoGallery
+					for(JSONCollection item : data.getCollection("items").collectionsIterable()) {
 						children.add(item.getCollection("video.data"));
 					}
 				} else { // Video
 					children.add(data);
 				}
 				
-				for(SSDCollection child : children) {
-					SSDCollection playlist = child.getCollection("source.playlist");
+				for(JSONCollection child : children) {
+					JSONCollection playlist = child.getCollection("source.playlist");
 					
 					// Collect individual playlist item's information
-					for(SSDCollection item : playlist.collectionsIterable()) {
-						String id = item.getDirectString("id", "");
+					for(JSONCollection item : playlist.collectionsIterable()) {
+						String id = item.getString("id", "");
 						
 						if(ids.contains(id)) {
 							continue;
@@ -1437,15 +1437,15 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 						
 						ids.add(id);
 						
-						SSDCollection newItem = SSDCollection.empty();
-						String type = item.getDirectString("type", "vod").toLowerCase();
-						newItem.setDirect("type", type);
-						newItem.setDirect("playerType", "dash");
-						newItem.setDirect("drm", 0);
-						newItem.setDirect("canBePlay", 1);
+						JSONCollection newItem = JSONCollection.empty();
+						String type = item.getString("type", "vod").toLowerCase();
+						newItem.set("type", type);
+						newItem.set("playerType", "dash");
+						newItem.set("drm", 0);
+						newItem.set("canBePlay", 1);
 						StreamSupport.stream(item.objectsIterable().spliterator(), false)
-									 .filter((o) -> allowedNames.contains(o.getName()))
-									 .forEach((o) -> newItem.setDirect(o.getName(), o));
+									 .filter((o) -> allowedNames.contains(o.name()))
+									 .forEach((o) -> newItem.set(o.name(), o));
 						
 						items.add(newItem);
 					}
@@ -1453,27 +1453,27 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			}
 			
 			URI apiUri = Net.uri(API_URL);
-			for(SSDCollection item : items) {
+			for(JSONCollection item : items) {
 				// Construct the HTTP POST body as a JSON object
-				SSDCollection coll = SSDCollection.empty();
-				SSDCollection array = SSDCollection.emptyArray();
-				String contentType = item.getDirectString("type");
-				String title = item.getDirectString("title");
-				item.removeDirect("type");
-				item.removeDirect("title");
+				JSONCollection coll = JSONCollection.empty();
+				JSONCollection array = JSONCollection.emptyArray();
+				String contentType = item.getString("type");
+				String title = item.getString("title");
+				item.remove("type");
+				item.remove("title");
 				array.add(item);
-				coll.setDirect("contentType", contentType);
-				coll.setDirect("items", array);
+				coll.set("contentType", contentType);
+				coll.set("items", array);
 				
-				String body = Net.queryString("data", coll.toJSON(true));
+				String body = Net.queryString("data", coll.toString(true));
 				Request request = Request.of(apiUri).POST(body);
 				
 				// Do the request to obtain the stream URLs
 				try(Response.OfStream response = Web.requestStream(request)) {
-					SSDCollection result = JSON.read(response.stream());
+					JSONCollection result = JSON.read(response.stream());
 					
-					for(SSDCollection playlistItem : result.getCollection("RESULT.playlist").collectionsIterable()) {
-						SourceInfo source = SourceInfo.ofEpisode(playlistItem.getDirectString("id"));
+					for(JSONCollection playlistItem : result.getCollection("RESULT.playlist").collectionsIterable()) {
+						SourceInfo source = SourceInfo.ofEpisode(playlistItem.getString("id"));
 						URI uri = Net.uri(playlistItem.getString("streamUrls.main"));
 						jobs.add(new ExtractJob(uri, ExtractMethod.NONE, source, title));
 					}
@@ -1542,7 +1542,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			                        .filter((l) -> l.type().equals("VideoObject"))
 			                        .findFirst().orElse(null))
 			                  .ifTrue(Objects::nonNull)
-			                  .map((l) -> l.data().getDirectString("name"))
+			                  .map((l) -> l.data().getString("name"))
 			                  .orElseGet(document::title);
 			
 			// Extract all the videos on the page

@@ -24,6 +24,7 @@ import sune.app.mediadown.media_engine.iprima.IPrimaAuthenticator.SessionData;
 import sune.app.mediadown.net.Net;
 import sune.app.mediadown.net.Web;
 import sune.app.mediadown.util.JSON;
+import sune.app.mediadown.util.JSON.JSONCollection;
 import sune.app.mediadownloader.drm.DRMBrowser;
 import sune.app.mediadownloader.drm.DRMContext;
 import sune.app.mediadownloader.drm.DRMEngine;
@@ -31,7 +32,6 @@ import sune.app.mediadownloader.drm.DRMResolver;
 import sune.app.mediadownloader.drm.resolver.SimpleDRMResolver;
 import sune.app.mediadownloader.drm.util.JS;
 import sune.app.mediadownloader.drm.util.MPDQualityModifier;
-import sune.util.ssdf2.SSDCollection;
 
 public class IPrimaDRMEngine implements DRMEngine {
 	
@@ -198,21 +198,21 @@ public class IPrimaDRMEngine implements DRMEngine {
 				modifier.modify(media.quality());
 				content = modifier.xml().html();
 			} else if(isAPIPlayURL(uri)) {
-				SSDCollection json = JSON.read(content);
+				JSONCollection json = JSON.read(content);
 				
 				// Remove ads before, after and throughout the video playback
 				json.set("adsEnabled", false);
 				json.set("videoAdsPreRoll", 0);
 				json.set("videoAdsMidRoll", 0);
 				json.set("videoAdsPostRoll", 0);
-				json.set("videoAdsMidRollPositions", SSDCollection.emptyArray());
-				json.set("videoAdsOverlayPositions", SSDCollection.emptyArray());
-				json.set("videoAdsPreRollKeys", SSDCollection.emptyArray());
-				json.set("videoAdsMidRollKeys", SSDCollection.emptyArray());
-				json.set("videoAdsPostRollKeys", SSDCollection.emptyArray());
+				json.set("videoAdsMidRollPositions", JSONCollection.emptyArray());
+				json.set("videoAdsOverlayPositions", JSONCollection.emptyArray());
+				json.set("videoAdsPreRollKeys", JSONCollection.emptyArray());
+				json.set("videoAdsMidRollKeys", JSONCollection.emptyArray());
+				json.set("videoAdsPostRollKeys", JSONCollection.emptyArray());
 				json.set("videoAdsPreRollDelay", 0);
 				
-				content = json.toJSON();
+				content = json.toString();
 			}
 			
 			return content;

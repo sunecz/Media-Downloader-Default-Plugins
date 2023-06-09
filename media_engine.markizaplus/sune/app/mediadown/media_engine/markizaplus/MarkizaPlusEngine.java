@@ -32,10 +32,10 @@ import sune.app.mediadown.net.Web.Response;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.task.ListTask;
+import sune.app.mediadown.util.JSON.JSONCollection;
 import sune.app.mediadown.util.JavaScript;
 import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
-import sune.util.ssdf2.SSDCollection;
 
 public final class MarkizaPlusEngine implements MediaEngine {
 	
@@ -184,11 +184,11 @@ public final class MarkizaPlusEngine implements MediaEngine {
 		return 0;
 	}
 	
-	private static final String mediaTitle(SSDCollection streamInfo, Document document) {
+	private static final String mediaTitle(JSONCollection streamInfo, Document document) {
 		// Markiza Plus has weird naming, so this is actually correct
-		String programName = streamInfo.getDirectString("episode", "");
-		String episodeText = streamInfo.getDirectString("programName", "");
-		int numSeason = streamInfo.getDirectInt("seasonNumber", 0);
+		String programName = streamInfo.getString("episode", "");
+		String episodeText = streamInfo.getString("programName", "");
+		int numSeason = streamInfo.getInt("seasonNumber", 0);
 		int numEpisode = -1;
 		String episodeName = ""; // Use empty string rather than null
 		
@@ -312,24 +312,24 @@ public final class MarkizaPlusEngine implements MediaEngine {
 				conScript = Utils.bracketSubstring(conScript, '{', '}', false, conScript.indexOf('{', 1), conScript.length());
 				
 				if(!conScript.isEmpty()) {
-					SSDCollection scriptData = JavaScript.readObject(conScript);
+					JSONCollection scriptData = JavaScript.readObject(conScript);
 					
 					if(scriptData != null) {
-						SSDCollection tracks = scriptData.getCollection("tracks");
+						JSONCollection tracks = scriptData.getCollection("tracks");
 						URI sourceUri = uri;
 						MediaSource source = MediaSource.of(this);
 						
-						for(SSDCollection node : tracks.collectionsIterable()) {
-							MediaFormat format = MediaFormat.fromName(node.getName());
+						for(JSONCollection node : tracks.collectionsIterable()) {
+							MediaFormat format = MediaFormat.fromName(node.name());
 							
-							for(SSDCollection coll : ((SSDCollection) node).collectionsIterable()) {
-								String videoUrl = coll.getDirectString("src");
+							for(JSONCollection coll : ((JSONCollection) node).collectionsIterable()) {
+								String videoUrl = coll.getString("src");
 								
 								if(format == MediaFormat.UNKNOWN) {
 									format = MediaFormat.fromPath(videoUrl);
 								}
 								
-								MediaLanguage language = MediaLanguage.ofCode(coll.getDirectString("lang"));
+								MediaLanguage language = MediaLanguage.ofCode(coll.getString("lang"));
 								String title = mediaTitle(scriptData.getCollection("plugins.measuring.streamInfo"), document);
 								List<Media> media = MediaUtils.createMedia(source, Net.uri(videoUrl), sourceUri,
 									title, language, MediaMetadata.empty());

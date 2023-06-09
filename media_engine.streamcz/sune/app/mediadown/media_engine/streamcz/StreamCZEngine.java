@@ -44,13 +44,13 @@ import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.task.ListTask;
 import sune.app.mediadown.util.JSON;
+import sune.app.mediadown.util.JSON.JSONCollection;
+import sune.app.mediadown.util.JSON.JSONObject;
 import sune.app.mediadown.util.JavaScript;
 import sune.app.mediadown.util.Opt;
 import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Utils.Ignore;
-import sune.util.ssdf2.SSDCollection;
-import sune.util.ssdf2.SSDObject;
 
 public final class StreamCZEngine implements MediaEngine {
 	
@@ -103,7 +103,7 @@ public final class StreamCZEngine implements MediaEngine {
 			
 			if(programId == null) {
 				Document document = HTML.from(program.uri());
-				SSDCollection state = API.appServerState(document);
+				JSONCollection state = API.appServerState(document);
 				programId = state.getString("fetchable.tag.show.data.id");
 				
 				if(programId == null) {
@@ -129,14 +129,14 @@ public final class StreamCZEngine implements MediaEngine {
 			MediaSource source = MediaSource.of(this);
 			
 			Document document = HTML.from(sourceURI);
-			SSDCollection state = API.appServerState(document);
-			SSDCollection videoData = state.getCollection("fetchable.episode.videoDetail.data");
-			String splBaseUrl = videoData.getDirectString("spl");
+			JSONCollection state = API.appServerState(document);
+			JSONCollection videoData = state.getCollection("fetchable.episode.videoDetail.data");
+			String splBaseUrl = videoData.getString("spl");
 			String splUrl = String.format("%s%s,%d,%s", splBaseUrl, "spl2", 3, "VOD").replace("|", "%7C");
 			URI splUri = Net.uri(splUrl);
-			SSDCollection json = JSON.read(Web.requestStream(Request.of(splUri).GET()).stream());
+			JSONCollection json = JSON.read(Web.requestStream(Request.of(splUri).GET()).stream());
 			
-			String programName = videoData.getDirectString("name", null);
+			String programName = videoData.getString("name", null);
 			String numSeason = null;
 			String numEpisode = null;
 			String episodeName = "";
@@ -161,15 +161,15 @@ public final class StreamCZEngine implements MediaEngine {
 			}
 			
 			String seasonUrlName = null;
-			SSDCollection tags = videoData.getDirectCollection("allParentTags", null);
+			JSONCollection tags = videoData.getCollection("allParentTags", null);
 			if(tags != null) {
-				for(SSDCollection tag : tags.collectionsIterable()) {
-					String category = tag.getDirectString("category");
-					String name = tag.getDirectString("name");
+				for(JSONCollection tag : tags.collectionsIterable()) {
+					String category = tag.getString("category");
+					String name = tag.getString("name");
 					
 					if(category.equalsIgnoreCase("season")) {
 						Matcher matcher = REGEX_SEASON.matcher(name);
-						seasonUrlName = tag.getDirectString("urlName");
+						seasonUrlName = tag.getString("urlName");
 						numSeason = matcher.matches() ? matcher.group(1) : name;
 					}
 				}
@@ -178,7 +178,7 @@ public final class StreamCZEngine implements MediaEngine {
 			// If the current media is not a movie, i.e. has more than one episode
 			if(!episodeName.isEmpty()) {
 				// Obtain the episode number manually from the list of episodes
-				String episodeId = videoData.getDirectString("id");
+				String episodeId = videoData.getString("id");
 				List<API.Node> episodes = null;
 				
 				// Check whether a season was found. A season is actually just a tab on the program's page.
@@ -226,19 +226,19 @@ public final class StreamCZEngine implements MediaEngine {
 			
 			// Check, if the media has some additional subtitles
 			List<SubtitlesMedia.Builder<?, ?>> subtitlesMedia = new ArrayList<>();
-			SSDCollection subtitlesArray;
+			JSONCollection subtitlesArray;
 			if((subtitlesArray = json.getCollection("data.subtitles", null)) != null) {
 				// Parse the subtitles and add them to all obtained media
-				for(SSDCollection subtitlesItem : subtitlesArray.collectionsIterable()) {
-					MediaLanguage subtitleLanguage = MediaLanguage.ofCode(subtitlesItem.getDirectString("language"));
+				for(JSONCollection subtitlesItem : subtitlesArray.collectionsIterable()) {
+					MediaLanguage subtitleLanguage = MediaLanguage.ofCode(subtitlesItem.getString("language"));
 					
 					loop:
-					for(SSDObject subtitleUrlObj : subtitlesItem.getDirectCollection("urls").objectsIterable()) {
+					for(JSONObject subtitleUrlObj : subtitlesItem.getCollection("urls").objectsIterable()) {
 						String subtitleUrl = subtitleUrlObj.stringValue();
 						URI subtitleUri = Net.isRelativeURI(subtitleUrl) ? splUri.resolve(subtitleUrl) : Net.uri(subtitleUrl);
 						MediaFormat subtitleFormat = MediaFormat.UNKNOWN;
 						
-						switch(subtitleUrlObj.getName()) {
+						switch(subtitleUrlObj.name()) {
 							case "srt":    subtitleFormat = MediaFormat.SRT; break;
 							case "webvtt": subtitleFormat = MediaFormat.VTT; break;
 							default: continue loop; // Skip the subtitles
@@ -252,19 +252,19 @@ public final class StreamCZEngine implements MediaEngine {
 				}
 			}
 			
-			SSDCollection filesMP4 = json.getCollection("data.mp4", null);
+			JSONCollection filesMP4 = json.getCollection("data.mp4", null);
 			if(filesMP4 != null) {
-				for(SSDCollection item : filesMP4.collectionsIterable()) {
-					String strQuality = item.getName();
+				for(JSONCollection item : filesMP4.collectionsIterable()) {
+					String strQuality = item.name();
 					MediaQuality quality = MediaQuality.fromString(strQuality, MediaType.VIDEO);
-					int bandwidth = item.getDirectInt("bandwidth", -1);
-					String codec = item.getDirectString("codec", null);
-					double duration = item.getDirectDouble("duration", MediaConstants.UNKNOWN_DURATION * 1000.0) / 1000.0;
-					MediaResolution resolution = Opt.of(item.getDirectCollection("resolution", null))
+					int bandwidth = item.getInt("bandwidth", -1);
+					String codec = item.getString("codec", null);
+					double duration = item.getDouble("duration", MediaConstants.UNKNOWN_DURATION * 1000.0) / 1000.0;
+					MediaResolution resolution = Opt.of(item.getCollection("resolution", null))
 					   .ifTrue(Objects::nonNull).map((v) -> new MediaResolution(v.getInt(0), v.getInt(1)))
 					   .orElse(MediaResolution.UNKNOWN);
 					MediaFormat format = MediaFormat.MP4;
-					String strUrl = item.getDirectString("url").replace("|", "%7C");
+					String strUrl = item.getString("url").replace("|", "%7C");
 					URI mediaUri = Net.isRelativeURI(strUrl) ? splUri.resolve(strUrl) : Net.uri(strUrl);
 					MediaMetadata metadata = MediaMetadata.builder().sourceURI(sourceURI).title(title).build();
 					List<String> codecs = List.of(codec);
@@ -303,12 +303,12 @@ public final class StreamCZEngine implements MediaEngine {
 			}
 			
 			for(String collectionName : List.of("pls.hls")) {
-				SSDCollection file = json.getCollection(collectionName, null);
+				JSONCollection file = json.getCollection(collectionName, null);
 				
 				// If the collection does not exist, just skip it
 				if(file == null) continue;
 				
-				String strUrl = file.getDirectString("url").replace("|", "%7C");
+				String strUrl = file.getString("url").replace("|", "%7C");
 				URI mediaUri = Net.isRelativeURI(strUrl) ? splUri.resolve(strUrl) : Net.uri(strUrl);
 				MediaLanguage language = MediaLanguage.UNKNOWN;
 				MediaMetadata metadata = MediaMetadata.empty();
@@ -402,7 +402,7 @@ public final class StreamCZEngine implements MediaEngine {
 		private static final URI URL_API = Net.uri("https://api.stream.cz/graphql");
 		private static final String REFERER = "https://www.stream.cz/";
 		
-		public static final SSDCollection request(String json) throws Exception {
+		public static final JSONCollection request(String json) throws Exception {
 			return JSON.read(
 				Web.requestStream(
 					Request.of(URL_API).headers(
@@ -412,7 +412,7 @@ public final class StreamCZEngine implements MediaEngine {
 			);
 		}
 		
-		public static final SSDCollection appServerState(Document document) {
+		public static final JSONCollection appServerState(Document document) {
 			for(Element script : document.select("script:not([src])")) {
 				String content = script.html();
 				int index;
@@ -429,7 +429,7 @@ public final class StreamCZEngine implements MediaEngine {
 		
 		public static final List<Node> categories() throws Exception {
 			Document document = HTML.from(URL_CATEGORIES);
-			SSDCollection state = appServerState(document);
+			JSONCollection state = appServerState(document);
 			
 			if(state != null) {
 				return Stream.concat(
@@ -447,13 +447,13 @@ public final class StreamCZEngine implements MediaEngine {
 			boolean hasNextPage = false;
 			
 			do {
-				SSDCollection data = request(queryFunction.apply(cursor));
-				SSDCollection info = data.getCollection(infoPath);
-				SSDCollection pageInfo = info.getDirectCollection("pageInfo");
+				JSONCollection data = request(queryFunction.apply(cursor));
+				JSONCollection info = data.getCollection(infoPath);
+				JSONCollection pageInfo = info.getCollection("pageInfo");
 				cursor = pageInfo.getString("endCursor", "");
 				hasNextPage = pageInfo.getBoolean("hasNextPage", false);
 				
-				Opt.of(info.getDirectCollection("edges", null))
+				Opt.of(info.getCollection("edges", null))
 				   .ifTrue(Objects::nonNull)
 				   .map((c) -> Utils.stream(c.collectionsIterable()))
 				   .map((s) -> s.map(Node::from))
@@ -613,12 +613,12 @@ public final class StreamCZEngine implements MediaEngine {
 				this.urlName = Objects.requireNonNull(urlName);
 			}
 			
-			public static final Node from(SSDCollection json) {
-				return fromDirect(json.getDirectCollection("node"));
+			public static final Node from(JSONCollection json) {
+				return fromDirect(json.getCollection("node"));
 			}
 			
-			public static final Node fromDirect(SSDCollection json) {
-				return new Node(json.getDirectString("id"), json.getDirectString("name"), json.getDirectString("urlName"));
+			public static final Node fromDirect(JSONCollection json) {
+				return new Node(json.getString("id"), json.getString("name"), json.getString("urlName"));
 			}
 			
 			public String id() {

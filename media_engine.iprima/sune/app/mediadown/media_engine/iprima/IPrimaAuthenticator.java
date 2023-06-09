@@ -22,6 +22,7 @@ import sune.app.mediadown.net.Web;
 import sune.app.mediadown.net.Web.Request;
 import sune.app.mediadown.net.Web.Response;
 import sune.app.mediadown.util.JSON;
+import sune.app.mediadown.util.JSON.JSONCollection;
 import sune.app.mediadown.util.Property;
 import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
@@ -124,7 +125,7 @@ public final class IPrimaAuthenticator {
 		
 		URI uri = Net.uri(URL_OAUTH_AUTHORIZE + '?' + query);
 		return tryAndClose(Web.requestStream(Request.of(uri).GET()),
-		                   (response) -> JSON.read(response.stream()).getDirectString("code", null));
+		                   (response) -> JSON.read(response.stream()).getString("code", null));
 	}
 	
 	private static final boolean userAuth(String code) throws Exception {
@@ -346,9 +347,9 @@ public final class IPrimaAuthenticator {
 			this.refreshToken = refreshToken;
 		}
 		
-		public static final SessionTokens parse(SSDCollection json) {
-			return new SessionTokens(json.toJSON(true), json.getDirectString("access_token"),
-				json.getDirectString("refresh_token"));
+		public static final SessionTokens parse(JSONCollection json) {
+			return new SessionTokens(json.toString(true), json.getString("access_token"),
+				json.getString("refresh_token"));
 		}
 		
 		public final String tokenDataString() {

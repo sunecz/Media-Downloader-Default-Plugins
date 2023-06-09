@@ -51,14 +51,14 @@ import sune.app.mediadown.plugin.PluginConfiguration;
 import sune.app.mediadown.task.ListTask;
 import sune.app.mediadown.util.CheckedFunction;
 import sune.app.mediadown.util.JSON;
+import sune.app.mediadown.util.JSON.JSONCollection;
+import sune.app.mediadown.util.JSON.JSONType;
 import sune.app.mediadown.util.JavaScript;
 import sune.app.mediadown.util.Opt;
 import sune.app.mediadown.util.Reflection;
 import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.TriFunction;
 import sune.app.mediadown.util.Utils;
-import sune.util.ssdf2.SSDCollection;
-import sune.util.ssdf2.SSDCollectionType;
 
 final class IPrimaHelper {
 	
@@ -197,21 +197,21 @@ final class IPrimaHelper {
 					return; // Do not continue
 				}
 				
-				SSDCollection data = JSON.read(content);
+				JSONCollection data = JSON.read(content);
 				// Try to obtain the full title of the media
 				String title = "";
 				Element elMediaInfo = document.selectFirst("script[type='application/ld+json']");
 				
 				if(elMediaInfo != null) {
-					SSDCollection mediaInfo = JSON.read(elMediaInfo.html());
+					JSONCollection mediaInfo = JSON.read(elMediaInfo.html());
 					String programName = mediaInfo.getString("partOfSeries.name", "");
 					String seasonName = mediaInfo.getString("partOfSeason.name", "");
-					String rawEpisode = mediaInfo.getDirectString("episodeNumber", "0");
+					String rawEpisode = mediaInfo.getString("episodeNumber", "0");
 					String numEpisode = String.format("%02d", Integer.valueOf(rawEpisode));
 					
 					// If a video is not part of any series, there is only a name of the video
 					if(programName.isEmpty()) {
-						programName = mediaInfo.getDirectString("name", "");
+						programName = mediaInfo.getString("name", "");
 						String regexNumEpisode = "\\s*\\((\\d+)\\)$";
 						
 						// Extract the episode number, if it exists in the name
@@ -268,8 +268,8 @@ final class IPrimaHelper {
 						
 						if(index > 0) {
 							con = Utils.bracketSubstring(con, '{', '}', false, index + find.length() - 1, con.length());
-							SSDCollection json = JavaScript.readObject(con);
-							fullName = json.getDirectString("title", "");
+							JSONCollection json = JavaScript.readObject(con);
+							fullName = json.getString("title", "");
 							
 							if(!fullName.isEmpty()) {
 								break;
@@ -298,21 +298,21 @@ final class IPrimaHelper {
 				}
 				
 				// The outer collection may be an array, we have to flatten it first, if it is
-				SSDCollection streamInfos;
-				if(data.getType() == SSDCollectionType.ARRAY) {
-					streamInfos = SSDCollection.emptyArray();
+				JSONCollection streamInfos;
+				if(data.type() == JSONType.ARRAY) {
+					streamInfos = JSONCollection.emptyArray();
 					Utils.stream(data.collectionsIterator())
-						.flatMap((c) -> Utils.stream(c.getDirectCollection("streamInfos").collectionsIterator()))
+						.flatMap((c) -> Utils.stream(c.getCollection("streamInfos").collectionsIterator()))
 						.forEach(streamInfos::add);
 				} else {
-					streamInfos = data.getDirectCollection("streamInfos");
+					streamInfos = data.getCollection("streamInfos");
 				}
 				
 				URI sourceURI = uri;
 				MediaSource source = MediaSource.of(engine);
 				
-				for(SSDCollection streamInfo : streamInfos.collectionsIterable()) {
-					String src = streamInfo.getDirectString("url");
+				for(JSONCollection streamInfo : streamInfos.collectionsIterable()) {
+					String src = streamInfo.getString("url");
 					MediaLanguage language = MediaLanguage.ofCode(streamInfo.getString("lang.key"));
 					List<Media> media = MediaUtils.createMedia(source, Net.uri(src), sourceURI, title,
 						language, MediaMetadata.empty());
@@ -437,8 +437,8 @@ final class IPrimaHelper {
 		
 		private final int callback(IPrima iprima, Program program, String response, Map<String, Object> args,
 				CheckedFunction<Episode, Boolean> adder) throws Exception {
-			SSDCollection data = JSON.read(response);
-			String content = data.getDirectString("related_content", null);
+			JSONCollection data = JSON.read(response);
+			String content = data.getString("related_content", null);
 			
 			if(content == null) {
 				return CALLBACK_EXIT; // Do not continue
@@ -455,12 +455,12 @@ final class IPrimaHelper {
 			}
 			
 			// Check if in the next iteration would be any items
-			if(data.getDirectBoolean("hide_load_more_button")) {
+			if(data.getBoolean("hide_load_more_button")) {
 				return CALLBACK_EXIT;
 			}
 			
 			// If so, return the next offset, provided in the response
-			return data.getDirectInt("offset");
+			return data.getInt("offset");
 		}
 		
 		public ListTask<Episode> getEpisodes(Program program) throws Exception {
@@ -612,8 +612,8 @@ final class IPrimaHelper {
 		
 		private static final int callback(ListTask<Program> task, IPrima iprima, String response, String type,
 				String graphQLType) throws Exception {
-			SSDCollection json = JSON.read(response);
-			String content = json.getDirectString("content");
+			JSONCollection json = JSON.read(response);
+			String content = json.getString("content");
 			Document document = HTML.parse(content);
 			Elements programs = document.select(".component--scope--cinematography > a");
 			
@@ -625,8 +625,8 @@ final class IPrimaHelper {
 				
 				String url = Net.uriFix(elProgram.attr("href"));
 				String title = elProgram.attr("title");
-				SSDCollection data = JSON.read(elProgram.attr("data-item-json"));
-				String id = String.valueOf(data.getDirectInt("id"));
+				JSONCollection data = JSON.read(elProgram.attr("data-item-json"));
+				String id = String.valueOf(data.getInt("id"));
 				Program program = new Program(Net.uri(url), title, "source", iprima, "id", id, "type", graphQLType);
 				
 				if(!task.add(program)) {
@@ -836,10 +836,10 @@ final class IPrimaHelper {
 						continue;
 					}
 					
-					SSDCollection data = JSON.read(content);
+					JSONCollection data = JSON.read(content);
 					URI sourceURI = Net.uri(urlPlay);
 					
-					for(SSDCollection videoData : data.collectionsIterable()) {
+					for(JSONCollection videoData : data.collectionsIterable()) {
 						// Obtain the program title
 						String programName = videoData.getString("productDetail.seriesTitle", "");
 						// Obtain the season information
@@ -856,9 +856,9 @@ final class IPrimaHelper {
 						String title = MediaUtils.mediaTitle(programName, numSeason, numEpisode, episodeName);
 						
 						// Add all the media
-						SSDCollection streamInfos = videoData.getDirectCollection("streamInfos");
-						for(SSDCollection streamInfo : streamInfos.collectionsIterable()) {
-							String src = streamInfo.getDirectString("url");
+						JSONCollection streamInfos = videoData.getCollection("streamInfos");
+						for(JSONCollection streamInfo : streamInfos.collectionsIterable()) {
+							String src = streamInfo.getString("url");
 							MediaLanguage language = MediaLanguage.ofCode(streamInfo.getString("lang.key"));
 							List<Media> media = MediaUtils.createMedia(source, Net.uri(src), sourceURI, title,
 								language, MediaMetadata.empty());

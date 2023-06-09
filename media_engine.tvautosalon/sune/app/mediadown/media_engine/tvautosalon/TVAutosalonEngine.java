@@ -33,12 +33,12 @@ import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.task.ListTask;
 import sune.app.mediadown.util.JSON;
+import sune.app.mediadown.util.JSON.JSONCollection;
 import sune.app.mediadown.util.JavaScript;
 import sune.app.mediadown.util.Pair;
 import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Utils.JS;
-import sune.util.ssdf2.SSDCollection;
 
 public final class TVAutosalonEngine implements MediaEngine {
 	
@@ -271,7 +271,7 @@ public final class TVAutosalonEngine implements MediaEngine {
 			int index;
 			if((index = script.indexOf("{\"")) >= 0) {
 				String configContent = Utils.bracketSubstring(script, '{', '}', false, index, script.length());
-				SSDCollection config = JavaScript.readObject(configContent);
+				JSONCollection config = JavaScript.readObject(configContent);
 				String baseId = null;
 				
 				if((index = script.indexOf("var _ONNPBaseId")) >= 0) {
@@ -282,8 +282,8 @@ public final class TVAutosalonEngine implements MediaEngine {
 					return;
 				}
 				
-				String iid = config.getDirectString("iid");
-				String mid = config.getDirectString("mid");
+				String iid = config.getString("iid");
+				String mid = config.getString("mid");
 				
 				frameURL = Utils.format(
 					"https://video.onnetwork.tv/frame86.php"
@@ -307,7 +307,7 @@ public final class TVAutosalonEngine implements MediaEngine {
 			HttpHeaders headers = Web.Headers.ofSingle("Referer", URL_REFERER);
 			String content = Web.request(Request.of(Net.uri(frameURL)).headers(headers).GET()).body();
 			
-			SSDCollection playerVideos = null;
+			JSONCollection playerVideos = null;
 			if((index = content.indexOf("var playerVideos")) >= 0) {
 				String json = Utils.bracketSubstring(content, '[', ']', false, index, content.length());
 				playerVideos = JSON.read(json);
@@ -325,19 +325,19 @@ public final class TVAutosalonEngine implements MediaEngine {
 			MediaMetadata metadata = MediaMetadata.builder().title(title).build();
 			
 			// Add all available media that are found in the player settings
-			SSDCollection emptyArray = SSDCollection.emptyArray();
-			for(SSDCollection video : playerVideos.collectionsIterable()) {
-				SSDCollection additionalURLs = video.getDirectCollection("urls", emptyArray);
-				String videoURL = video.getDirectString("url");
+			JSONCollection emptyArray = JSONCollection.emptyArray();
+			for(JSONCollection video : playerVideos.collectionsIterable()) {
+				JSONCollection additionalURLs = video.getCollection("urls", emptyArray);
+				String videoURL = video.getString("url");
 				
 				List<Media> media = new ArrayList<>();
 				media.addAll(MediaUtils.createMedia(source, Net.uri(videoURL), sourceURI, title, language, metadata));
 				
-				for(SSDCollection additionalVideo : additionalURLs.collectionsIterable()) {
-					String additionalVideoURL = additionalVideo.getDirectString("url");
+				for(JSONCollection additionalVideo : additionalURLs.collectionsIterable()) {
+					String additionalVideoURL = additionalVideo.getString("url");
 					media.add(VideoMedia.simple().source(source)
 					          	.uri(Net.uri(additionalVideoURL))
-					          	.quality(MediaQuality.fromString(additionalVideo.getDirectString("name"), MediaType.VIDEO))
+					          	.quality(MediaQuality.fromString(additionalVideo.getString("name"), MediaType.VIDEO))
 					          	.format(MediaFormat.fromPath(additionalVideoURL))
 					          	.metadata(metadata)
 					          	.build());

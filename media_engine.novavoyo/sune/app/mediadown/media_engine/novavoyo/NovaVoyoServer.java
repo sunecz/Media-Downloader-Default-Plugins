@@ -1,5 +1,7 @@
 package sune.app.mediadown.media_engine.novavoyo;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.net.CookieStore;
 import java.net.HttpCookie;
 import java.net.URI;
@@ -43,14 +45,13 @@ import sune.app.mediadown.plugin.PluginConfiguration;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.task.ListTask;
 import sune.app.mediadown.util.JSON;
+import sune.app.mediadown.util.JSON.JSONCollection;
+import sune.app.mediadown.util.JSON.JSONObject;
 import sune.app.mediadown.util.JavaScript;
 import sune.app.mediadown.util.NIO;
 import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Utils.Ignore;
-import sune.util.ssdf2.SSDCollection;
-import sune.util.ssdf2.SSDF;
-import sune.util.ssdf2.SSDObject;
 
 public final class NovaVoyoServer implements Server {
 	
@@ -76,8 +77,8 @@ public final class NovaVoyoServer implements Server {
 			String content = elScript.html();
 			int index;
 			if((index = content.indexOf("klebetnica(")) >= 0) {
-				content = Utils.bracketSubstring(content, '{', '}', false, index, content.length());
-				SSDCollection data = SSDF.read(content);
+				String object = Utils.bracketSubstring(content, '{', '}', false, index, content.length());
+				JSONCollection data = Ignore.call(() -> JSON.newReader(object).allowUnquotedNames(true).read());
 				return VoyoError.ofFailure(data);
 			}
 		}
@@ -85,9 +86,9 @@ public final class NovaVoyoServer implements Server {
 		return VoyoError.ofFailure(null);
 	}
 	
-	private static final String mediaTitle(SSDCollection streamInfo, Document document) {
+	private static final String mediaTitle(JSONCollection streamInfo, Document document) {
 		// Nova Voyo has weird naming, this is actually correct
-		String programName = streamInfo.getDirectString("episode", "");
+		String programName = streamInfo.getString("episode", "");
 		int numSeason = -1;
 		int numEpisode = -1;
 		String episodeName = null;
@@ -99,11 +100,11 @@ public final class NovaVoyoServer implements Server {
 				.findFirst().orElseGet(LinkingData::empty);
 			
 			if(!linkingData.isEmpty()) {
-				programName = linkingData.data().getDirectString("name", "");
+				programName = linkingData.data().getString("name", "");
 			}
 		} else {
-			String episodeText = streamInfo.getDirectString("programName", "");
-			numSeason = streamInfo.getDirectInt("seasonNumber", 0);
+			String episodeText = streamInfo.getString("programName", "");
+			numSeason = streamInfo.getInt("seasonNumber", 0);
 			
 			Matcher matcher = REGEX_EPISODE.matcher(episodeText);
 			if(matcher.matches()) {
@@ -137,7 +138,7 @@ public final class NovaVoyoServer implements Server {
 			if(!(error = checkForError(embedDoc)).isSuccess())
 				throw new IllegalStateException("Error " + error.event() + ": " + error.type());
 			
-			SSDCollection settings = null;
+			JSONCollection settings = null;
 			for(Element elScript : embedDoc.select("script:not([src])")) {
 				String content = elScript.html();
 				int index;
@@ -151,18 +152,18 @@ public final class NovaVoyoServer implements Server {
 			if(settings == null)
 				return; // Do not continue
 			
-			SSDCollection tracks = settings.getDirectCollection("tracks");
+			JSONCollection tracks = settings.getCollection("tracks");
 			URI sourceURI = uri;
 			MediaSource source = MediaSource.of(this);
 			
 			String title = mediaTitle(settings.getCollection("plugins.measuring.streamInfo"), document);
-			for(SSDCollection node : tracks.collectionsIterable()) {
-				MediaFormat format = MediaFormat.fromName(node.getName());
-				for(SSDCollection coll : ((SSDCollection) node).collectionsIterable()) {
-					String videoURL = coll.getDirectString("src");
+			for(JSONCollection node : tracks.collectionsIterable()) {
+				MediaFormat format = MediaFormat.fromName(node.name());
+				for(JSONCollection coll : ((JSONCollection) node).collectionsIterable()) {
+					String videoURL = coll.getString("src");
 					if(format == MediaFormat.UNKNOWN)
 						format = MediaFormat.fromPath(videoURL);
-					MediaLanguage language = MediaLanguage.ofCode(coll.getDirectString("lang"));
+					MediaLanguage language = MediaLanguage.ofCode(coll.getString("lang"));
 					List<Media> media = MediaUtils.createMedia(source, Net.uri(videoURL), sourceURI,
 						title, language, MediaMetadata.empty());
 					for(Media s : media) {
@@ -253,8 +254,8 @@ public final class NovaVoyoServer implements Server {
 		}
 		
 		private static final void addDeviceToRemoveOnNextStart(Device device) {
-			SSDCollection value = devicesToRemoveOnNextStart();
-			if(value == null) value = SSDCollection.emptyArray();
+			JSONCollection value = devicesToRemoveOnNextStart();
+			if(value == null) value = JSONCollection.emptyArray();
 			value.add(device.removeURL());
 			configuration().writer().set("devicesToRemove", value);
 			saveConfiguration();
@@ -263,7 +264,7 @@ public final class NovaVoyoServer implements Server {
 		private static final void clearDevicesToRemoveOnNextStart() {
 			PluginConfiguration configuration = configuration();
 			Configuration.Writer writer = configuration.writer();
-			writer.set("devicesToRemove", SSDCollection.emptyArray());
+			writer.set("devicesToRemove", JSONCollection.emptyArray());
 			saveConfiguration();
 		}
 		
@@ -271,10 +272,16 @@ public final class NovaVoyoServer implements Server {
 			return NIO.localPath("resources/config/" + PLUGIN.getContext().getPlugin().instance().name() + ".ssdf");
 		}
 		
-		private static final SSDCollection devicesToRemoveOnNextStart() {
+		private static final JSONCollection devicesToRemoveOnNextStart() {
 			// Due to behavior of the current ArrayConfigurationProperty we must acquire the list
 			// using indirect reading and parsing of the configuration file.
-			return SSDF.read(configurationPath().toFile()).getDirectCollection("devicesToRemove", null);
+			try {
+				return JSON.newReader(configurationPath())
+						   .allowUnquotedNames(true).read()
+						   .getCollection("devicesToRemove", null);
+			} catch(IOException ex) {
+				throw new UncheckedIOException(ex);
+			}
 		}
 		
 		private static final void saveConfiguration() {
@@ -332,10 +339,10 @@ public final class NovaVoyoServer implements Server {
 				throw new IllegalStateException("Unable to log in");
 			
 			// Remove any previously created devices that should be removed
-			SSDCollection devicesToRemove = devicesToRemoveOnNextStart();
+			JSONCollection devicesToRemove = devicesToRemoveOnNextStart();
 			if(devicesToRemove != null) {
 				// Remove all devices (using their removeURL) that are present
-				for(SSDObject object : devicesToRemove.objectsIterable()) {
+				for(JSONObject object : devicesToRemove.objectsIterable()) {
 					DeviceManager.removeDevice(object.stringValue());
 				}
 				
@@ -572,14 +579,14 @@ public final class NovaVoyoServer implements Server {
 		private final String event;
 		private final String type;
 		
-		private VoyoError(boolean isSuccess, SSDCollection data) {
+		private VoyoError(boolean isSuccess, JSONCollection data) {
 			this.isSuccess = isSuccess;
 			
 			String event = null;
 			String type = null;
 			
 			if(data != null) {
-				event = data.getDirectString("event", "");
+				event = data.getString("event", "");
 				type = data.getString("data.type", "");
 			}
 			
@@ -591,7 +598,7 @@ public final class NovaVoyoServer implements Server {
 			return new VoyoError(true, null);
 		}
 		
-		public static final VoyoError ofFailure(SSDCollection data) {
+		public static final VoyoError ofFailure(JSONCollection data) {
 			return new VoyoError(false, data);
 		}
 		
@@ -613,7 +620,7 @@ public final class NovaVoyoServer implements Server {
 		private static LinkingData EMPTY;
 		
 		private final Document document;
-		private final SSDCollection data;
+		private final JSONCollection data;
 		private final String type;
 		
 		private LinkingData() {
@@ -622,10 +629,10 @@ public final class NovaVoyoServer implements Server {
 			this.type = "none";
 		}
 		
-		private LinkingData(Document document, SSDCollection data) {
+		private LinkingData(Document document, JSONCollection data) {
 			this.document = Objects.requireNonNull(document);
 			this.data = Objects.requireNonNull(data);
-			this.type = data.getDirectString("@type");
+			this.type = data.getString("@type");
 		}
 		
 		public static final LinkingData empty() {
@@ -648,7 +655,7 @@ public final class NovaVoyoServer implements Server {
 			return document;
 		}
 		
-		public final SSDCollection data() {
+		public final JSONCollection data() {
 			return data;
 		}
 		

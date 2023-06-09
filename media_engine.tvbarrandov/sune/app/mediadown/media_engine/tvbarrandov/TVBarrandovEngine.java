@@ -58,11 +58,11 @@ import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.task.ListTask;
 import sune.app.mediadown.util.FXUtils;
 import sune.app.mediadown.util.JSON;
+import sune.app.mediadown.util.JSON.JSONCollection;
 import sune.app.mediadown.util.JavaScript;
 import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Utils.Ignore;
-import sune.util.ssdf2.SSDCollection;
 
 public final class TVBarrandovEngine implements MediaEngine {
 	
@@ -281,20 +281,20 @@ public final class TVBarrandovEngine implements MediaEngine {
 								int index;
 								if((index = content.indexOf("ytInitialData = {")) >= 0) {
 									content = Utils.bracketSubstring(content, '{', '}', false, index, content.length());
-									SSDCollection json = JavaScript.readObject(content);
+									JSONCollection json = JavaScript.readObject(content);
 									
-									SSDCollection tabs = json.getCollection("contents.twoColumnBrowseResultsRenderer.tabs");
-									SSDCollection searchTab = tabs.getDirectCollection("" + (tabs.length() - 1));
-									SSDCollection searchContent = searchTab.collectionsIterator().next()
-											.getDirectCollection("content").collectionsIterator().next()
-											.getDirectCollection("contents");
+									JSONCollection tabs = json.getCollection("contents.twoColumnBrowseResultsRenderer.tabs");
+									JSONCollection searchTab = tabs.getCollection("" + (tabs.length() - 1));
+									JSONCollection searchContent = searchTab.collectionsIterator().next()
+											.getCollection("content").collectionsIterator().next()
+											.getCollection("contents");
 									
-									for(SSDCollection searchItem : searchContent.collectionsIterable()) {
-										SSDCollection itemData = searchItem.collectionsIterator().next()
+									for(JSONCollection searchItem : searchContent.collectionsIterable()) {
+										JSONCollection itemData = searchItem.collectionsIterator().next()
 											.getCollection("contents.0.videoRenderer", null);
 										if(itemData == null) continue; // Invalid item, skip it
 										
-										String videoId = itemData.getDirectString("videoId");
+										String videoId = itemData.getString("videoId");
 										String title = itemData.getString("title.runs.0.text").toLowerCase();
 										// Choose the result we want, it should at least contain the required
 										// words, i.e. program name and the date string.
@@ -344,17 +344,17 @@ public final class TVBarrandovEngine implements MediaEngine {
 						content = JSONUtils.removeComments(content);
 						
 						// Parse the content of the JavaScript object
-						SSDCollection json = JSON.read(content);
-						duration = Double.valueOf(json.getDirectString("length", "-1.0"));
-						programName = json.getDirectString("program", "");
-						episodeName = json.getDirectString("title", "");
+						JSONCollection json = JSON.read(content);
+						duration = Double.valueOf(json.getString("length", "-1.0"));
+						programName = json.getString("program", "");
+						episodeName = json.getString("title", "");
 						
 						// Some videos can have the exactly same name, we don't want double name in the media title
 						if(programName.equalsIgnoreCase(episodeName))
 							episodeName = "";
 						
 						// Add information about airdate since almost all videos have that
-						String airdate = json.getDirectString("airdate", "");
+						String airdate = json.getString("airdate", "");
 						if(!airdate.isEmpty()) {
 							DateTimeFormatter formatterParse = DateTimeFormatter.ofPattern("yyyyMMdd HH:mm:ss");
 							DateTimeFormatter formatterFormat = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm:ss");
