@@ -778,10 +778,10 @@ final class PrimaPlus implements IPrima {
 				// Must remove JavaScript function calls and object instantiation from the content,
 				// otherwise it cannot be parsed correctly.
 				Regex regexJSCall = Regex.of(":\\s*[^\\(\\,\\\"]+\\((?:(?<!\\\")[^\\,])+(?<!\\\"),");
-				content = regexJSCall.replaceAll(content, (m) -> "\"\"");
+				content = regexJSCall.replaceAll(content, "\"\"");
 				
 				// Cannot use JavaScript.readObject since the names are not quoted
-				JSONCollection object = JavaScript.readObject(Utils.prefixUnicodeEscapeSequences(content, "\\\\\\"));
+				JSONCollection object = JavaScript.readObject(content);
 				JSONCollection data = object.getCollection("data");
 				JSONCollection state = object.getCollection("state");
 				
@@ -866,6 +866,7 @@ final class PrimaPlus implements IPrima {
 				String value = object.stringValue();
 				
 				switch(object.type()) {
+					case STRING_UNQUOTED:
 					case UNKNOWN:
 						value = args.get(value);
 						break;
