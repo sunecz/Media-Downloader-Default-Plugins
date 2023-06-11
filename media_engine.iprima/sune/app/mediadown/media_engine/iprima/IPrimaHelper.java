@@ -124,7 +124,7 @@ final class IPrimaHelper {
 	
 	public static final int compareNatural(String a, String b) {
 		// Delegate to the new more performant method for natural comparison
-		return Utils.compareNatural(a, b);
+		return Utils.compareNaturalIgnoreCase(a, b);
 	}
 	
 	public static final void setPlugin(PluginBase plugin) {
@@ -890,6 +890,14 @@ final class IPrimaHelper {
 	
 	static final class ProgramWrapper implements Comparable<ProgramWrapper> {
 		
+		private static final Comparator<ProgramWrapper> comparator;
+		
+		static {
+			comparator = Comparator
+				.<ProgramWrapper>nullsLast((a, b) -> compareNatural(a.program.title(), b.program.title()))
+				.thenComparing((e) -> e.program.uri());
+		}
+		
 		private final Program program;
 		
 		public ProgramWrapper(Program program) {
@@ -912,17 +920,16 @@ final class IPrimaHelper {
 			ProgramWrapper other = (ProgramWrapper) obj;
 			// Do not compare program data
 			return Objects.equals(program.uri(), other.program.uri())
-						&& Objects.equals(program.title().toLowerCase(), other.program.title().toLowerCase());
+						&& program.title().equalsIgnoreCase(other.program.title());
 		}
 		
 		@Override
 		public int compareTo(ProgramWrapper w) {
-			if(Objects.requireNonNull(w) == this) return 0;
-			return Comparator.<ProgramWrapper>nullsLast((a, b) ->
-							IPrimaHelper.compareNatural(a.program.title().toLowerCase(),
-							                            b.program.title().toLowerCase()))
-						.thenComparing((e) -> e.program.uri())
-						.compare(this, w);
+			if(Objects.requireNonNull(w) == this) {
+				return 0;
+			}
+			
+			return comparator.compare(this, w);
 		}
 		
 		public Program program() {
@@ -932,7 +939,14 @@ final class IPrimaHelper {
 	
 	static final class EpisodeWrapper extends Wrapper<Episode> {
 		
-		private static Comparator<Wrapper<Episode>> comparator;
+		private static final Comparator<Wrapper<Episode>> comparator;
+		
+		static {
+			comparator = Comparator
+				.<Wrapper<Episode>, Integer>comparing((e) -> cast(e).offset)
+				.thenComparing((e) -> cast(e).index)
+				.thenComparing((a, b) -> compareNatural(cast(a).value.title(), cast(b).value.title()));
+		}
 		
 		private final int offset;
 		private final int index;
@@ -946,21 +960,6 @@ final class IPrimaHelper {
 		// Utility function
 		private static final EpisodeWrapper cast(Wrapper<Episode> wrapper) {
 			return (EpisodeWrapper) wrapper;
-		}
-		
-		private static final Comparator<Wrapper<Episode>> comparator() {
-			if(comparator == null) {
-				synchronized(EpisodeWrapper.class) {
-					if(comparator == null) {
-						comparator = Comparator.<Wrapper<Episode>, Integer>comparing((e) -> cast(e).offset)
-							.thenComparing((e) -> cast(e).index)
-							.thenComparing((a, b) -> compareNatural(cast(a).value.title().toLowerCase(),
-							                                        cast(b).value.title().toLowerCase()));
-					}
-				}
-			}
-			
-			return comparator;
 		}
 		
 		@Override
@@ -979,7 +978,7 @@ final class IPrimaHelper {
 			EpisodeWrapper other = (EpisodeWrapper) obj;
 			// Do not compare program data
 			return Objects.equals(value.uri(), other.value.uri())
-						&& Objects.equals(value.title().toLowerCase(), other.value.title().toLowerCase());
+						&& value.title().equalsIgnoreCase(other.value.title());
 		}
 		
 		@Override
@@ -988,7 +987,7 @@ final class IPrimaHelper {
 				return 0;
 			}
 			
-			return comparator().compare(this, w);
+			return comparator.compare(this, w);
 		}
 	}
 	
