@@ -4,6 +4,8 @@ import java.net.URI;
 import java.net.http.HttpHeaders;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.ListIterator;
 import java.util.Map;
@@ -46,7 +48,6 @@ import sune.app.mediadown.util.JSON.JSONCollection;
 import sune.app.mediadown.util.JSON.JSONNode;
 import sune.app.mediadown.util.JSON.JSONObject;
 import sune.app.mediadown.util.JSON.JSONType;
-import sune.app.mediadown.util.JavaScript;
 import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
 
@@ -439,7 +440,7 @@ final class PrimaPlus implements IPrima {
 					.filter((c) -> c.hasCollection("title"))
 					.findFirst().get().name();
 				
-				String programId = nuxt.getResolved(dataName + ".title.id");
+				String programId = nuxt.get(dataName + ".title.id", null);
 				
 				for(Season season : listSeasons(programId)) {
 					for(Episode episode : listEpisodes(program, season.id())) {
@@ -466,7 +467,7 @@ final class PrimaPlus implements IPrima {
 				String dataName = Utils.stream(nuxt.data().collectionsIterable())
 					.filter((c) -> c.hasCollection("content"))
 					.findFirst().get().name();
-				String videoPlayId = nuxt.getResolved(dataName + ".content.additionals.videoPlayId");
+				String videoPlayId = nuxt.get(dataName + ".content.additionals.videoPlayId", null);
 				
 				if(videoPlayId == null) {
 					throw new IllegalStateException("Unable to extract video play ID");
@@ -482,10 +483,10 @@ final class PrimaPlus implements IPrima {
 				JSONCollection configData = JSON.read(content);
 				
 				// Get information for the media title
-				String programName = nuxt.getResolved(dataName + ".content.additionals.programTitle", "");
-				String numSeason = nuxt.getResolved(dataName + ".content.additionals.seasonNumber", null);
-				String numEpisode = nuxt.getResolved(dataName + ".content.additionals.episodeNumber", null);
-				String episodeName = nuxt.getResolved(dataName + ".content.title", "");
+				String programName = nuxt.get(dataName + ".content.additionals.programTitle", "");
+				String numSeason = nuxt.get(dataName + ".content.additionals.seasonNumber", null);
+				String numEpisode = nuxt.get(dataName + ".content.additionals.episodeNumber", null);
+				String episodeName = nuxt.get(dataName + ".content.title", "");
 				
 				if(programName.isEmpty()) {
 					programName = episodeName;
@@ -681,107 +682,23 @@ final class PrimaPlus implements IPrima {
 		private static final class Nuxt {
 			
 			private final JSONCollection data;
-			private final Map<String, String> args;
 			private final boolean isPremium;
 			
-			private Nuxt(JSONCollection data, Map<String, String> args, boolean isPremium) {
+			private Nuxt(JSONCollection data, boolean isPremium) {
 				this.data = Objects.requireNonNull(data);
-				this.args = Objects.requireNonNull(args);
 				this.isPremium = isPremium;
 			}
 			
-			/**
-			 * @return 0 if an opening bracket, 1 if a closing bracket, -1 if neither.
-			 */
-			private static final int isBracketChar(int c) {
-				return c <= ')' ? ((c = c - '(') >= 0           ? 0b000 | (c)      : -1) :
-					   c <= ']' ? ((c = c - '[') >= 0 && c != 1 ? 0b010 | (c >> 1) : -1) :
-					   c <= '}' ? ((c = c - '{') >= 0 && c != 1 ? 0b100 | (c >> 1) : -1) :
-					   -1;
-			}
-			
-			private static final boolean isVarContentClosingChar(int c) {
-				return c == ';' || c == '<'; // '<' for HTML script tag
-			}
-			
-			private static final int varContentEndIndex(String string, int start) {
-				int end = string.length();
-				
-				int[] brackets = new int[3];
-				boolean escaped = false;
-				boolean sq = false;
-				boolean dq = false;
-				
-				loop:
-				for(int i = start, l = string.length(), c, v; i < l; ++i) {
-					c = string.codePointAt(i);
-					
-					if(escaped) {
-						escaped = false;
-					} else {
-						switch(c) {
-							case '\\': escaped = true; break;
-							case '\"': if(!sq) dq = !dq; break;
-							case '\'': if(!dq) sq = !sq; break;
-							default:
-								if(!sq && !dq) {
-									if((v = isBracketChar(c)) >= 0) {
-										// Adds either 1 (opening) or -1 (closing) to the bracket counter
-										brackets[v >> 1] += ((2 - ((v & 0b1) + 1)) << 1) - 1;
-									} else if(isVarContentClosingChar(c)
-													&& brackets[0] == 0
-													&& brackets[1] == 0
-													&& brackets[2] == 0) {
-										end = i;
-										break loop;
-									}
-								}
-								break;
-						}
-					}
-				}
-				
-				return end;
-			}
-			
 			public static final Nuxt extract(String html) {
-				int indexVar;
-				if((indexVar = html.indexOf("window.__NUXT__")) < 0) {
-					throw new IllegalStateException("Nuxt object does not exist");
+				int idx;
+				if((idx = html.indexOf("id=\"__NUXT_DATA__\"")) < 0
+						|| (idx = html.indexOf("[", idx)) < 0) {
+					throw new IllegalStateException("Nuxt data do not exist");
 				}
 				
-				// Find the end of the Nuxt variable's content, so that we can extract information
-				// only from the actual data and not somewhere else.
-				final int end = varContentEndIndex(html, indexVar);
+				String content = Utils.bracketSubstring(html, '[', ']', false, idx, html.length());
 				
-				int indexReturn;
-				if((indexReturn = html.indexOf("return", indexVar)) < 0) {
-					throw new IllegalStateException("Nuxt object has an unsupported format");
-				}
-				
-				String content = Utils.bracketSubstring(html, '{', '}', false, indexReturn, end);
-				
-				// Also parse the function arguments since some values are present there
-				String fnArgsNames = Utils.bracketSubstring(html, '(', ')', false, html.indexOf("function", indexVar), end);
-				String fnArgsValues = Utils.bracketSubstring(html, '(', ')', false, indexReturn + content.length(), end);
-				fnArgsNames = fnArgsNames.substring(1, fnArgsNames.length() - 1); // Remove brackets
-				fnArgsValues = fnArgsValues.substring(1, fnArgsValues.length() - 1); // Remove brackets
-				// Source: https://stackoverflow.com/a/1757107
-				Regex regexComma = Regex.of(",(?=(?:[^\\\"]*\\\"[^\\\"]*\\\")*[^\\\"]*$)");
-				
-				Map<String, String> mapArgs = Utils.zip(
-					regexComma.splitAsStream(fnArgsNames),
-					regexComma.splitAsStream(fnArgsValues),
-					Map::entry
-				).collect(Collectors.toMap(Entry::getKey, Entry::getValue));
-				
-				// Must remove JavaScript function calls and object instantiation from the content,
-				// otherwise it cannot be parsed correctly.
-				Regex regexJSCall = Regex.of(":\\s*[^\\(\\,\\\"]+\\((?:(?<!\\\")[^\\,])+(?<!\\\"),");
-				content = regexJSCall.replaceAll(content, "\"\"");
-				
-				// Cannot use JavaScript.readObject since the names are not quoted
-				JSONCollection object = JavaScript.readObject(content);
+				JSONCollection object = Parser.parse(content);
 				JSONCollection data = object.getCollection("data");
 				JSONCollection state = object.getCollection("state");
 				
@@ -791,91 +708,11 @@ final class PrimaPlus implements IPrima {
 					.getString("role", "").toLowerCase();
 				boolean isPremium = role.equals("premium");
 				
-				return new Nuxt(data, mapArgs, isPremium);
+				return new Nuxt(data, isPremium);
 			}
 			
-			@SuppressWarnings("unused")
-			public JSONCollection getCollection(String name) {
-				return data.getCollection(name);
-			}
-			
-			private final JSONCollection resolveCollection(JSONCollection original) {
-				boolean isArray = original.type() == JSONType.ARRAY;
-				JSONCollection resolved = JSONCollection.empty(isArray);
-				
-				if(isArray) {
-					for(JSONNode node : original) {
-						if(node.isCollection()) {
-							resolved.add(resolveCollection((JSONCollection) node));
-						} else {
-							JSONObject object = (JSONObject) node;
-							
-							if(object.type() == JSONType.UNKNOWN) {
-								resolved.add(resolve(object.stringValue()));
-							} else {
-								resolved.add(object);
-							}
-						}
-					}
-				} else {
-					for(JSONNode node : original) {
-						String name = node.name();
-						
-						if(node.isCollection()) {
-							resolved.set(name, resolveCollection((JSONCollection) node));
-						} else {
-							JSONObject object = (JSONObject) node;
-							
-							if(object.type() == JSONType.UNKNOWN) {
-								resolved.set(name, resolve(object.stringValue()));
-							} else {
-								resolved.set(name, object);
-							}
-						}
-					}
-				}
-				
-				return resolved;
-			}
-			
-			@SuppressWarnings("unused")
-			public JSONCollection getResolvedCollection(String name) {
-				return resolveCollection(data.getCollection(name));
-			}
-			
-			public String resolve(String value) {
-				String val;
-				if((val = args.get(value)) != null) {
-					return Utils.unquote(val);
-				}
-				
-				return value;
-			}
-			
-			public String getResolved(String name) {
-				return getResolved(name, null);
-			}
-			
-			public String getResolved(String name, String defaultValue) {
-				JSONObject object = data.getObject(name, null);
-				
-				if(object == null) {
-					return defaultValue;
-				}
-				
-				String value = object.stringValue();
-				
-				switch(object.type()) {
-					case STRING_UNQUOTED:
-					case UNKNOWN:
-						value = args.get(value);
-						break;
-					default:
-						// Do nothing
-						break;
-				}
-				
-				return Utils.unquote(value);
+			public String get(String name, String defaultValue) {
+				return data.getString(name, defaultValue);
 			}
 			
 			public JSONCollection data() {
@@ -885,6 +722,229 @@ final class PrimaPlus implements IPrima {
 			@SuppressWarnings("unused")
 			public boolean isPremium() {
 				return isPremium;
+			}
+			
+			// Reference: https://dwl2jqo5jww9m.cloudfront.net/_nuxt/entry.8c888bb8.js
+			// Search __NUXT_DATA__ to see what is done with the JSON data in that element.
+			private static final class Parser {
+				
+				private static final int q2 = -1;
+				private static final int Y2 = -2;
+				private static final int ey = -3;
+				private static final int ry = -4;
+				private static final int ny = -5;
+				private static final int ay = -6;
+				
+				private static final JSONCollection T0(String json) {
+					return oy(json);
+				}
+				
+				private static final JSONCollection oy(String json) {
+					return ty(JSON.read(json));
+				}
+				
+				private static final boolean json_hotfix_isEmpty(JSONCollection collection) {
+					// JSONCollection::length() throws NPE if inner nodes collection is null,
+					// therefore use the currenly safer iterator approach.
+					return !collection.iterator().hasNext();
+				}
+				
+				private static final JSONNode checkNode(JSONNode node) {
+					return node != null ? node : JSONObject.ofNull();
+				}
+				
+				private static final JSONCollection toCollection(Set<JSONNode> set) {
+					JSONCollection c = JSONCollection.emptyArray();
+					for(JSONNode n : set) c.add(checkNode(n));
+					return c;
+				}
+				
+				private static final JSONCollection toCollection(Map<JSONNode, JSONNode> map) {
+					JSONCollection c = JSONCollection.empty();
+					for(Entry<JSONNode, JSONNode> e : map.entrySet()) {
+						c.set(((JSONObject) e.getKey()).stringValue(), checkNode(e.getValue()));
+					}
+					return c;
+				}
+				
+				/*
+					function o(t, i = !1) {
+						if (t === q2) return;
+						if (t === ey) return NaN;
+						if (t === ry) return 1 / 0;
+						if (t === ny) return -1 / 0;
+						if (t === ay) return -0;
+						if (i) throw new Error("Invalid input");
+						if (t in a) return a[t];
+						const d = n[t];
+						if (!d || typeof d != "object") a[t] = d;
+						else if (Array.isArray(d))
+							if (typeof d[0] == "string") {
+								const s = d[0],
+									l = r == null ? void 0 : r[s];
+								if (l) return a[t] = l(o(d[1]));
+								switch (s) {
+									case "Date":
+										a[t] = new Date(d[1]);
+										break;
+									case "Set":
+										const c = new Set;
+										a[t] = c;
+										for (let y = 1; y < d.length; y += 1) c.add(o(d[y]));
+										break;
+									case "Map":
+										const u = new Map;
+										a[t] = u;
+										for (let y = 1; y < d.length; y += 2) u.set(o(d[y]), o(d[y + 1]));
+										break;
+									case "RegExp":
+										a[t] = new RegExp(d[1], d[2]);
+										break;
+									case "Object":
+										a[t] = Object(d[1]);
+										break;
+									case "BigInt":
+										a[t] = BigInt(d[1]);
+										break;
+									case "null":
+										const m = Object.create(null);
+										a[t] = m;
+										for (let y = 1; y < d.length; y += 2) m[d[y]] = o(d[y + 1]);
+										break;
+									default:
+										throw new Error(`Unknown type ${s}`)
+								}
+							} else {
+								const s = new Array(d.length);
+								a[t] = s;
+								for (let l = 0; l < d.length; l += 1) {
+									const c = d[l];
+									c !== Y2 && (s[l] = o(c))
+								}
+							}
+						else {
+							const s = {};
+							a[t] = s;
+							for (const l in d) {
+								const c = d[l];
+								s[l] = o(c)
+							}
+						}
+						return a[t]
+					}
+				*/
+				private static final JSONNode o(JSONCollection n, JSONNode[] a, int t) {
+					if(t == q2) return JSONObject.ofNull();
+					if(t == ey) return JSONObject.ofDouble(Double.NaN);
+					if(t == ry) return JSONObject.ofDouble(1.0 / 0.0);
+					if(t == ny) return JSONObject.ofDouble(-1.0 / 0.0);
+					if(t == ay) return JSONObject.ofDouble(-0.0);
+					if(a[t] != null) return a[t];
+					
+					JSONNode dObj = n.get(t);
+					boolean isCollection;
+					
+					if(dObj == null
+							|| !(isCollection = dObj.isCollection())
+							|| json_hotfix_isEmpty((JSONCollection) dObj)) {
+						a[t] = dObj;
+						return a[t];
+					}
+					
+					if(isCollection) {
+						JSONCollection d = (JSONCollection) dObj;
+						
+						if(d.type() == JSONType.ARRAY) {
+							JSONNode f = d.get(0);
+							
+							if(f.type() == JSONType.STRING || f.type() == JSONType.STRING_UNQUOTED) {
+								String s = ((JSONObject) f).stringValue();
+								
+								if(s.equals("Reactive")) {
+									// Simplified as opposed to the original code to always return
+									// just the object itself.
+									JSONNode obj = o(n, a, d.getInt(1));
+									a[t] = obj;
+									return obj;
+								}
+								
+								switch(s) {
+				                    case "Date":
+				                    	a[t] = d.get(1);
+				                        break;
+				                    case "Set":
+				                        Set<JSONNode> c = new HashSet<>();
+				                        for(int y = 1; y < d.length(); y += 1) c.add(o(n, a, d.getInt(y)));
+				                        a[t] = toCollection(c);
+				                        break;
+				                    case "Map":
+				                    	Map<JSONNode, JSONNode> u = new HashMap<>();
+				                        for(int y = 1; y < d.length(); y += 2) {
+				                        	u.put(o(n, a, d.getInt(y)), o(n, a, d.getInt(y + 1)));
+				                        }
+				                        a[t] = toCollection(u);
+				                        break;
+				                    case "RegExp":
+				                    	a[t] = d;
+				                        break;
+				                    case "Object":
+				                    case "BigInt":
+				                    	a[t] = d.get(1);
+				                        break;
+				                    case "null":
+				                    	a[t] = null;
+				                        break;
+				                    default:
+				                        throw new RuntimeException("Unknown type " + s);
+				                }
+							} else {
+								JSONCollection s = JSONCollection.emptyArray();
+								a[t] = s;
+								
+								for(int l = 0; l < d.length(); l += 1) {
+									int c = d.getInt(l);
+									
+									if(c != Y2) {
+										s.set(l, checkNode(o(n, a, c)));
+									}
+								}
+							}
+						} else {
+							JSONCollection s = JSONCollection.empty();
+							a[t] = s;
+							
+							for(JSONObject l : d.objectsIterable()) {
+								int c = l.intValue();
+								s.set(l.name(), checkNode(o(n, a, c)));
+							}
+						}
+					}
+					
+					return a[t];
+				}
+				
+				/*
+					function ty(e, r) {
+						if (typeof e == "number") return o(e, !0);
+						if (!Array.isArray(e) || e.length === 0) throw new Error("Invalid input");
+						const n = e,
+							a = Array(n.length);
+						return o(0)
+					}
+				*/
+				private static final JSONCollection ty(JSONCollection json) {
+					JSONNode node = o(json, new JSONNode[json.length()], 0);
+					
+					if(!node.isCollection()) {
+						throw new IllegalStateException("Not a collection");
+					}
+					
+					return (JSONCollection) node;
+				}
+				
+				public static final JSONCollection parse(String content) {
+					return T0(content);
+				}
 			}
 		}
 		
