@@ -7,7 +7,7 @@ import sune.app.mediadownloader.drm.DRMEngines;
 
 @Plugin(name          = "drm_engine.iprima",
 	    title         = "plugin.drm_engine.iprima.title",
-	    version       = "00.02.08-0005",
+	    version       = "00.02.09-0001",
 	    author        = "Sune",
 	    updateBaseURL = "https://app.sune.tech/mediadown/dat/plugin/0002/drm_engine/iprima/",
 	    updatable     = true,
