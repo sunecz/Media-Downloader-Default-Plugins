@@ -712,7 +712,13 @@ final class PrimaPlus implements IPrima {
 			}
 			
 			public String get(String name, String defaultValue) {
-				return data.getString(name, defaultValue);
+				JSONObject object = data.getObject(name);
+				
+				if(object == null) {
+					return defaultValue;
+				}
+				
+				return object.stringValue();
 			}
 			
 			public JSONCollection data() {
