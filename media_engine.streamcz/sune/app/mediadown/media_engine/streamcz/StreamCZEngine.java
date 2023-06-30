@@ -405,9 +405,9 @@ public final class StreamCZEngine implements MediaEngine {
 		public static final JSONCollection request(String json) throws Exception {
 			return JSON.read(
 				Web.requestStream(
-					Request.of(URL_API).headers(
-						Web.Headers.ofSingle("Referer", REFERER, "Content-Type", "application/json")
-					).POST(json)
+					Request.of(URL_API)
+						.headers(Web.Headers.ofSingle("Referer", REFERER))
+						.POST(json, "application/json")
 				).stream()
 			);
 		}
