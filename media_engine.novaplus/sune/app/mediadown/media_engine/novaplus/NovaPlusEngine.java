@@ -31,6 +31,7 @@ import sune.app.mediadown.net.Web.Response;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.task.ListTask;
+import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.JSON.JSONCollection;
 import sune.app.mediadown.util.JavaScript;
 import sune.app.mediadown.util.Regex;
@@ -76,17 +77,28 @@ public final class NovaPlusEngine implements MediaEngine {
 	NovaPlusEngine() {
 	}
 	
-	private static final String mediaTitle(JSONCollection streamInfo) {
-		// NovaPlus has weird naming, this is actually correct
-		String programName = streamInfo.getString("episode", "");
-		String episodeText = streamInfo.getString("programName", "");
-		int numSeason = streamInfo.getInt("seasonNumber", 0);
-		int numEpisode = -1;
-		String episodeName = ""; // Use empty string rather than null
+	private static final String mediaTitle(Document document) {
+		// Since using the measuring.streamInfo is not reliable, we use Linked Data.
+		Element script = document.selectFirst("script[type='application/ld+json']");
 		
-		Matcher matcher = REGEX_EPISODE.matcher(episodeText);
+		// The Linked data should always be present
+		if(script == null) {
+			throw new IllegalStateException("No Linked data");
+		}
+		
+		JSONCollection data = JSON.read(script.html());
+		
+		String programName = data.getString("partOfSeries.name");
+		String episodeName = data.getString("name", "");
+		int numSeason = data.getInt("partOfSeason.seasonNumber", -1);
+		int numEpisode = data.getInt("episodeNumber", -1);
+		
+		Matcher matcher = REGEX_EPISODE.matcher(episodeName);
 		if(matcher.matches()) {
-			numEpisode = Integer.valueOf(matcher.group(1));
+			if(numEpisode < 0) {
+				numEpisode = Integer.valueOf(matcher.group(1));
+			}
+			
 			episodeName = Optional.ofNullable(matcher.group(2)).orElse("");
 		}
 		
@@ -269,12 +281,12 @@ public final class NovaPlusEngine implements MediaEngine {
 				JSONCollection tracks = scriptData.getCollection("tracks");
 				URI sourceURI = uri;
 				MediaSource source = MediaSource.of(this);
+				String title = mediaTitle(document);
 				
 				for(JSONCollection node : tracks.collectionsIterable()) {
 					for(JSONCollection coll : ((JSONCollection) node).collectionsIterable()) {
 						String videoURL = coll.getString("src");
 						MediaLanguage language = MediaLanguage.ofCode(coll.getString("lang"));
-						String title = mediaTitle(scriptData.getCollection("plugins.measuring.streamInfo"));
 						List<Media> media = MediaUtils.createMedia(source, Net.uri(videoURL), sourceURI,
 							title, language, MediaMetadata.empty());
 						
