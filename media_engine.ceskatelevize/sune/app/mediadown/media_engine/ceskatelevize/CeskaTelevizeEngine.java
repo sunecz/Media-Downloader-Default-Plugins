@@ -1081,7 +1081,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 					
 					// Try to obtain the episode number within the season, if the first attempt failed
 					if(numEpisode.isBlank()) {
-						String seasonId = activeSeasonId.equals("null") ? null : activeSeasonId;
+						String seasonId = "null".equals(activeSeasonId) ? null : activeSeasonId;
 						String episodeId = mediaData.getString("props.pageProps.data.mediaMeta.id");
 						String showIDEC = mediaData.getString("props.pageProps.data.mediaMeta.show.idec");
 						int num = Episodes.indexOf(episodeId, showIDEC, seasonId);
