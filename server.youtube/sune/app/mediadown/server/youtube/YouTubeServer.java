@@ -95,8 +95,8 @@ public class YouTubeServer implements Server {
 				}
 				
 				String playerConfig = Utils.bracketSubstring(scriptHTML, '{', '}', false, matcher.end() - 1, scriptHTML.length());
-				JSONCollection dataConfig = JavaScript.readObject(Utils.prefixUnicodeEscapeSequences(playerConfig, "\\\\\\"));
-				String title = JavaScript.replaceUnicodeEscapeSequences(dataConfig.getString("videoDetails.title"));
+				JSONCollection dataConfig = JavaScript.readObject(playerConfig);
+				String title = dataConfig.getString("videoDetails.title");
 				JSONCollection formatsConfig = dataConfig.getCollection("streamingData.adaptiveFormats");
 				List<Tuple> videos = new ArrayList<>();
 				List<Tuple> audios = new ArrayList<>();
