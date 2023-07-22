@@ -1,35 +1,12 @@
 package sune.app.mediadown.drm_engine.novavoyo;
 
-import java.net.CookieStore;
-import java.net.HttpCookie;
 import java.net.URI;
-import java.net.URL;
-import java.nio.charset.Charset;
-import java.nio.file.Path;
-import java.time.Instant;
-import java.time.temporal.ChronoUnit;
-import java.util.Date;
-import java.util.List;
-import java.util.stream.Collectors;
 
-import org.cef.browser.CefFrame;
-import org.cef.network.CefCookie;
-import org.cef.network.CefCookieManager;
-import org.jsoup.nodes.Element;
-
-import io.netty.handler.codec.http.FullHttpRequest;
+import sune.app.mediadown.drm.DRMEngine;
+import sune.app.mediadown.drm.DRMResolver;
 import sune.app.mediadown.media.Media;
-import sune.app.mediadown.net.HTML;
 import sune.app.mediadown.net.Net;
-import sune.app.mediadown.net.Web;
-import sune.app.mediadown.util.Reflection3;
-import sune.app.mediadownloader.drm.DRMBrowser;
-import sune.app.mediadownloader.drm.DRMContext;
-import sune.app.mediadownloader.drm.DRMEngine;
-import sune.app.mediadownloader.drm.DRMResolver;
-import sune.app.mediadownloader.drm.resolver.SimpleDRMResolver;
-import sune.app.mediadownloader.drm.util.JS;
-import sune.app.mediadownloader.drm.util.MPDQualityModifier;
+import sune.app.mediadown.net.Web.Request;
 
 public class NovaVoyoDRMEngine implements DRMEngine {
 	
@@ -37,57 +14,20 @@ public class NovaVoyoDRMEngine implements DRMEngine {
 	NovaVoyoDRMEngine() {
 	}
 	
-	private static final boolean doVoyoLogin() throws Exception {
-		Class<?> clazz = Class.forName("sune.app.mediadown.media_engine.novavoyo.NovaVoyoServer$VoyoAccount");
-		return (boolean) Reflection3.invokeStatic(clazz, "login");
-	}
-	
-	private static final List<HttpCookie> savedCookies() throws Exception {
-		URI uri = Net.uri("https://voyo.nova.cz/muj-profil");
-		
-		// Get the top-level domain so that all the cookies are included
-		String domain = uri.getHost();
-		String[] parts = domain.split("\\.", 3);
-		if(parts.length < 2)
-			throw new IllegalStateException("Invalid domain");
-		int i = parts.length < 3 ? 0 : 1;
-		domain = parts[i] + '.' + parts[i + 1];
-		
-		String tlDomain = domain;
-		CookieStore cookieStore = Web.cookieManager().getCookieStore();
-		return cookieStore.getCookies().stream()
-			.filter((c) -> c.getDomain().endsWith(tlDomain))
-			.collect(Collectors.toList());
-	}
-	
-	private static final void setCefCookies(String url, List<HttpCookie> cookies) {
-		Instant instant = Instant.now();
-		Date now = Date.from(instant);
-		Date expires = Date.from(instant.plus(7, ChronoUnit.DAYS));
-		CefCookieManager cookieManager = CefCookieManager.getGlobalManager();
-		
-		for(HttpCookie cookie : cookies) {
-			CefCookie cefCookie = new CefCookie(cookie.getName(), cookie.getValue(), cookie.getDomain(),
-				cookie.getPath(), cookie.getSecure(), cookie.isHttpOnly(), now, now, false, expires);
-			cookieManager.setCookie(url, cefCookie);
-		}
+	@Override
+	public DRMResolver createResolver() {
+		return new NovaVoyoDRMResolver();
 	}
 	
 	@Override
-	public DRMResolver createResolver(DRMContext context, String url, Path output, Media media) {
-		return new NovaVoyoDRMResolver(context, url, output, media);
-	}
-	
-	@Override
-	public boolean isCompatibleURL(String url) {
-		URL urlObj = Net.url(url);
+	public boolean isCompatibleURI(URI uri) {
 		// Check the protocol
-		String protocol = urlObj.getProtocol();
+		String protocol = uri.getScheme();
 		if(!protocol.equals("http") &&
 		   !protocol.equals("https"))
 			return false;
 		// Check the host
-		String host = urlObj.getHost();
+		String host = uri.getHost();
 		if((host.startsWith("www."))) // www prefix
 			host = host.substring(4);
 		if(!host.equals("voyo.nova.cz"))
@@ -96,90 +36,22 @@ public class NovaVoyoDRMEngine implements DRMEngine {
 		return true;
 	}
 	
-	private static final class NovaVoyoDRMResolver extends SimpleDRMResolver {
+	private static final class NovaVoyoDRMResolver implements DRMResolver {
 		
-		private String embedUrl;
+		private static final URI LICENSE_URI;
 		
-		public NovaVoyoDRMResolver(DRMContext context, String url, Path output, Media media) {
-			super(context, url, output, media);
+		static {
+			LICENSE_URI = Net.uri("https://drm-widevine-licensing.axprod.net/AcquireLicense");
 		}
 		
 		@Override
-		public void onLoadStart(DRMBrowser browser, CefFrame frame) {
-			if(frame.getURL().startsWith(embedUrl)) {
-				// Set consent cookie to not show the cookie consent popup.
-				Instant instant = Instant.now();
-				Date now = Date.from(instant);
-				Date expires = Date.from(instant.plus(7, ChronoUnit.DAYS));
-				// This cookie value means "Decline all unnecessary cookies".
-				String value = "CPcJswAPcJswAAHABBENCXCgAAAAAAAAAAAAAAAAAAEiIAMAAQRwJQAYAA"
-						+ "gjgGgAwABBHAVABgACCOBSADAAEEcB0AGAAII4EIAMAAQRwCQAYAAgjgMgAwABBHAA"
-						+ ".YAAAAAAAAAAA";
-				CefCookie cookieConsent = new CefCookie("euconsent-v2", value,
-					".nova.cz", "/", false, false, now, now, false, expires);
-				CefCookieManager.getGlobalManager().setCookie(url, cookieConsent);
-				
-				JS.Record.include(frame);
-				JS.Record.activate(frame, ".video-js[id^=\"player-\"] > video");
-			}
-		}
-		
-		@Override
-		public void onLoadEnd(DRMBrowser browser, CefFrame frame, int httpStatusCode) {
-			if(frame.getURL().startsWith(embedUrl)) {
-				JS.Helper.include(frame);
-				JS.Helper.hideVideoElementStyle(frame);
-			}
-		}
-		
-		@Override
-		public boolean shouldModifyRequest(FullHttpRequest request) {
-			return request.getUri().endsWith("/manifest.mpd");
-		}
-		
-		@Override
-		public void modifyRequest(FullHttpRequest request) {
-			// Disable encoding for specific requests
-			request.headers().set("Accept-Encoding", "identity");
-		}
-		
-		@Override
-		public boolean shouldModifyResponse(String uri, String mimeType, Charset charset, FullHttpRequest request) {
-			return mimeType.equalsIgnoreCase("application/dash+xml");
-		}
-		
-		@Override
-		public String modifyResponse(String uri, String mimeType, Charset charset, String content,
-				FullHttpRequest request) {
-			if(mimeType.equalsIgnoreCase("application/dash+xml")) {
-				// Select the quality we want
-				MPDQualityModifier modifier = MPDQualityModifier.fromString(content);
-				modifier.modify(media.quality());
-				content = modifier.xml().html();
-			}
+		public Request createRequest(Media media) {
+			String token = media.metadata().get("drmToken", "");
 			
-			return content;
-		}
-		
-		@Override
-		public String url() {
-			if(embedUrl == null) {
-				try {
-					// Do "headless" login so we can access the page with all the valid data.
-					doVoyoLogin();
-					setCefCookies(url, savedCookies());
-					
-					// Obtain the iframe element and get its URL
-					Element elIframe = HTML.from(Net.uri(url)).selectFirst(".js-detail-player .iframe-wrap iframe");
-					if(elIframe != null) {
-						embedUrl = elIframe.absUrl("src");
-					}
-				} catch(Exception ex) {
-					throw new IllegalStateException("Unable to obtain the video iframe", ex);
-				}
-			}
-			
-			return embedUrl;
+			// The body will be replaced with content of the challenge
+			return Request.of(LICENSE_URI)
+				.addHeaders("Referer", "https://media.cms.nova.cz/", "X-AxDRM-Message", token)
+				.POST("", "application/octet-stream");
 		}
 	}
 }
