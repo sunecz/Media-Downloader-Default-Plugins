@@ -35,7 +35,7 @@ public final class WMSDownloader implements Downloader {
 	
 	@Override
 	public boolean isDownloadable(Media media) {
-		return MediaUtils.isSegmentedMedia(media);
+		return !media.metadata().isProtected() && MediaUtils.isSegmentedMedia(media);
 	}
 	
 	@Override

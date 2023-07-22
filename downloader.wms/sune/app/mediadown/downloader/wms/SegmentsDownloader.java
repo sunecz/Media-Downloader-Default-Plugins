@@ -264,6 +264,32 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		}
 	}
 	
+	protected final List<Path> temporaryFiles(int count) {
+		List<Path> tempFiles = new ArrayList<>(count);
+		String fileNameNoType = Utils.fileNameNoType(dest.getFileName().toString());
+		
+		for(int i = 0; i < count; ++i) {
+			Path tempFile = dest.getParent().resolve(fileNameNoType + "." + i + ".part");
+			Ignore.callVoid(() -> NIO.deleteFile(tempFile));
+			tempFiles.add(tempFile);
+		}
+		
+		return tempFiles;
+	}
+	
+	protected final InternalDownloader ensureInternalDownloader() {
+		if(downloader == null) {
+			TrackerManager dummyManager = new TrackerManager();
+			downloader = createDownloader(dummyManager);
+			dummyManager.addEventListener(
+				TrackerEvent.UPDATE,
+				(t) -> downloader.call(DownloadEvent.UPDATE, new Pair<>(downloader, dummyManager))
+			);
+		}
+		
+		return downloader;
+	}
+	
 	@Override
 	public final void start() throws Exception {
 		if(state.is(TaskStates.STARTED) && state.is(TaskStates.RUNNING)) {
@@ -273,9 +299,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		state.set(TaskStates.RUNNING);
 		state.set(TaskStates.STARTED);
 		
-		TrackerManager dummyManager = new TrackerManager();
-		downloader = createDownloader(dummyManager);
-		dummyManager.addEventListener(TrackerEvent.UPDATE, (t) -> downloader.call(DownloadEvent.UPDATE, new Pair<>(downloader, dummyManager)));
+		ensureInternalDownloader();
 		
 		eventRegistry.call(DownloadEvent.BEGIN, downloader);
 		manager.addEventListener(TrackerEvent.UPDATE, (t) -> eventRegistry.call(DownloadEvent.UPDATE, new Pair<>(downloader, manager)));
@@ -308,14 +332,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		downloadTracker = new DownloadTracker(size.get());
 		manager.tracker(downloadTracker);
 		try {
-			List<Path> tempFiles = new ArrayList<>(segmentsHolders.size());
-			String fileNameNoType = Utils.fileNameNoType(dest.getFileName().toString());
-			
-			for(int i = 0, l = segmentsHolders.size(); i < l; ++i) {
-				Path tempFile = dest.getParent().resolve(fileNameNoType + "." + i + ".part");
-				Ignore.callVoid(() -> NIO.deleteFile(tempFile));
-				tempFiles.add(tempFile);
-			}
+			List<Path> tempFiles = temporaryFiles(segmentsHolders.size());
 			
 			DownloadEventHandler handler = new DownloadEventHandler(downloadTracker);
 			downloader.addEventListener(DownloadEvent.UPDATE, handler::onUpdate);
