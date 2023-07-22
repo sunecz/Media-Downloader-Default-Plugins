@@ -1,7 +1,7 @@
 // This file is used only by an IDE, each plugin is built automatically using the build script.
 module sune.app.mediadown.default_plugins {
 	requires transitive sune.app.mediadown;
-	requires transitive sune.app.mediadownloader.drm;
+	requires transitive sune.app.mediadown.drm;
 	requires javafx.web;
 	requires jdk.jsobject;
 	requires ssdf2;
