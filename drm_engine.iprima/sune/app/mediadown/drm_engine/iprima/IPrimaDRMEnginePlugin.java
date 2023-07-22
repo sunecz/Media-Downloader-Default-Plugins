@@ -1,9 +1,9 @@
 package sune.app.mediadown.drm_engine.iprima;
 
 import sune.app.mediadown.MediaDownloader;
+import sune.app.mediadown.drm.DRMEngines;
 import sune.app.mediadown.plugin.Plugin;
 import sune.app.mediadown.plugin.PluginBase;
-import sune.app.mediadownloader.drm.DRMEngines;
 
 @Plugin(name          = "drm_engine.iprima",
 	    title         = "plugin.drm_engine.iprima.title",
