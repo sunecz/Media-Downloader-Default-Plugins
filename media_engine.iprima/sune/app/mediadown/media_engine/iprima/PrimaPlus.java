@@ -537,14 +537,36 @@ final class PrimaPlus implements IPrima {
 				for(JSONCollection streamInfo : streamInfos.collectionsIterable()) {
 					URI src = Net.uri(streamInfo.getString("url"));
 					MediaLanguage language = MediaLanguage.ofCode(streamInfo.getString("lang.key"));
+					MediaMetadata metadata = MediaMetadata.empty();
+					String type = streamInfo.getString("type").toLowerCase();
+					
+					if(streamInfo.hasCollection("drmInfo")) {
+						JSONCollection drmInfo = streamInfo.getCollection("drmInfo");
+						String drmToken = null;
+						
+						switch(type) {
+							case "dash":
+								drmToken = Utils.stream(drmInfo.getCollection("modularDrmInfos").collectionsIterable())
+									.filter((c) -> c.getString("keySystem").equals("com.widevine.alpha"))
+									.map((c) -> c.getString("token"))
+									.findFirst().orElse(null);
+								break;
+							case "hls":
+								// Widevine not supported, ignore
+								break;
+						}
+						
+						if(drmToken != null) {
+							metadata = MediaMetadata.of("drmToken", drmToken);
+						}
+					}
+					
 					List<Media.Builder<?, ?>> media = MediaUtils.createMediaBuilders(
-						source, src, sourceURI, title, language, MediaMetadata.empty()
+						source, src, sourceURI, title, language, metadata
 					);
 					
 					if(!subtitles.isEmpty()) {
-						String type = streamInfo.getString("type");
-						
-						switch(type.toLowerCase()) {
+						switch(type) {
 							case "hls": {
 								// Must wrap the combined video container in a separated video container,
 								// otherwise the subtitles will not be downloaded correctly.
