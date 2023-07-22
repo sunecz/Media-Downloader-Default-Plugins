@@ -1,7 +1,5 @@
 package sune.app.mediadown.media_engine.novavoyo;
 
-import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.net.CookieStore;
 import java.net.HttpCookie;
 import java.net.URI;
@@ -46,12 +44,14 @@ import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.task.ListTask;
 import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.JSON.JSONCollection;
-import sune.app.mediadown.util.JSON.JSONObject;
 import sune.app.mediadown.util.JavaScript;
 import sune.app.mediadown.util.NIO;
 import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Utils.Ignore;
+import sune.util.ssdf2.SSDCollection;
+import sune.util.ssdf2.SSDF;
+import sune.util.ssdf2.SSDObject;
 
 public final class NovaVoyoServer implements Server {
 	
@@ -159,13 +159,44 @@ public final class NovaVoyoServer implements Server {
 			String title = mediaTitle(settings.getCollection("plugins.measuring.streamInfo"), document);
 			for(JSONCollection node : tracks.collectionsIterable()) {
 				MediaFormat format = MediaFormat.fromName(node.name());
+				String formatName = node.name().toLowerCase();
+				
 				for(JSONCollection coll : ((JSONCollection) node).collectionsIterable()) {
 					String videoURL = coll.getString("src");
-					if(format == MediaFormat.UNKNOWN)
-						format = MediaFormat.fromPath(videoURL);
 					MediaLanguage language = MediaLanguage.ofCode(coll.getString("lang"));
-					List<Media> media = MediaUtils.createMedia(source, Net.uri(videoURL), sourceURI,
-						title, language, MediaMetadata.empty());
+					MediaMetadata metadata = MediaMetadata.empty();
+					
+					if(format == MediaFormat.UNKNOWN) {
+						format = MediaFormat.fromPath(videoURL);
+					}
+					
+					if(coll.hasCollection("drm")) {
+						JSONCollection drmInfo = coll.getCollection("drm");
+						String drmToken = null;
+						
+						switch(formatName) {
+							case "dash":
+								drmToken = Utils.stream(drmInfo.collectionsIterable())
+									.filter((c) -> c.getString("keySystem").equals("com.widevine.alpha"))
+									.flatMap((c) -> Utils.stream(c.getCollection("headers").collectionsIterable()))
+									.filter((h) -> h.getString("name").equals("X-AxDRM-Message"))
+									.map((h) -> h.getString("value"))
+									.findFirst().orElse(null);
+								break;
+							case "hls":
+								// Widevine not supported, ignore
+								break;
+						}
+						
+						if(drmToken != null) {
+							metadata = MediaMetadata.of("drmToken", drmToken);
+						}
+					}
+					
+					List<Media> media = MediaUtils.createMedia(
+						source, Net.uri(videoURL), sourceURI, title, language, metadata
+					);
+					
 					for(Media s : media) {
 						if(!task.add(s)) {
 							return; // Do not continue
@@ -254,8 +285,8 @@ public final class NovaVoyoServer implements Server {
 		}
 		
 		private static final void addDeviceToRemoveOnNextStart(Device device) {
-			JSONCollection value = devicesToRemoveOnNextStart();
-			if(value == null) value = JSONCollection.emptyArray();
+			SSDCollection value = devicesToRemoveOnNextStart();
+			if(value == null) value = SSDCollection.emptyArray();
 			value.add(device.removeURL());
 			configuration().writer().set("devicesToRemove", value);
 			saveConfiguration();
@@ -264,7 +295,7 @@ public final class NovaVoyoServer implements Server {
 		private static final void clearDevicesToRemoveOnNextStart() {
 			PluginConfiguration configuration = configuration();
 			Configuration.Writer writer = configuration.writer();
-			writer.set("devicesToRemove", JSONCollection.emptyArray());
+			writer.set("devicesToRemove", SSDCollection.emptyArray());
 			saveConfiguration();
 		}
 		
@@ -272,16 +303,10 @@ public final class NovaVoyoServer implements Server {
 			return NIO.localPath("resources/config/" + PLUGIN.getContext().getPlugin().instance().name() + ".ssdf");
 		}
 		
-		private static final JSONCollection devicesToRemoveOnNextStart() {
+		private static final SSDCollection devicesToRemoveOnNextStart() {
 			// Due to behavior of the current ArrayConfigurationProperty we must acquire the list
 			// using indirect reading and parsing of the configuration file.
-			try {
-				return JSON.newReader(configurationPath())
-						   .allowUnquotedNames(true).read()
-						   .getCollection("devicesToRemove", null);
-			} catch(IOException ex) {
-				throw new UncheckedIOException(ex);
-			}
+			return SSDF.read(configurationPath().toFile()).getCollection("devicesToRemove", null);
 		}
 		
 		private static final void saveConfiguration() {
@@ -339,10 +364,10 @@ public final class NovaVoyoServer implements Server {
 				throw new IllegalStateException("Unable to log in");
 			
 			// Remove any previously created devices that should be removed
-			JSONCollection devicesToRemove = devicesToRemoveOnNextStart();
+			SSDCollection devicesToRemove = devicesToRemoveOnNextStart();
 			if(devicesToRemove != null) {
 				// Remove all devices (using their removeURL) that are present
-				for(JSONObject object : devicesToRemove.objectsIterable()) {
+				for(SSDObject object : devicesToRemove.objectsIterable()) {
 					DeviceManager.removeDevice(object.stringValue());
 				}
 				
