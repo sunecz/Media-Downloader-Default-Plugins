@@ -79,14 +79,23 @@ public final class NovaPlusEngine implements MediaEngine {
 	
 	private static final String mediaTitle(Document document) {
 		// Since using the measuring.streamInfo is not reliable, we use Linked Data.
-		Element script = document.selectFirst("script[type='application/ld+json']");
+		JSONCollection data = null;
 		
-		// The Linked data should always be present
-		if(script == null) {
-			throw new IllegalStateException("No Linked data");
+		for(Element script : document.select("script[type='application/ld+json']")) {
+			JSONCollection content = JSON.read(script.html());
+			
+			// Skip Linked Data of the website itself
+			if(content.getString("@type").equalsIgnoreCase("website")) {
+				continue;
+			}
+			
+			data = content;
 		}
 		
-		JSONCollection data = JSON.read(script.html());
+		// The Linked data should always be present
+		if(data == null) {
+			throw new IllegalStateException("No Linked data");
+		}
 		
 		String programName = data.getString("partOfSeries.name");
 		String episodeName = data.getString("name", "");
