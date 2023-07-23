@@ -551,9 +551,9 @@ final class PrimaPlus implements IPrima {
 									.map((c) -> c.getString("token"))
 									.findFirst().orElse(null);
 								break;
-							case "hls":
-								// Widevine not supported, ignore
-								break;
+							default:
+								// Widevine not supported, do not add media sources
+								continue;
 						}
 						
 						if(drmToken != null) {
