@@ -18,6 +18,7 @@ import sune.app.mediadown.entity.Episode;
 import sune.app.mediadown.entity.MediaEngine;
 import sune.app.mediadown.entity.Program;
 import sune.app.mediadown.media.Media;
+import sune.app.mediadown.media.MediaFormat;
 import sune.app.mediadown.media.MediaLanguage;
 import sune.app.mediadown.media.MediaMetadata;
 import sune.app.mediadown.media.MediaSource;
@@ -293,11 +294,44 @@ public final class NovaPlusEngine implements MediaEngine {
 				String title = mediaTitle(document);
 				
 				for(JSONCollection node : tracks.collectionsIterable()) {
+					MediaFormat format = MediaFormat.fromName(node.name());
+					String formatName = node.name().toLowerCase();
+					
 					for(JSONCollection coll : ((JSONCollection) node).collectionsIterable()) {
 						String videoURL = coll.getString("src");
 						MediaLanguage language = MediaLanguage.ofCode(coll.getString("lang"));
-						List<Media> media = MediaUtils.createMedia(source, Net.uri(videoURL), sourceURI,
-							title, language, MediaMetadata.empty());
+						MediaMetadata metadata = MediaMetadata.empty();
+						
+						if(format == MediaFormat.UNKNOWN) {
+							format = MediaFormat.fromPath(videoURL);
+						}
+						
+						if(coll.hasCollection("drm")) {
+							JSONCollection drmInfo = coll.getCollection("drm");
+							String drmToken = null;
+							
+							switch(formatName) {
+								case "dash":
+									drmToken = Utils.stream(drmInfo.collectionsIterable())
+										.filter((c) -> c.getString("keySystem").equals("com.widevine.alpha"))
+										.flatMap((c) -> Utils.stream(c.getCollection("headers").collectionsIterable()))
+										.filter((h) -> h.getString("name").equals("X-AxDRM-Message"))
+										.map((h) -> h.getString("value"))
+										.findFirst().orElse(null);
+									break;
+								case "hls":
+									// Widevine not supported, ignore
+									break;
+							}
+							
+							if(drmToken != null) {
+								metadata = MediaMetadata.of("drmToken", drmToken);
+							}
+						}
+						
+						List<Media> media = MediaUtils.createMedia(
+							source, Net.uri(videoURL), sourceURI, title, language, metadata
+						);
 						
 						for(Media s : media) {
 							if(!task.add(s)) {
