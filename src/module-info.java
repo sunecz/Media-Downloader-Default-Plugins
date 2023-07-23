@@ -24,4 +24,5 @@ module sune.app.mediadown.default_plugins {
 	exports sune.app.mediadown.drm_engine.ceskatelevize;
 	exports sune.app.mediadown.drm_engine.novavoyo;
 	exports sune.app.mediadown.drm_engine.iprima;
+	exports sune.app.mediadown.drm_engine.novaplus;
 }

@@ -1,0 +1,9 @@
+{
+	plugin: {
+		drm_engine: {
+			novaplus: {
+				title: "TV Nova (DRM)"
+			}
+		}
+	}
+}
