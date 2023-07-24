@@ -69,16 +69,19 @@ public final class NovaVoyoServer implements Server {
 	NovaVoyoServer() {
 	}
 	
-	private static final VoyoError checkForError(Document document) {
-		if(!document.body().hasClass("error"))
+	private static final VoyoError checkForError(Document document) throws Exception {
+		if(!document.body().hasClass("error")) {
 			return VoyoError.ofSuccess();
+		}
 		
 		for(Element elScript : document.select("script:not([src])")) {
 			String content = elScript.html();
+			
 			int index;
 			if((index = content.indexOf("klebetnica(")) >= 0) {
 				String object = Utils.bracketSubstring(content, '{', '}', false, index, content.length());
-				JSONCollection data = Ignore.call(() -> JSON.newReader(object).allowUnquotedNames(true).read());
+				object = object.replace("'", "\""); // JSON reader supports only double quotes
+				JSONCollection data = JSON.newReader(object).allowUnquotedNames(true).read();
 				return VoyoError.ofFailure(data);
 			}
 		}
@@ -135,8 +138,21 @@ public final class NovaVoyoServer implements Server {
 			Document embedDoc = HTML.from(Net.uri(embedURL));
 			
 			VoyoError error;
-			if(!(error = checkForError(embedDoc)).isSuccess())
-				throw new IllegalStateException("Error " + error.event() + ": " + error.type());
+			if(!(error = checkForError(embedDoc)).isSuccess()) {
+				switch(error.type()) {
+					case "player_parental_profile_age_required":
+						if(VoyoAccount.bypassAgeRestriction()) {
+							embedDoc = HTML.from(Net.uri(embedURL)); // Retry
+							
+							if(checkForError(embedDoc).isSuccess()) {
+								break;
+							}
+						}
+						// FALL-THROUGH
+					default:
+						throw new IllegalStateException("Error " + error.event() + ": " + error.type());
+				}
+			}
 			
 			JSONCollection settings = null;
 			for(Element elScript : embedDoc.select("script:not([src])")) {
@@ -256,9 +272,15 @@ public final class NovaVoyoServer implements Server {
 	
 	private static final class VoyoAccount {
 		
-		private static final String URL_MY_ACCOUNT = "https://voyo.nova.cz/muj-profil";
+		private static final URI URI_MY_ACCOUNT;
+		private static final URI URI_AGE_RESTRICTION;
 		private static final AtomicBoolean isLoginInProcess = new AtomicBoolean();
 		private static final AtomicBoolean isLoggedIn = new AtomicBoolean();
+		
+		static {
+			URI_MY_ACCOUNT = Net.uri("https://voyo.nova.cz/muj-profil");
+			URI_AGE_RESTRICTION = Net.uri("https://voyo.nova.cz/obrazovky-prehravace/rodicovska-kontrola-profil");
+		}
 		
 		// Forbid anyone to create an instance of this class
 		private VoyoAccount() {
@@ -322,7 +344,7 @@ public final class NovaVoyoServer implements Server {
 			// (1) Remove all cookies.
 			// (2) Visit any (logged-in-only?) page.
 			Web.cookieManager().getCookieStore().removeAll();
-			Web.request(Request.of(Net.uri(URL_MY_ACCOUNT)).GET());
+			Web.request(Request.of(URI_MY_ACCOUNT).GET());
 		}
 		
 		public static final boolean isLoggedIn() {
@@ -378,7 +400,7 @@ public final class NovaVoyoServer implements Server {
 			List<Device> devices;
 			
 			// Remember the login session cookies for later use
-			URI cookiesURI = Net.uri(URL_MY_ACCOUNT);
+			URI cookiesURI = URI_MY_ACCOUNT;
 			List<HttpCookie> cookies = savedCookies(cookiesURI);
 			// Remember the list of removeURLs of devices for later use
 			devices = DeviceManager.listDevices();
@@ -427,6 +449,20 @@ public final class NovaVoyoServer implements Server {
 			isLoggedIn.set(true);
 			isLoginInProcess.set(false);
 			return true;
+		}
+		
+		public static boolean bypassAgeRestriction() throws Exception {
+			String body = Net.queryString(Map.of(
+				"birth_day", 1,
+				"birth_month", 1,
+				"birth_year", 2000,
+				"save", "Uložit",
+				"_do", "content212-userAgeForm-form-submit"
+			));
+			
+			try(Response.OfStream response = Web.requestStream(Request.of(URI_AGE_RESTRICTION).POST(body))) {
+				return response.statusCode() == 200;
+			}
 		}
 	}
 	
