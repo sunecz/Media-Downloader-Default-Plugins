@@ -7,7 +7,7 @@ import sune.app.mediadown.plugin.PluginBase;
 
 @Plugin(name          = "drm_engine.markizavoyo",
 	    title         = "plugin.drm_engine.markizavoyo.title",
-	    version       = "00.02.09-0000",
+	    version       = "00.02.09-0001",
 	    author        = "Sune",
 	    updateBaseURL = "https://app.sune.tech/mediadown/dat/plugin/0002/drm_engine/markizavoyo/",
 	    updatable     = true,
