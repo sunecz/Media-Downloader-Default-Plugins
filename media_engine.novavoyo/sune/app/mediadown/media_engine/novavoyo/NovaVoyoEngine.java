@@ -466,17 +466,24 @@ public final class NovaVoyoEngine implements MediaEngine {
 			);
 			
 			try(Response.OfStream response = request(action, args)) {
-				JSONCollection json = JSON.read(response.stream());
-				URI uri = Net.uri(json.getString("data.redirect.url"));
-				return HTML.from(Request.of(uri).GET());
+				String content = new String(response.stream().readAllBytes(), Shared.CHARSET);
+				content = content.replace("\\n", "\n").replace("\\\"", "\\\\\\\""); // Resolve escaped characters
+				JSONCollection json = JSON.read(content);
+				
+				if(json.hasString("data.redirect.url")) {
+					URI uri = Net.uri(json.getString("data.redirect.url"));
+					return HTML.from(Request.of(uri).GET());
+				}
+				
+				return HTML.parse(json.getString("data.content.40-10").replace("\\\"", "\""));
 			}
 		}
 		
-		private static final List<Season> getSeasons(Program program) throws Exception {
+		private static final List<Season> getSeasons(Document detail) throws Exception {
 			List<Season> seasons = new ArrayList<>();
 			
-			Document document = getProgramDetail(program);
-			Elements elItems = document.select("#episodesDropdown + .dropdown-menu .dropdown-item");
+			Element dropdownMenu = detail.selectFirst("#episodesDropdown + .dropdown-menu");
+			Elements elItems = dropdownMenu.select(".dropdown-item");
 			int numOfSeasons = elItems.size();
 			
 			for(int i = 0; i < numOfSeasons; ++i) {
@@ -501,7 +508,18 @@ public final class NovaVoyoEngine implements MediaEngine {
 		
 		public static final ListTask<Episode> getEpisodes(Program program) throws Exception {
 			return ListTask.of((task) -> {
-				for(Season season : getSeasons(program)) {
+				Document detail = getProgramDetail(program);
+				
+				if(detail.selectFirst(".listing") == null) { // Movie
+					URI uri = program.uri().resolve("#player-fullscreen");
+					String title = detail.selectFirst("h1.title").text().trim();
+					Episode episode = new Episode(program, uri, title);
+					
+					task.add(episode);
+					return; // Do not continue
+				}
+				
+				for(Season season : getSeasons(detail)) {
 					if(!loopListEpisodes(task, program, season)) {
 						return; // Do not continue
 					}
