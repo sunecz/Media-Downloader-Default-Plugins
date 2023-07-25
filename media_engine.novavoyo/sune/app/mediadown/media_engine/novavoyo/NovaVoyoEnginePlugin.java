@@ -2,7 +2,7 @@ package sune.app.mediadown.media_engine.novavoyo;
 
 import sune.app.mediadown.MediaDownloader;
 import sune.app.mediadown.configuration.Configuration.ConfigurationProperty;
-import sune.app.mediadown.entity.Servers;
+import sune.app.mediadown.entity.MediaEngines;
 import sune.app.mediadown.plugin.Plugin;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginConfiguration;
@@ -39,8 +39,7 @@ public final class NovaVoyoEnginePlugin extends PluginBase {
 	@Override
 	public void init() throws Exception {
 		translatedTitle = MediaDownloader.translation().getSingle(super.getTitle());
-		// Currently support only obtaining of media sources
-		Servers.add(NAME, NovaVoyoServer.class);
+		MediaEngines.add(NAME, NovaVoyoEngine.class);
 		initConfiguration();
 	}
 	

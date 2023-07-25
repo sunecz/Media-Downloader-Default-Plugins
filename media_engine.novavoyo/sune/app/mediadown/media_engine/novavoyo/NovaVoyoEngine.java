@@ -10,6 +10,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.ListIterator;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -21,12 +22,16 @@ import java.util.stream.Collectors;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.nodes.TextNode;
+import org.jsoup.select.Elements;
 
 import javafx.scene.image.Image;
 import sune.app.mediadown.MediaDownloader;
+import sune.app.mediadown.Shared;
 import sune.app.mediadown.configuration.Configuration;
 import sune.app.mediadown.configuration.Configuration.ConfigurationProperty;
-import sune.app.mediadown.entity.Server;
+import sune.app.mediadown.entity.Episode;
+import sune.app.mediadown.entity.MediaEngine;
+import sune.app.mediadown.entity.Program;
 import sune.app.mediadown.media.Media;
 import sune.app.mediadown.media.MediaFormat;
 import sune.app.mediadown.media.MediaLanguage;
@@ -53,7 +58,7 @@ import sune.util.ssdf2.SSDCollection;
 import sune.util.ssdf2.SSDF;
 import sune.util.ssdf2.SSDObject;
 
-public final class NovaVoyoServer implements Server {
+public final class NovaVoyoEngine implements MediaEngine {
 	
 	private static final PluginBase PLUGIN = PluginLoaderContext.getContext().getInstance();
 	
@@ -66,7 +71,7 @@ public final class NovaVoyoServer implements Server {
 	private static final Regex REGEX_EPISODE = Regex.of("^(?:.*?(?: - |: ))?(\\d+)\\. díl(?:(?: - |: )(.*))?$");
 	
 	// Allow to create an instance when registering the engine
-	NovaVoyoServer() {
+	NovaVoyoEngine() {
 	}
 	
 	private static final VoyoError checkForError(Document document) throws Exception {
@@ -119,6 +124,16 @@ public final class NovaVoyoServer implements Server {
 		}
 		
 		return MediaUtils.mediaTitle(programName, numSeason, numEpisode, episodeName);
+	}
+	
+	@Override
+	public ListTask<Program> getPrograms() throws Exception {
+		return API.getPrograms(new API.Sort(API.Sort.By.TITLE, API.Sort.Order.ASC));
+	}
+	
+	@Override
+	public ListTask<Episode> getEpisodes(Program program) throws Exception {
+		return API.getEpisodes(program);
 	}
 	
 	@Override
@@ -224,6 +239,11 @@ public final class NovaVoyoServer implements Server {
 	}
 	
 	@Override
+	public boolean isDirectMediaSupported() {
+		return true;
+	}
+	
+	@Override
 	public boolean isCompatibleURI(URI uri) {
 		// Check the protocol
 		String protocol = uri.getScheme();
@@ -268,6 +288,295 @@ public final class NovaVoyoServer implements Server {
 	@Override
 	public String toString() {
 		return TITLE;
+	}
+	
+	private static final class API {
+		
+		private static final URI URI_ENDPOINT = Net.uri("https://voyo.nova.cz/api/v1/");
+		
+		private static final Category TV_SHOWS = new Category("voyo-4", 17);
+		private static final Category TV_SERIES = new Category("voyo-3", 16);
+		private static final Category MOVIES = new Category("voyo-5", 18);
+		private static final Category KIDS = new Category("voyo-7", 20);
+		
+		private static final Category[] CATEGORIES = {
+			TV_SHOWS, TV_SERIES, MOVIES, KIDS
+		};
+		
+		private static final int ITEMS_PER_PAGE = 64;
+		
+		private static final int RESULT_SUCCESS = 0;
+		private static final int RESULT_NO_MORE_ITEMS = 1;
+		private static final int RESULT_CANCEL = 2;
+		
+		private static final Response.OfStream request(String action, Map<String, Object> args) throws Exception {
+			URI uri = URI_ENDPOINT.resolve(action + '?' + Net.queryString(args));
+			Request request = Request.of(uri)
+				.addHeaders("Referer", "https://voyo.nova.cz/", "X-Requested-With", "XMLHttpRequest")
+				.GET();
+			return Web.requestStream(request);
+		}
+		
+		private static final int parsePrograms(ListTask<Program> task, Response.OfStream response)
+				throws Exception {
+			// The JavaScript object filteredShowDataX does not always exist (e.g. for the first page),
+			// therefore just use the HTML content of the page.
+			Document document = HTML.parse(new String(response.stream().readAllBytes(), Shared.CHARSET), response.uri());
+			
+			for(Element elWrapper : document.select(".row > .i")) {
+				Element elLink = elWrapper.selectFirst(".title > a");
+				String programId = elWrapper.selectFirst(".c-video-box").attr("data-resource").replace("show.", "");
+				String url = elLink.absUrl("href");
+				String title = elLink.text().trim();
+				Program program = new Program(Net.uri(url), title, "programId", programId);
+				
+				if(!task.add(program)) {
+					return RESULT_CANCEL; // Do not continue
+				}
+			}
+			
+			Element elNav = document.selectFirst(".c-pagination");
+			
+			if(elNav == null) {
+				// No pagination, meaning no more items
+				return RESULT_NO_MORE_ITEMS;
+			}
+			
+			Element elItemContent = elNav.selectFirst("li:last-child > *");
+			
+			if(elItemContent.hasClass("-disabled")) {
+				// The last list item contains either an anchor element, having a link
+				// to the next page, which is available, or a span element, which indicates
+				// that there is no more items, i.e. we are on the last page.
+				return RESULT_NO_MORE_ITEMS;
+			}
+			
+			return RESULT_SUCCESS;
+		}
+		
+		private static final int listPrograms(ListTask<Program> task, Category category, Sort sort, int page, int count)
+				throws Exception {
+			String action = "shows/genres";
+			Map<String, Object> args = Map.of(
+				"category", category.categoryId(),
+				"pageId", category.pageId(),
+				"sort", sort.internalName(),
+				"limit", count,
+				"page", page
+			);
+			
+			try(Response.OfStream response = request(action, args)) {
+				return parsePrograms(task, response);
+			}
+		}
+		
+		private static final boolean loopListPrograms(ListTask<Program> task, Category category, Sort sort) throws Exception {
+			loop:
+			for(int page = 1;; ++page) {
+				switch(listPrograms(task, category, sort, page, ITEMS_PER_PAGE)) {
+					case RESULT_CANCEL:
+						return false; // Do not continue
+					case RESULT_NO_MORE_ITEMS:
+						break loop; // End the loop
+					default:
+						continue; // Continue to the next page
+				}
+			}
+			
+			return true;
+		}
+		
+		private static final int parseEpisodes(ListTask<Episode> task, Program program, Season season,
+				Response.OfStream response) throws Exception {
+			String content = new String(response.stream().readAllBytes(), Shared.CHARSET);
+			
+			if(content.isEmpty()) {
+				// Nothing to be shown, therefore no more items
+				return RESULT_NO_MORE_ITEMS;
+			}
+			
+			Document document = HTML.parse(content, response.uri());
+			Elements items = document.select("article");
+			
+			// Since order is always ascending but we want descending by default,
+			// use the ListIterator to reverse the order.
+			for(ListIterator<Element> it = items.listIterator(items.size()); it.hasPrevious();) {
+				Element elWrapper = it.previous();
+				Element elLink = elWrapper.selectFirst(".title > a");
+				String url = elLink.absUrl("href");
+				String title = String.format("%d. série - %s", season.number(), elLink.text().trim());
+				Episode episode = new Episode(program, Net.uri(url), title);
+				
+				if(!task.add(episode)) {
+					return RESULT_CANCEL; // Do not continue
+				}
+				
+			}
+			
+			Element elLoadMore = document.selectFirst(".load-more");
+			
+			if(elLoadMore == null) {
+				// No Load more button, meaning no more items
+				return RESULT_NO_MORE_ITEMS;
+			}
+			
+			return RESULT_SUCCESS;
+		}
+		
+		private static final int listEpisodes(ListTask<Episode> task, Program program, Season season, int offset,
+				int count) throws Exception {
+			String action = "show/content";
+			Map<String, Object> args = Map.of(
+				"showId", program.get("programId"),
+				"type", "episodes",
+				"season", season.id(),
+				"orderDirection", Sort.Order.ASC.internalName(), // Works only with ASC order
+				"offset", offset,
+				"count", count,
+				"url", program.uri().getPath()
+			);
+			
+			try(Response.OfStream response = request(action, args)) {
+				return parseEpisodes(task, program, season, response);
+			}
+		}
+		
+		private static final boolean loopListEpisodes(ListTask<Episode> task, Program program, Season season)
+				throws Exception {
+			loop:
+			for(int offset = 0, count = ITEMS_PER_PAGE;; offset += count) {
+				switch(listEpisodes(task, program, season, offset, count)) {
+					case RESULT_CANCEL:
+						return false; // Do not continue
+					case RESULT_NO_MORE_ITEMS:
+						break loop; // End the loop
+					default:
+						continue; // Continue to the next page
+				}
+			}
+			
+			return true;
+		}
+		
+		private static final Document getProgramDetail(Program program) throws Exception {
+			String action = "page/detail-url";
+			Map<String, Object> args = Map.of(
+				"layout_parts[]", "40-10",
+				"url", program.uri().toString()
+			);
+			
+			try(Response.OfStream response = request(action, args)) {
+				JSONCollection json = JSON.read(response.stream());
+				URI uri = Net.uri(json.getString("data.redirect.url"));
+				return HTML.from(Request.of(uri).GET());
+			}
+		}
+		
+		private static final List<Season> getSeasons(Program program) throws Exception {
+			List<Season> seasons = new ArrayList<>();
+			
+			Document document = getProgramDetail(program);
+			Elements elItems = document.select("#episodesDropdown + .dropdown-menu .dropdown-item");
+			int numOfSeasons = elItems.size();
+			
+			for(int i = 0; i < numOfSeasons; ++i) {
+				Element elItem = elItems.get(i);
+				String id = elItem.attr("data-season-id");
+				int number = numOfSeasons - i;
+				seasons.add(new Season(id, number));
+			}
+			
+			return seasons;
+		}
+		
+		public static final ListTask<Program> getPrograms(Sort sort) throws Exception {
+			return ListTask.of((task) -> {
+				for(Category category : CATEGORIES) {
+					if(!loopListPrograms(task, category, sort)) {
+						return; // Do not continue
+					}
+				}
+			});
+		}
+		
+		public static final ListTask<Episode> getEpisodes(Program program) throws Exception {
+			return ListTask.of((task) -> {
+				for(Season season : getSeasons(program)) {
+					if(!loopListEpisodes(task, program, season)) {
+						return; // Do not continue
+					}
+				}
+			});
+		}
+		
+		private static final class Sort {
+			
+			private final By by;
+			private final Order order;
+			
+			public Sort(By by, Order order) {
+				this.by = Objects.requireNonNull(by);
+				this.order = Objects.requireNonNull(order);
+			}
+			
+			public String internalName() {
+				return String.format("%s__%s", by.internalName(), order.internalName());
+			}
+			
+			public static enum By {
+				
+				TITLE("title"), DATE("date");
+				
+				private final String internalName;
+				
+				private By(String internalName) {
+					this.internalName = internalName;
+				}
+				
+				public String internalName() { return internalName; }
+			}
+			
+			public static enum Order {
+				
+				ASC("asc"), DESC("desc");
+				
+				private final String internalName;
+				
+				private Order(String internalName) {
+					this.internalName = internalName;
+				}
+				
+				public String internalName() { return internalName; }
+			}
+		}
+		
+		private static final class Category {
+			
+			private final String categoryId;
+			private final int pageId;
+			
+			private Category(String categoryId, int pageId) {
+				this.categoryId = categoryId;
+				this.pageId = pageId;
+			}
+			
+			public String categoryId() { return categoryId; }
+			public int pageId() { return pageId; }
+		}
+		
+		private static final class Season {
+			
+			private final String id;
+			private final int number;
+			
+			public Season(String id, int number) {
+				this.id = id;
+				this.number = number;
+			}
+			
+			public String id() { return id; }
+			public int number() { return number; }
+		}
 	}
 	
 	private static final class VoyoAccount {
