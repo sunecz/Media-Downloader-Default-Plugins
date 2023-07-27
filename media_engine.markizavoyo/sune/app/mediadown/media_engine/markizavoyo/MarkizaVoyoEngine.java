@@ -784,7 +784,7 @@ public final class MarkizaVoyoEngine implements MediaEngine {
 				"birth_month", 1,
 				"birth_year", 2000,
 				"save", "Uložiť",
-				"_do", "content212-userAgeForm-form-submit"
+				"_do", "content232-userAgeForm-form-submit"
 			));
 			
 			try(Response.OfStream response = Web.requestStream(Request.of(URI_AGE_RESTRICTION).POST(body))) {
