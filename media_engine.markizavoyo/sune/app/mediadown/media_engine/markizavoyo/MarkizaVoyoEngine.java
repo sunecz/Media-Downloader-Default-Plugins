@@ -68,62 +68,8 @@ public final class MarkizaVoyoEngine implements MediaEngine {
 	public static final String URL     = PLUGIN.getURL();
 	public static final Image  ICON    = PLUGIN.getIcon();
 	
-	private static final Regex REGEX_EPISODE = Regex.of("^(?:.*?(?: - |: ))?(\\d+)\\. díl(?:(?: - |: )(.*))?$");
-	
 	// Allow to create an instance when registering the engine
 	MarkizaVoyoEngine() {
-	}
-	
-	private static final VoyoError checkForError(Document document) throws Exception {
-		if(!document.body().hasClass("error")) {
-			return VoyoError.ofSuccess();
-		}
-		
-		for(Element elScript : document.select("script:not([src])")) {
-			String content = elScript.html();
-			
-			int index;
-			if((index = content.indexOf("klebetnica(")) >= 0) {
-				String object = Utils.bracketSubstring(content, '{', '}', false, index, content.length());
-				object = object.replace("'", "\""); // JSON reader supports only double quotes
-				JSONCollection data = JSON.newReader(object).allowUnquotedNames(true).read();
-				return VoyoError.ofFailure(data);
-			}
-		}
-		
-		return VoyoError.ofFailure(null);
-	}
-	
-	private static final String mediaTitle(JSONCollection streamInfo, Document document) {
-		// Nova Voyo has weird naming, this is actually correct
-		String programName = streamInfo.getString("episode", "");
-		int numSeason = -1;
-		int numEpisode = -1;
-		String episodeName = null;
-		
-		if(programName.isEmpty()) {
-			// No useful information can be extracted from streamInfo, use LinkingData
-			LinkingData linkingData = LinkingData.from(document).stream()
-				.filter((ld) -> Utils.contains(Set.of("Movie", "TVEpisode"), ld.type()))
-				.findFirst().orElseGet(LinkingData::empty);
-			
-			if(!linkingData.isEmpty()) {
-				programName = linkingData.data().getString("name", "");
-			}
-		} else {
-			String episodeText = streamInfo.getString("programName", "");
-			numSeason = streamInfo.getInt("seasonNumber", 0);
-			
-			Matcher matcher = REGEX_EPISODE.matcher(episodeText);
-			if(matcher.matches()) {
-				numEpisode = Integer.parseInt(matcher.group(1));
-				episodeName = Optional.ofNullable(matcher.group(2)).orElse("");
-			} else {
-				episodeName = episodeText;
-			}
-		}
-		
-		return MediaUtils.mediaTitle(programName, numSeason, numEpisode, episodeName);
 	}
 	
 	@Override
@@ -138,104 +84,7 @@ public final class MarkizaVoyoEngine implements MediaEngine {
 	
 	@Override
 	public ListTask<Media> getMedia(URI uri, Map<String, Object> data) throws Exception {
-		return ListTask.of((task) -> {
-			// Ensure the user is logged in
-			VoyoAccount.login();
-			
-			// Obtain the main iframe for the video
-			Document document = HTML.from(uri);
-			Element elIframe = document.selectFirst(".js-detail-player .iframe-wrap iframe");
-			if(elIframe == null)
-				return;
-			
-			// Obtain the embedded iframe document to extract the player settings
-			String embedURL = elIframe.absUrl("src");
-			Document embedDoc = HTML.from(Net.uri(embedURL));
-			
-			VoyoError error;
-			if(!(error = checkForError(embedDoc)).isSuccess()) {
-				switch(error.type()) {
-					case "player_parental_profile_age_required":
-						if(VoyoAccount.bypassAgeRestriction()) {
-							embedDoc = HTML.from(Net.uri(embedURL)); // Retry
-							
-							if(checkForError(embedDoc).isSuccess()) {
-								break;
-							}
-						}
-						// FALL-THROUGH
-					default:
-						throw new IllegalStateException("Error " + error.event() + ": " + error.type());
-				}
-			}
-			
-			JSONCollection settings = null;
-			for(Element elScript : embedDoc.select("script:not([src])")) {
-				String content = elScript.html();
-				int index;
-				if((index = content.indexOf("Player.init")) >= 0) {
-					content = Utils.bracketSubstring(content, '{', '}', false, index, content.length());
-					settings = JavaScript.readObject(content);
-					break;
-				}
-			}
-			
-			if(settings == null)
-				return; // Do not continue
-			
-			JSONCollection tracks = settings.getCollection("tracks");
-			URI sourceURI = uri;
-			MediaSource source = MediaSource.of(this);
-			
-			String title = mediaTitle(settings.getCollection("plugins.measuring.streamInfo"), document);
-			for(JSONCollection node : tracks.collectionsIterable()) {
-				MediaFormat format = MediaFormat.fromName(node.name());
-				String formatName = node.name().toLowerCase();
-				
-				for(JSONCollection coll : ((JSONCollection) node).collectionsIterable()) {
-					String videoURL = coll.getString("src");
-					MediaLanguage language = MediaLanguage.ofCode(coll.getString("lang"));
-					MediaMetadata metadata = MediaMetadata.empty();
-					
-					if(format == MediaFormat.UNKNOWN) {
-						format = MediaFormat.fromPath(videoURL);
-					}
-					
-					if(coll.hasCollection("drm")) {
-						JSONCollection drmInfo = coll.getCollection("drm");
-						String drmToken = null;
-						
-						switch(formatName) {
-							case "dash":
-								drmToken = Utils.stream(drmInfo.collectionsIterable())
-									.filter((c) -> c.getString("keySystem").equals("com.widevine.alpha"))
-									.flatMap((c) -> Utils.stream(c.getCollection("headers").collectionsIterable()))
-									.filter((h) -> h.getString("name").equals("X-AxDRM-Message"))
-									.map((h) -> h.getString("value"))
-									.findFirst().orElse(null);
-								break;
-							default:
-								// Widevine not supported, do not add media sources
-								continue;
-						}
-						
-						if(drmToken != null) {
-							metadata = MediaMetadata.of("drmToken", drmToken);
-						}
-					}
-					
-					List<Media> media = MediaUtils.createMedia(
-						source, Net.uri(videoURL), sourceURI, title, language, metadata
-					);
-					
-					for(Media s : media) {
-						if(!task.add(s)) {
-							return; // Do not continue
-						}
-					}
-				}
-			}
-		});
+		return API.getMedia(this, uri, data);
 	}
 	
 	@Override
@@ -308,6 +157,8 @@ public final class MarkizaVoyoEngine implements MediaEngine {
 		private static final int RESULT_SUCCESS = 0;
 		private static final int RESULT_NO_MORE_ITEMS = 1;
 		private static final int RESULT_CANCEL = 2;
+		
+		private static final Regex REGEX_EPISODE = Regex.of("^(?:.*?(?: - |: ))?(\\d+)\\. díl(?:(?: - |: )(.*))?$");
 		
 		private static final Response.OfStream request(String action, Map<String, Object> args) throws Exception {
 			URI uri = URI_ENDPOINT.resolve(action + '?' + Net.queryString(args));
@@ -458,6 +309,58 @@ public final class MarkizaVoyoEngine implements MediaEngine {
 			return true;
 		}
 		
+		private static final VoyoError checkForError(Document document) throws Exception {
+			if(!document.body().hasClass("error")) {
+				return VoyoError.ofSuccess();
+			}
+			
+			for(Element elScript : document.select("script:not([src])")) {
+				String content = elScript.html();
+				
+				int index;
+				if((index = content.indexOf("klebetnica(")) >= 0) {
+					String object = Utils.bracketSubstring(content, '{', '}', false, index, content.length());
+					object = object.replace("'", "\""); // JSON reader supports only double quotes
+					JSONCollection data = JSON.newReader(object).allowUnquotedNames(true).read();
+					return VoyoError.ofFailure(data);
+				}
+			}
+			
+			return VoyoError.ofFailure(null);
+		}
+		
+		private static final String mediaTitle(JSONCollection streamInfo, Document document) {
+			// Nova Voyo has weird naming, this is actually correct
+			String programName = streamInfo.getString("episode", "");
+			int numSeason = -1;
+			int numEpisode = -1;
+			String episodeName = null;
+			
+			if(programName.isEmpty()) {
+				// No useful information can be extracted from streamInfo, use LinkingData
+				LinkingData linkingData = LinkingData.from(document).stream()
+					.filter((ld) -> Utils.contains(Set.of("Movie", "TVEpisode"), ld.type()))
+					.findFirst().orElseGet(LinkingData::empty);
+				
+				if(!linkingData.isEmpty()) {
+					programName = linkingData.data().getString("name", "");
+				}
+			} else {
+				String episodeText = streamInfo.getString("programName", "");
+				numSeason = streamInfo.getInt("seasonNumber", 0);
+				
+				Matcher matcher = REGEX_EPISODE.matcher(episodeText);
+				if(matcher.matches()) {
+					numEpisode = Integer.parseInt(matcher.group(1));
+					episodeName = Optional.ofNullable(matcher.group(2)).orElse("");
+				} else {
+					episodeName = episodeText;
+				}
+			}
+			
+			return MediaUtils.mediaTitle(programName, numSeason, numEpisode, episodeName);
+		}
+		
 		private static final Document getProgramDetail(Program program) throws Exception {
 			String action = "page/detail-url";
 			Map<String, Object> args = Map.of(
@@ -522,6 +425,108 @@ public final class MarkizaVoyoEngine implements MediaEngine {
 				for(Season season : getSeasons(detail)) {
 					if(!loopListEpisodes(task, program, season)) {
 						return; // Do not continue
+					}
+				}
+			});
+		}
+		
+		public static final ListTask<Media> getMedia(MediaEngine engine, URI uri, Map<String, Object> data)
+				throws Exception {
+			return ListTask.of((task) -> {
+				// Ensure the user is logged in
+				VoyoAccount.login();
+				
+				// Obtain the main iframe for the video
+				Document document = HTML.from(uri);
+				Element elIframe = document.selectFirst(".js-detail-player .iframe-wrap iframe");
+				if(elIframe == null)
+					return;
+				
+				// Obtain the embedded iframe document to extract the player settings
+				String embedURL = elIframe.absUrl("src");
+				Document embedDoc = HTML.from(Net.uri(embedURL));
+				
+				VoyoError error;
+				if(!(error = checkForError(embedDoc)).isSuccess()) {
+					switch(error.type()) {
+						case "player_parental_profile_age_required":
+							if(VoyoAccount.bypassAgeRestriction()) {
+								embedDoc = HTML.from(Net.uri(embedURL)); // Retry
+								
+								if(checkForError(embedDoc).isSuccess()) {
+									break;
+								}
+							}
+							// FALL-THROUGH
+						default:
+							throw new IllegalStateException("Error " + error.event() + ": " + error.type());
+					}
+				}
+				
+				JSONCollection settings = null;
+				for(Element elScript : embedDoc.select("script:not([src])")) {
+					String content = elScript.html();
+					int index;
+					if((index = content.indexOf("Player.init")) >= 0) {
+						content = Utils.bracketSubstring(content, '{', '}', false, index, content.length());
+						settings = JavaScript.readObject(content);
+						break;
+					}
+				}
+				
+				if(settings == null)
+					return; // Do not continue
+				
+				JSONCollection tracks = settings.getCollection("tracks");
+				URI sourceURI = uri;
+				MediaSource source = MediaSource.of(engine);
+				
+				String title = mediaTitle(settings.getCollection("plugins.measuring.streamInfo"), document);
+				for(JSONCollection node : tracks.collectionsIterable()) {
+					MediaFormat format = MediaFormat.fromName(node.name());
+					String formatName = node.name().toLowerCase();
+					
+					for(JSONCollection coll : ((JSONCollection) node).collectionsIterable()) {
+						String videoURL = coll.getString("src");
+						MediaLanguage language = MediaLanguage.ofCode(coll.getString("lang"));
+						MediaMetadata metadata = MediaMetadata.empty();
+						
+						if(format == MediaFormat.UNKNOWN) {
+							format = MediaFormat.fromPath(videoURL);
+						}
+						
+						if(coll.hasCollection("drm")) {
+							JSONCollection drmInfo = coll.getCollection("drm");
+							String drmToken = null;
+							
+							switch(formatName) {
+								case "dash":
+									drmToken = Utils.stream(drmInfo.collectionsIterable())
+										.filter((c) -> c.getString("keySystem").equals("com.widevine.alpha"))
+										.flatMap((c) -> Utils.stream(c.getCollection("headers").collectionsIterable()))
+										.filter((h) -> h.getString("name").equals("X-AxDRM-Message"))
+										.map((h) -> h.getString("value"))
+										.findFirst().orElse(null);
+									break;
+								default:
+									// Widevine not supported, do not add media sources
+									continue;
+							}
+							
+							if(drmToken != null) {
+								metadata = MediaMetadata.of("drmToken", drmToken);
+							}
+						}
+						
+						List<Media> media = MediaUtils.createMedia(
+							source, Net.uri(videoURL), sourceURI, title, language, metadata
+						);
+						
+						for(Media s : media) {
+							if(!task.add(s)) {
+								return; // Do not continue
+							}
+						}
 					}
 				}
 			});
