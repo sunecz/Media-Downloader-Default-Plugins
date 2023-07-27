@@ -213,6 +213,7 @@ public class YouTubeServer implements Server {
 		if(host.startsWith("m."))   // mobile
 			host = host.substring(2);
 		if(!host.equals("youtube.com") &&
+		   !host.equals("youtube-nocookie.com") &&
 		   !host.equals("youtu.be"))
 			return false;
 		// Otherwise, it is probably compatible URL
