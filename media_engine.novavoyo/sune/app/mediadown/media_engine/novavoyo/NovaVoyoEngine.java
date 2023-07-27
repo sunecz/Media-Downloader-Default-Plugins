@@ -484,12 +484,13 @@ public final class NovaVoyoEngine implements MediaEngine {
 			
 			Element dropdownMenu = detail.selectFirst("#episodesDropdown + .dropdown-menu");
 			Elements elItems = dropdownMenu.select(".dropdown-item");
-			int numOfSeasons = elItems.size();
 			
-			for(int i = 0; i < numOfSeasons; ++i) {
-				Element elItem = elItems.get(i);
+			for(Element elItem : elItems) {
 				String id = elItem.attr("data-season-id");
-				int number = numOfSeasons - i;
+				// Since some programs have seasons in the ascending order and
+				// some have them in the descending order, we must extract the number
+				// of a season from the text itself.
+				int number = Utils.extractInt(elItem.textNodes().get(0).text());
 				seasons.add(new Season(id, number));
 			}
 			
