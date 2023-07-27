@@ -61,26 +61,14 @@ public class YouTubeServer implements Server {
 	public static final String URL     = PLUGIN.getURL();
 	public static final Image  ICON    = PLUGIN.getIcon();
 	
-	private static Regex REGEX_EMBED_URL;
-	
 	// Allow to create an instance when registering the server
 	YouTubeServer() {
-	}
-	
-	private static final String maybeTransformEmbedURL(String url) {
-		if(REGEX_EMBED_URL == null) {
-			REGEX_EMBED_URL = Regex.of("^https?://(?:www\\.|m\\.)?youtube\\.com/embed/([^?#]+)(?:[?#].*)?$");
-		}
-		Matcher matcher = REGEX_EMBED_URL.matcher(url);
-		return matcher.matches()
-					? "https://www.youtube.com/watch?v=" + matcher.group(1)
-					: url;
 	}
 	
 	@Override
 	public ListTask<Media> getMedia(URI uri, Map<String, Object> data) throws Exception {
 		return ListTask.of((task) -> {
-			String url = maybeTransformEmbedURL(uri.toString());
+			String url = YouTubeUrls.maybeTransformUrl(uri.toString());
 			Document document = HTML.from(Net.uri(url));
 			Signature.Context ctx = Signature.Extractor.extract(document);
 			Elements scripts = document.getElementsByTag("script");
@@ -259,6 +247,36 @@ public class YouTubeServer implements Server {
 	@Override
 	public String toString() {
 		return TITLE;
+	}
+	
+	private static final class YouTubeUrls {
+		
+		private static final String[] regexUrls = new String[] {
+			"^https?://(?:www\\.|m\\.)?youtube\\.com/embed/(?<id>[^?#]+)(?:[?#].*)?$",
+			"^https?://youtu.be/(?<id>[^?#]+)(?:[?#].*)?$",
+		};
+		
+		private static final Regex[] regexCache = new Regex[regexUrls.length];
+		
+		private YouTubeUrls() {
+		}
+		
+		public static final String maybeTransformUrl(String url) {
+			for(int i = 0, l = regexUrls.length; i < l; ++i) {
+				Regex regex;
+				if((regex = regexCache[i]) == null) {
+					regex = Regex.of(regexUrls[i]);
+					regexCache[i] = regex;
+				}
+				
+				Matcher matcher;
+				if((matcher = regex.matcher(url)).matches()) {
+					return "https://www.youtube.com/watch?v=" + matcher.group("id");
+				}
+			}
+			
+			return url;
+		}
 	}
 	
 	private static final class Segmenter {
