@@ -10,7 +10,7 @@ import sune.app.mediadown.util.Password;
 
 @Plugin(name          = "media_engine.markizavoyo",
 	    title         = "plugin.media_engine.markizavoyo.title",
-	    version       = "00.02.09-0002",
+	    version       = "00.02.09-0003",
 	    author        = "Sune",
 	    updateBaseURL = "https://app.sune.tech/mediadown/dat/plugin/0002/media_engine/markizavoyo/",
 	    updatable     = true,
