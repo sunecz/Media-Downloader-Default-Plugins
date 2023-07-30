@@ -319,9 +319,9 @@ public final class NovaPlusEngine implements MediaEngine {
 										.map((h) -> h.getString("value"))
 										.findFirst().orElse(null);
 									break;
-								case "hls":
-									// Widevine not supported, ignore
-									break;
+								default:
+									// Widevine not supported, do not add media sources
+									continue;
 							}
 							
 							if(drmToken != null) {
