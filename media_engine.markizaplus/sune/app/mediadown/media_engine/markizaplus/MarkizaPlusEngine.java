@@ -363,7 +363,8 @@ public final class MarkizaPlusEngine implements MediaEngine {
 		String host = uri.getHost();
 		if((host.startsWith("www."))) // www prefix
 			host = host.substring(4);
-		if(!host.equals("markiza.sk"))
+		if(!host.equals("markiza.sk") &&
+		   !host.equals("videoarchiv.markiza.sk"))
 			return false;
 		// Otherwise, it is probably compatible URL
 		return true;
