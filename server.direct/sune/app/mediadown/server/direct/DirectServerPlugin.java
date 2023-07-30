@@ -7,7 +7,7 @@ import sune.app.mediadown.plugin.PluginBase;
 
 @Plugin(name          = "server.direct",
 	    title         = "plugin.server.direct.title",
-	    version       = "00.02.09-0000",
+	    version       = "00.02.09-0001",
 	    author        = "Sune",
 	    updateBaseURL = "https://app.sune.tech/mediadown/dat/plugin/0002/server/direct/",
 	    updatable     = true,
