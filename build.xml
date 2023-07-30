@@ -59,6 +59,7 @@
 		<!-- Servers -->
 		<antcall target="build-server"><param name="var.name" value="html5"   /></antcall>
 		<antcall target="build-server"><param name="var.name" value="youtube" /></antcall>
+		<antcall target="build-server"><param name="var.name" value="direct"  /></antcall>
 		<!-- DRM engines -->
 		<antcall target="build-drm-engine"><param name="var.name" value="ceskatelevize" /></antcall>
 		<antcall target="build-drm-engine"><param name="var.name" value="novavoyo"      /></antcall>

@@ -1,0 +1,9 @@
+{
+	plugin: {
+		server: {
+			direct: {
+				title: "Přímá URL"
+			}
+		}
+	}
+}
