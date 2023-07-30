@@ -23,6 +23,7 @@ import sune.app.mediadown.conversion.ConversionMedia;
 import sune.app.mediadown.download.AcceleratedFileDownloader;
 import sune.app.mediadown.download.Download;
 import sune.app.mediadown.download.DownloadConfiguration;
+import sune.app.mediadown.download.DownloadContext;
 import sune.app.mediadown.download.DownloadResult;
 import sune.app.mediadown.download.InternalDownloader;
 import sune.app.mediadown.download.MediaDownloadConfiguration;
@@ -32,7 +33,6 @@ import sune.app.mediadown.event.EventRegistry;
 import sune.app.mediadown.event.Listener;
 import sune.app.mediadown.event.tracker.DownloadTracker;
 import sune.app.mediadown.event.tracker.PlainTextTracker;
-import sune.app.mediadown.event.tracker.TrackerEvent;
 import sune.app.mediadown.event.tracker.TrackerManager;
 import sune.app.mediadown.event.tracker.WaitTracker;
 import sune.app.mediadown.gui.table.ResolvedMedia;
@@ -44,6 +44,7 @@ import sune.app.mediadown.media.MediaUtils;
 import sune.app.mediadown.media.SubtitlesMedia;
 import sune.app.mediadown.net.Web;
 import sune.app.mediadown.net.Web.Request;
+import sune.app.mediadown.net.Web.Response;
 import sune.app.mediadown.pipeline.DownloadPipelineResult;
 import sune.app.mediadown.util.Metadata;
 import sune.app.mediadown.util.NIO;
@@ -58,7 +59,7 @@ public final class SimpleDownloader implements Download, DownloadResult {
 	private static final HttpHeaders HEADERS = Web.Headers.ofSingle("Accept", "*/*");
 	
 	private final Translation translation = MediaDownloader.translation().getTranslation("plugin.downloader.smf");
-	private final TrackerManager manager = new TrackerManager();
+	private final TrackerManager trackerManager = new TrackerManager();
 	private final EventRegistry<DownloadEvent> eventRegistry = new EventRegistry<>();
 	
 	private final Media media;
@@ -73,12 +74,13 @@ public final class SimpleDownloader implements Download, DownloadResult {
 	private DownloadPipelineResult pipelineResult;
 	private InternalDownloader downloader;
 	private DownloadTracker downloadTracker;
+	private Exception exception;
 	
 	SimpleDownloader(Media media, Path dest, MediaDownloadConfiguration configuration) {
 		this.media         = Objects.requireNonNull(media);
 		this.dest          = Objects.requireNonNull(dest);
 		this.configuration = Objects.requireNonNull(configuration);
-		manager.tracker(new WaitTracker());
+		trackerManager.tracker(new WaitTracker());
 	}
 	
 	private static final int compareFirstLongestString(String a, String b) {
@@ -101,7 +103,7 @@ public final class SimpleDownloader implements Download, DownloadResult {
 			return false;
 		String text = translation.getSingle("progress.compute_total_size");
 		PlainTextTracker tracker = new PlainTextTracker();
-		manager.tracker(tracker);
+		trackerManager.tracker(tracker);
 		tracker.text(text);
 		tracker.progress(0.0);
 		worker = Worker.createThreadedWorker();
@@ -158,12 +160,10 @@ public final class SimpleDownloader implements Download, DownloadResult {
 		state.set(TaskStates.RUNNING);
 		state.set(TaskStates.STARTED);
 		
-		TrackerManager dummyManager = new TrackerManager();
-		downloader = createDownloader(dummyManager);
-		dummyManager.addEventListener(TrackerEvent.UPDATE, (t) -> downloader.call(DownloadEvent.UPDATE, new Pair<>(downloader, dummyManager)));
+		eventRegistry.call(DownloadEvent.BEGIN, this);
 		
-		eventRegistry.call(DownloadEvent.BEGIN, downloader);
-		manager.addEventListener(TrackerEvent.UPDATE, (t) -> eventRegistry.call(DownloadEvent.UPDATE, new Pair<>(downloader, manager)));
+		downloader = createDownloader(new TrackerManager());
+		downloader.setTracker(new DownloadTracker());
 		Ignore.callVoid(() -> NIO.createFile(dest));
 		
 		List<MediaHolder> mediaHolders = MediaUtils.solids(media).stream()
@@ -175,14 +175,11 @@ public final class SimpleDownloader implements Download, DownloadResult {
 				.map(MediaHolder::new)
 				.collect(Collectors.toList());
 		
-		DownloadTracker localTracker = new DownloadTracker();
-		downloader.setTracker(localTracker);
-		
 		computeTotalSize(mediaHolders, subtitles);
 		if(!checkIfCanContinue()) return;
 		
 		downloadTracker = new DownloadTracker(size);
-		manager.tracker(downloadTracker);
+		trackerManager.tracker(downloadTracker);
 		List<Path> tempFiles = new ArrayList<>(mediaHolders.size());
 		try {
 			String fileNameNoType = Utils.fileNameNoType(dest.getFileName().toString());
@@ -249,7 +246,9 @@ public final class SimpleDownloader implements Download, DownloadResult {
 			
 			state.set(TaskStates.DONE);
 		} catch(Exception ex) {
-			eventRegistry.call(DownloadEvent.ERROR, new Pair<>(downloader, ex));
+			exception = ex;
+			state.set(TaskStates.ERROR);
+			eventRegistry.call(DownloadEvent.ERROR, this);
 			throw ex; // Forward the exception
 		} finally {
 			stop();
@@ -277,7 +276,7 @@ public final class SimpleDownloader implements Download, DownloadResult {
 			state.set(TaskStates.STOPPED);
 		}
 		
-		eventRegistry.call(DownloadEvent.END, downloader);
+		eventRegistry.call(DownloadEvent.END, this);
 	}
 	
 	@Override
@@ -296,7 +295,7 @@ public final class SimpleDownloader implements Download, DownloadResult {
 		state.unset(TaskStates.RUNNING);
 		state.set(TaskStates.PAUSED);
 		
-		eventRegistry.call(DownloadEvent.PAUSE, downloader);
+		eventRegistry.call(DownloadEvent.PAUSE, this);
 	}
 	
 	@Override
@@ -315,7 +314,7 @@ public final class SimpleDownloader implements Download, DownloadResult {
 		state.unset(TaskStates.PAUSED);
 		state.set(TaskStates.RUNNING);
 		lockPause.unlock();
-		eventRegistry.call(DownloadEvent.RESUME, downloader);
+		eventRegistry.call(DownloadEvent.RESUME, this);
 	}
 	
 	@Override
@@ -368,6 +367,44 @@ public final class SimpleDownloader implements Download, DownloadResult {
 		eventRegistry.remove(event, listener);
 	}
 	
+	@Override
+	public TrackerManager trackerManager() {
+		return trackerManager;
+	}
+	
+	@Override
+	public Exception exception() {
+		return exception;
+	}
+	
+	@Override
+	public Request request() {
+		// There are many requests, just return null
+		return null;
+	}
+	
+	@Override
+	public Path output() {
+		return dest;
+	}
+	
+	@Override
+	public DownloadConfiguration configuration() {
+		// There are many download configurations, just return null
+		return null;
+	}
+	
+	@Override
+	public Response response() {
+		// There are many responses, just return null
+		return null;
+	}
+	
+	@Override
+	public long totalBytes() {
+		return size;
+	}
+	
 	private final class DownloadEventHandler {
 		
 		private final DownloadTracker tracker;
@@ -377,12 +414,12 @@ public final class SimpleDownloader implements Download, DownloadResult {
 			this.tracker = Objects.requireNonNull(tracker);
 		}
 		
-		public void onBegin(InternalDownloader downloader) {
+		public void onBegin(DownloadContext context) {
 			lastSize = 0L;
 		}
 		
-		public void onUpdate(Pair<InternalDownloader, TrackerManager> pair) {
-			DownloadTracker downloadTracker = (DownloadTracker) pair.b.tracker();
+		public void onUpdate(DownloadContext context) {
+			DownloadTracker downloadTracker = (DownloadTracker) context.trackerManager().tracker();
 			long current = downloadTracker.current();
 			long delta = current - lastSize;
 			
@@ -390,8 +427,10 @@ public final class SimpleDownloader implements Download, DownloadResult {
 			lastSize = current;
 		}
 		
-		public void onError(Pair<InternalDownloader, Exception> pair) {
-			eventRegistry.call(DownloadEvent.ERROR, pair);
+		public void onError(DownloadContext context) {
+			exception = context.exception();
+			state.set(TaskStates.ERROR);
+			eventRegistry.call(DownloadEvent.ERROR, SimpleDownloader.this);
 		}
 	}
 	
