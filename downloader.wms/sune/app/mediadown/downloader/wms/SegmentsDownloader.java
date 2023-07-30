@@ -25,6 +25,7 @@ import sune.app.mediadown.concurrent.Worker;
 import sune.app.mediadown.conversion.ConversionMedia;
 import sune.app.mediadown.download.Download;
 import sune.app.mediadown.download.DownloadConfiguration;
+import sune.app.mediadown.download.DownloadContext;
 import sune.app.mediadown.download.DownloadResult;
 import sune.app.mediadown.download.FileDownloader;
 import sune.app.mediadown.download.InternalDownloader;
@@ -41,7 +42,6 @@ import sune.app.mediadown.event.tracker.PipelineStates;
 import sune.app.mediadown.event.tracker.PlainTextTracker;
 import sune.app.mediadown.event.tracker.SimpleTracker;
 import sune.app.mediadown.event.tracker.Tracker;
-import sune.app.mediadown.event.tracker.TrackerEvent;
 import sune.app.mediadown.event.tracker.TrackerManager;
 import sune.app.mediadown.event.tracker.WaitTracker;
 import sune.app.mediadown.exception.RejectedResponseException;
@@ -74,7 +74,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 	private static final long TIME_UPDATE_RESOLUTION_MS = 50L;
 	
 	private final Translation translation = MediaDownloader.translation().getTranslation("plugin.downloader.wms");
-	private final TrackerManager manager = new TrackerManager();
+	private final TrackerManager trackerManager = new TrackerManager();
 	private final EventRegistry<DownloadEvent> eventRegistry = new EventRegistry<>();
 	
 	private final Media media;
@@ -92,6 +92,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 	private DownloadPipelineResult pipelineResult;
 	private InternalDownloader downloader;
 	private DownloadTracker downloadTracker;
+	private Exception exception;
 	
 	SegmentsDownloader(Media media, Path dest, MediaDownloadConfiguration configuration, int maxRetryAttempts,
 			boolean asyncTotalSize, int waitOnRetryMs) {
@@ -101,7 +102,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		this.maxRetryAttempts = checkMaxRetryAttempts(maxRetryAttempts);
 		this.asyncTotalSize   = asyncTotalSize;
 		this.waitOnRetryMs    = checkMilliseconds(waitOnRetryMs);
-		manager.tracker(new WaitTracker());
+		trackerManager.tracker(new WaitTracker());
 	}
 	
 	private static final int checkMaxRetryAttempts(int maxRetryAttempts) {
@@ -279,12 +280,8 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 	
 	protected final InternalDownloader ensureInternalDownloader() {
 		if(downloader == null) {
-			TrackerManager dummyManager = new TrackerManager();
-			downloader = createDownloader(dummyManager);
-			dummyManager.addEventListener(
-				TrackerEvent.UPDATE,
-				(t) -> downloader.call(DownloadEvent.UPDATE, new Pair<>(downloader, dummyManager))
-			);
+			downloader = createDownloader(new TrackerManager());
+			downloader.setTracker(new DownloadTracker());
 		}
 		
 		return downloader;
@@ -299,10 +296,9 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		state.set(TaskStates.RUNNING);
 		state.set(TaskStates.STARTED);
 		
-		ensureInternalDownloader();
+		eventRegistry.call(DownloadEvent.BEGIN, this);
 		
-		eventRegistry.call(DownloadEvent.BEGIN, downloader);
-		manager.addEventListener(TrackerEvent.UPDATE, (t) -> eventRegistry.call(DownloadEvent.UPDATE, new Pair<>(downloader, manager)));
+		ensureInternalDownloader();
 		Ignore.callVoid(() -> NIO.createFile(dest));
 		
 		// Prepare the segments that should be downloaded
@@ -323,14 +319,12 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 			.map(RemoteMedia::new)
 			.collect(Collectors.toList());
 		
-		DownloadTracker notifyTracker = new DownloadTracker();
-		downloader.setTracker(notifyTracker);
-		
 		computeTotalSize(segments, subtitles);
 		if(!checkState()) return;
 		
 		downloadTracker = new DownloadTracker(size.get());
-		manager.tracker(downloadTracker);
+		trackerManager.tracker(downloadTracker);
+		
 		try {
 			List<Path> tempFiles = temporaryFiles(segmentsHolders.size());
 			
@@ -378,8 +372,8 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 							}
 							
 							if(previousTracker == null) {
-								previousTracker = manager.tracker();
-								manager.tracker(retryTracker);
+								previousTracker = trackerManager.tracker();
+								trackerManager.tracker(retryTracker);
 							}
 							
 							retryTracker.attempt(i);
@@ -435,7 +429,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 					}
 					
 					if(previousTracker != null) {
-						manager.tracker(previousTracker);
+						trackerManager.tracker(previousTracker);
 						previousTracker = null;
 					}
 					
@@ -496,7 +490,9 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 			
 			state.set(TaskStates.DONE);
 		} catch(Exception ex) {
-			eventRegistry.call(DownloadEvent.ERROR, new Pair<>(downloader, ex));
+			exception = ex;
+			state.set(TaskStates.ERROR);
+			eventRegistry.call(DownloadEvent.ERROR, this);
 			throw ex; // Forward the exception
 		} finally {
 			stop();
@@ -524,7 +520,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 			state.set(TaskStates.STOPPED);
 		}
 		
-		eventRegistry.call(DownloadEvent.END, downloader);
+		eventRegistry.call(DownloadEvent.END, this);
 	}
 	
 	@Override
@@ -542,7 +538,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		
 		state.unset(TaskStates.RUNNING);
 		state.set(TaskStates.PAUSED);
-		eventRegistry.call(DownloadEvent.PAUSE, downloader);
+		eventRegistry.call(DownloadEvent.PAUSE, this);
 	}
 	
 	@Override
@@ -561,7 +557,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		state.unset(TaskStates.PAUSED);
 		state.set(TaskStates.RUNNING);
 		lockPause.unlock();
-		eventRegistry.call(DownloadEvent.RESUME, downloader);
+		eventRegistry.call(DownloadEvent.RESUME, this);
 	}
 	
 	@Override
@@ -614,6 +610,44 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		eventRegistry.remove(event, listener);
 	}
 	
+	@Override
+	public TrackerManager trackerManager() {
+		return trackerManager;
+	}
+	
+	@Override
+	public Exception exception() {
+		return exception;
+	}
+	
+	@Override
+	public Request request() {
+		// There are many requests, just return null
+		return null;
+	}
+	
+	@Override
+	public Path output() {
+		return dest;
+	}
+	
+	@Override
+	public DownloadConfiguration configuration() {
+		// There are many download configurations, just return null
+		return null;
+	}
+	
+	@Override
+	public Response response() {
+		// There are many responses, just return null
+		return null;
+	}
+	
+	@Override
+	public long totalBytes() {
+		return size.get();
+	}
+	
 	private final class DownloadEventHandler {
 		
 		private final DownloadTracker tracker;
@@ -624,20 +658,24 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 			this.tracker = Objects.requireNonNull(tracker);
 		}
 		
-		public void onUpdate(Pair<InternalDownloader, TrackerManager> pair) {
-			DownloadTracker downloadTracker = (DownloadTracker) pair.b.tracker();
+		public void onUpdate(DownloadContext context) {
+			DownloadTracker downloadTracker = (DownloadTracker) context.trackerManager().tracker();
 			long current = downloadTracker.current();
 			long delta = current - lastSize.get();
 			
 			tracker.update(delta);
 			lastSize.set(current);
+			
+			eventRegistry.call(DownloadEvent.UPDATE, SegmentsDownloader.this);
 		}
 		
-		public void onError(Pair<InternalDownloader, Exception> pair) {
+		public void onError(DownloadContext context) {
 			if(!propagateError)
 				return; // Ignore the error, if needed (used for retries)
 			
-			eventRegistry.call(DownloadEvent.ERROR, pair);
+			exception = context.exception();
+			state.set(TaskStates.ERROR);
+			eventRegistry.call(DownloadEvent.ERROR, SegmentsDownloader.this);
 		}
 		
 		public void setPropagateError(boolean value) {
@@ -716,7 +754,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 			
 			String text = translation.getSingle("progress.compute_total_size");
 			PlainTextTracker tracker = new PlainTextTracker();
-			manager.tracker(tracker);
+			trackerManager.tracker(tracker);
 			tracker.text(text);
 			tracker.progress(0.0);
 			
