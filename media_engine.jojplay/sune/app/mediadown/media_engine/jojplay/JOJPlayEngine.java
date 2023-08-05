@@ -275,7 +275,11 @@ public final class JOJPlayEngine implements MediaEngine {
 			int numSeason = Integer.valueOf(fields.getString("seasonNumber.integerValue", "-1"));
 			String episodeName = resolveFieldValue(fields.getCollection("name"));
 			
-			if(programName.equals(episodeName)) {
+			if(programName == null) {
+				// Some videos have only the episode name, so use it
+				programName = episodeName;
+			} else if(programName.equals(episodeName)) {
+				// Prevent duplicate text in the title
 				episodeName = null;
 			}
 			
