@@ -10,7 +10,7 @@ import sune.app.mediadown.util.Password;
 
 @Plugin(name          = "media_engine.jojplay",
 	    title         = "plugin.media_engine.jojplay.title",
-	    version       = "00.02.09-0001",
+	    version       = "00.02.09-0002",
 	    author        = "Sune",
 	    updateBaseURL = "https://app.sune.tech/mediadown/dat/plugin/0002/media_engine/jojplay/",
 	    updatable     = true,
