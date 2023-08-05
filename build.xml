@@ -53,6 +53,7 @@
 		<antcall target="build-media-engine"><param name="var.name" value="markizaplus"   /></antcall>
 		<antcall target="build-media-engine"><param name="var.name" value="tncz"          /></antcall>
 		<antcall target="build-media-engine"><param name="var.name" value="markizavoyo"   /></antcall>
+		<antcall target="build-media-engine"><param name="var.name" value="jojplay"       /></antcall>
 		<!-- Downloaders -->
 		<antcall target="build-downloader"><param name="var.name" value="smf" /></antcall>
 		<antcall target="build-downloader"><param name="var.name" value="wms" /></antcall>
