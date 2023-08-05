@@ -430,17 +430,17 @@ public final class JOJPlayEngine implements MediaEngine {
 					return PLUGIN.getContext().getConfiguration();
 				}
 				
-				private static final <T> T value(String propertyName) {
+				private static final <T> T value(String propertyName, T defaultValue) {
 					return Optional.<ConfigurationProperty<T>>ofNullable(configuration().property(propertyName))
-								.map(ConfigurationProperty::value).get();
+								.map(ConfigurationProperty::value).orElse(defaultValue);
 				}
 				
 				public static final String email() {
-					return value("authData_email");
+					return value("authData_email", "");
 				}
 				
 				public static final String password() {
-					return value("authData_password");
+					return value("authData_password", "");
 				}
 			}
 		}
