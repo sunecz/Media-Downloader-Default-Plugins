@@ -15,6 +15,7 @@ import sune.app.mediadown.entity.Episode;
 import sune.app.mediadown.entity.MediaEngine;
 import sune.app.mediadown.entity.Program;
 import sune.app.mediadown.media.Media;
+import sune.app.mediadown.media.MediaFormat;
 import sune.app.mediadown.media.MediaLanguage;
 import sune.app.mediadown.media.MediaMetadata;
 import sune.app.mediadown.media.MediaSource;
@@ -52,8 +53,8 @@ public final class TNCZEngine implements MediaEngine {
 	private static final String URL_EPISODE_LIST;
 	
 	// Videos
-	private static final String SEL_PLAYER_IFRAME = "iframe.player-container";
-	private static final String TXT_PLAYER_CONFIG_BEGIN = "Player.init(";
+	private static final String SEL_PLAYER_IFRAME = "iframe[data-video-id]";
+	private static final String TXT_PLAYER_CONFIG_BEGIN = "player:";
 	
 	// Others
 	private static final Regex REGEX_SHOW_ID = Regex.of("\"show\":\"(\\d+)\"");
@@ -85,8 +86,15 @@ public final class TNCZEngine implements MediaEngine {
 			numEpisode = Integer.valueOf(matcher.group(1));
 			episodeName = Optional.ofNullable(matcher.group(2)).orElse("");
 		} else {
-			// Use just the episode text, since it contains even the program name
-			programName = episodeText;
+			// Some episodes names may contain the program name at the beginning, so we
+			// remove it, if that's the case. Also, some additional characters, such as
+			// spaces, commas, dashes, etc. right after it.
+			if(episodeText.startsWith(programName)) {
+				episodeName = episodeText.replaceFirst("^" + Regex.quote(programName) + "[^\\pL\\pN]*", "");
+			} else {
+				// Otherwise it should be OK to use it as an episode name
+				episodeName = episodeText;
+			}
 		}
 		
 		return MediaUtils.mediaTitle(programName, numSeason, numEpisode, episodeName);
@@ -196,38 +204,61 @@ public final class TNCZEngine implements MediaEngine {
 			Element iframe = document.selectFirst(SEL_PLAYER_IFRAME);
 			
 			if(iframe == null) {
-				return;
+				return; // Do not continue
 			}
 			
 			String iframeURL = iframe.absUrl("src");
 			String content = Web.request(Request.of(Net.uri(iframeURL)).GET()).body();
 			
-			if(content != null && !content.isEmpty()) {
-				int begin = content.indexOf(TXT_PLAYER_CONFIG_BEGIN) + TXT_PLAYER_CONFIG_BEGIN.length() - 1;
-				String conScript = Utils.bracketSubstring(content, '(', ')', false, begin, content.length());
-				conScript = Utils.bracketSubstring(conScript, '{', '}', false, conScript.indexOf('{', 1), conScript.length());
+			if(content == null || content.isEmpty()) {
+				return; // Do not continue
+			}
+			
+			int begin = content.indexOf(TXT_PLAYER_CONFIG_BEGIN) + TXT_PLAYER_CONFIG_BEGIN.length();
+			String conScript = Utils.bracketSubstring(content, '{', '}', false, begin, content.length());
+			
+			if(!conScript.isEmpty()) {
+				JSONCollection scriptData = JavaScript.readObject(conScript);
 				
-				if(!conScript.isEmpty()) {
-					JSONCollection scriptData = JavaScript.readObject(conScript);
+				if(scriptData != null) {
+					JSONCollection tracks = scriptData.getCollection("lib.source.sources");
+					URI sourceURI = uri;
+					MediaSource source = MediaSource.of(this);
+					String title = mediaTitle(scriptData.getCollection("plugins.events.customData"));
 					
-					if(scriptData != null) {
-						JSONCollection tracks = scriptData.getCollection("tracks");
-						String title = mediaTitle(scriptData.getCollection("plugins.measuring.streamInfo"));
-						URI sourceURI = uri;
-						MediaSource source = MediaSource.of(this);
+					for(JSONCollection node : tracks.collectionsIterable()) {
+						String type = node.getString("type");
+						MediaFormat format = MediaFormat.fromMimeType(type);
+						String formatName = format.name().toLowerCase();
+						String videoURL = node.getString("src");
+						MediaLanguage language = MediaLanguage.UNKNOWN;
+						MediaMetadata metadata = MediaMetadata.empty();
 						
-						for(JSONCollection node : tracks.collectionsIterable()) {
-							for(JSONCollection coll : ((JSONCollection) node).collectionsIterable()) {
-								String videoURL = coll.getString("src");
-								MediaLanguage language = MediaLanguage.ofCode(coll.getString("lang"));
-								List<Media> media = MediaUtils.createMedia(source, Net.uri(videoURL), sourceURI,
-									title, language, MediaMetadata.empty());
-								
-								for(Media s : media) {
-									if(!task.add(s)) {
-										return; // Do not continue
-									}
-								}
+						if(node.hasCollection("contentProtection")) {
+							JSONCollection drmInfo = node.getCollection("contentProtection");
+							String drmToken = null;
+							
+							switch(formatName) {
+								case "dash":
+									drmToken = drmInfo.getString("token");
+									break;
+								default:
+									// Widevine not supported, do not add media sources
+									continue;
+							}
+							
+							if(drmToken != null) {
+								metadata = MediaMetadata.of("drmToken", drmToken);
+							}
+						}
+						
+						List<Media> media = MediaUtils.createMedia(
+							source, Net.uri(videoURL), sourceURI, title, language, metadata
+						);
+						
+						for(Media s : media) {
+							if(!task.add(s)) {
+								return; // Do not continue
 							}
 						}
 					}
