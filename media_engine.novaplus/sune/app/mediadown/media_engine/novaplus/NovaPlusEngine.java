@@ -57,8 +57,8 @@ public final class NovaPlusEngine implements MediaEngine {
 	private static final String SEL_EPISODES_LOAD_MORE = ".js-load-more-trigger .c-button";
 	
 	// Videos
-	private static final String SEL_PLAYER_IFRAME = ".container iframe";
-	private static final String TXT_PLAYER_CONFIG_BEGIN = "Player.init(";
+	private static final String SEL_PLAYER_IFRAME = "iframe[data-video-id]";
+	private static final String TXT_PLAYER_CONFIG_BEGIN = "player:";
 	
 	// Others
 	private static final String SEL_LABEL_VOYO = ".c-badge";
@@ -280,63 +280,51 @@ public final class NovaPlusEngine implements MediaEngine {
 			return; // Do not continue
 		}
 		
-		int begin = content.indexOf(TXT_PLAYER_CONFIG_BEGIN) + TXT_PLAYER_CONFIG_BEGIN.length() - 1;
-		String conScript = Utils.bracketSubstring(content, '(', ')', false, begin, content.length());
-		conScript = Utils.bracketSubstring(conScript, '{', '}', false, conScript.indexOf('{', 1), conScript.length());
+		int begin = content.indexOf(TXT_PLAYER_CONFIG_BEGIN) + TXT_PLAYER_CONFIG_BEGIN.length();
+		String conScript = Utils.bracketSubstring(content, '{', '}', false, begin, content.length());
 		
 		if(!conScript.isEmpty()) {
 			JSONCollection scriptData = JavaScript.readObject(conScript);
 			
 			if(scriptData != null) {
-				JSONCollection tracks = scriptData.getCollection("tracks");
+				JSONCollection tracks = scriptData.getCollection("lib.source.sources");
 				URI sourceURI = uri;
 				MediaSource source = MediaSource.of(this);
 				String title = mediaTitle(document);
 				
 				for(JSONCollection node : tracks.collectionsIterable()) {
-					MediaFormat format = MediaFormat.fromName(node.name());
-					String formatName = node.name().toLowerCase();
+					String type = node.getString("type");
+					MediaFormat format = MediaFormat.fromMimeType(type);
+					String formatName = format.name().toLowerCase();
+					String videoURL = node.getString("src");
+					MediaLanguage language = MediaLanguage.UNKNOWN;
+					MediaMetadata metadata = MediaMetadata.empty();
 					
-					for(JSONCollection coll : ((JSONCollection) node).collectionsIterable()) {
-						String videoURL = coll.getString("src");
-						MediaLanguage language = MediaLanguage.ofCode(coll.getString("lang"));
-						MediaMetadata metadata = MediaMetadata.empty();
+					if(node.hasCollection("contentProtection")) {
+						JSONCollection drmInfo = node.getCollection("contentProtection");
+						String drmToken = null;
 						
-						if(format == MediaFormat.UNKNOWN) {
-							format = MediaFormat.fromPath(videoURL);
+						switch(formatName) {
+							case "dash":
+								drmToken = drmInfo.getString("token");
+								break;
+							default:
+								// Widevine not supported, do not add media sources
+								continue;
 						}
 						
-						if(coll.hasCollection("drm")) {
-							JSONCollection drmInfo = coll.getCollection("drm");
-							String drmToken = null;
-							
-							switch(formatName) {
-								case "dash":
-									drmToken = Utils.stream(drmInfo.collectionsIterable())
-										.filter((c) -> c.getString("keySystem").equals("com.widevine.alpha"))
-										.flatMap((c) -> Utils.stream(c.getCollection("headers").collectionsIterable()))
-										.filter((h) -> h.getString("name").equals("X-AxDRM-Message"))
-										.map((h) -> h.getString("value"))
-										.findFirst().orElse(null);
-									break;
-								default:
-									// Widevine not supported, do not add media sources
-									continue;
-							}
-							
-							if(drmToken != null) {
-								metadata = MediaMetadata.of("drmToken", drmToken);
-							}
+						if(drmToken != null) {
+							metadata = MediaMetadata.of("drmToken", drmToken);
 						}
-						
-						List<Media> media = MediaUtils.createMedia(
-							source, Net.uri(videoURL), sourceURI, title, language, metadata
-						);
-						
-						for(Media s : media) {
-							if(!task.add(s)) {
-								return; // Do not continue
-							}
+					}
+					
+					List<Media> media = MediaUtils.createMedia(
+						source, Net.uri(videoURL), sourceURI, title, language, metadata
+					);
+					
+					for(Media s : media) {
+						if(!task.add(s)) {
+							return; // Do not continue
 						}
 					}
 				}
