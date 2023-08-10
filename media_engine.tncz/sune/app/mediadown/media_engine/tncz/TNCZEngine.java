@@ -105,6 +105,11 @@ public final class TNCZEngine implements MediaEngine {
 			}
 		}
 		
+		if(programName.isBlank() && !episodeName.isBlank()) {
+			programName = episodeName;
+			episodeName = "";
+		}
+		
 		return MediaUtils.mediaTitle(programName, numSeason, numEpisode, episodeName);
 	}
 	
