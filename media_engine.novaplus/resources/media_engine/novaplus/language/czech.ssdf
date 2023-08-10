@@ -5,8 +5,8 @@
 				title: "TV Nova",
 				error: {
 					media_unavailable: {
-						title: "Media unavailable",
-						text:  "The video is not available due to the following reason:"
+						title: "Nedostupné médium",
+						text:  "Video není dostupné z následujícího důvodu:"
 					}
 				}
 			}
