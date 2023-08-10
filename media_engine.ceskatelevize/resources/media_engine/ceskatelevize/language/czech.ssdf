@@ -5,11 +5,11 @@
 				title: "Česká Televize",
 				error: {
 					media_error: {
-						title: "Error",
-						text:  "Media cannot be obtained due to the following reason:"
+						title: "Chyba",
+						text:  "Média nelze získat z následujícího důvodů:"
 					},
 					value: {
-						media_unavailable: "Video is no longer available"
+						media_unavailable: "Video již není dostupné"
 					}
 				}
 			}

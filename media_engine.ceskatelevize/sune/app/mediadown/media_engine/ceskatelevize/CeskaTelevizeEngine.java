@@ -30,11 +30,14 @@ import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 
 import javafx.scene.image.Image;
+import sune.app.mediadown.MediaDownloader;
 import sune.app.mediadown.concurrent.Threads;
 import sune.app.mediadown.concurrent.VarLoader;
 import sune.app.mediadown.entity.Episode;
 import sune.app.mediadown.entity.MediaEngine;
 import sune.app.mediadown.entity.Program;
+import sune.app.mediadown.gui.Dialog;
+import sune.app.mediadown.language.Translation;
 import sune.app.mediadown.media.Media;
 import sune.app.mediadown.media.MediaFormat;
 import sune.app.mediadown.media.MediaLanguage;
@@ -85,9 +88,21 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 	CeskaTelevizeEngine() {
 	}
 	
+	private static final Translation translation() {
+		String path = "plugin." + PLUGIN.getContext().getPlugin().instance().name();
+		return MediaDownloader.translation().getTranslation(path);
+	}
+	
 	private static final boolean checkURLSubdomain(URI uri, String required) {
 		String[] hostParts = uri.getHost().split("\\.", 2);
 		return hostParts.length > 1 && hostParts[0].equalsIgnoreCase(required);
+	}
+	
+	private static final void displayError(String name) {
+		Translation tr = translation().getTranslation("error");
+		String message = tr.getSingle("value." + name);
+		tr = tr.getTranslation("media_error");
+		Dialog.showContentInfo(tr.getSingle("title"), tr.getSingle("text"), message);
 	}
 	
 	@Override
@@ -808,13 +823,18 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 					"streamingProtocol", STREAM_PROTOCOL
 				);
 				
-				URI uri;
+				String uri;
 				try(Response.OfStream response = Web.requestStream(Request.of(ENDPOINT).POST(body))) {
 					JSONCollection json = JSON.read(response.stream());
-					uri = Net.uri(json.getString("url"));
+					uri = json.getString("url");
+					
+					if(uri.startsWith("error")) {
+						displayError("media_unavailable");
+						return null; // Do not continue
+					}
 				}
 				
-				return parsePlaylist(uri);
+				return parsePlaylist(Net.uri(uri));
 			}
 		}
 		
