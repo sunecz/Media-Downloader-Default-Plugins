@@ -36,6 +36,7 @@ import sune.app.mediadown.concurrent.Threads;
 import sune.app.mediadown.entity.Episode;
 import sune.app.mediadown.entity.MediaEngine;
 import sune.app.mediadown.entity.Program;
+import sune.app.mediadown.language.Translation;
 import sune.app.mediadown.media.Media;
 import sune.app.mediadown.media.MediaLanguage;
 import sune.app.mediadown.media.MediaMetadata;
@@ -133,6 +134,11 @@ final class IPrimaHelper {
 	
 	public static final PluginConfiguration configuration() {
 		return PLUGIN.getContext().getConfiguration();
+	}
+	
+	public static final Translation translation() {
+		String path = "plugin." + PLUGIN.getContext().getPlugin().instance().name();
+		return MediaDownloader.translation().getTranslation(path);
 	}
 	
 	private static abstract class DefaultMediaObtainerBase {

@@ -23,6 +23,8 @@ import sune.app.mediadown.MediaDownloader;
 import sune.app.mediadown.concurrent.Threads;
 import sune.app.mediadown.entity.Episode;
 import sune.app.mediadown.entity.Program;
+import sune.app.mediadown.gui.Dialog;
+import sune.app.mediadown.language.Translation;
 import sune.app.mediadown.media.Media;
 import sune.app.mediadown.media.MediaFormat;
 import sune.app.mediadown.media.MediaLanguage;
@@ -314,6 +316,13 @@ final class PrimaPlus implements IPrima {
 			return sessionData != null ? sessionData.accessToken() : null;
 		}
 		
+		private static final void displayError(JSONCollection errorInfo) {
+			Translation tr = IPrimaHelper.translation().getTranslation("error");
+			String message = tr.getSingle("value." + errorInfo.getString("errorCode"));
+			tr = tr.getTranslation("media_error");
+			Dialog.showContentInfo(tr.getSingle("title"), tr.getSingle("text"), message);
+		}
+		
 		public final ListTask<Program> getPrograms(IPrimaEngine engine) throws Exception {
 			return ListTask.of((task) -> {
 				final String method = "strip.strip.bulkItems.vdm";
@@ -511,6 +520,14 @@ final class PrimaPlus implements IPrima {
 				List<Media.Builder<?, ?>> subtitles = new ArrayList<>();
 				
 				for(JSONCollection configItem : configData.collectionsIterable()) {
+					// First, check whether there is any error regarding the media source
+					JSONCollection errorInfo;
+					if((errorInfo = configItem.getCollection("errorResult")) != null) {
+						displayError(errorInfo);
+						// If one media source has an error, we don't need to continue
+						return;
+					}
+					
 					for(JSONCollection streamInfo : configItem.getCollection("streamInfos").collectionsIterable()) {
 						streamInfos.add(streamInfo);
 					}

@@ -22,6 +22,15 @@
 							}
 						}
 					}
+				},
+				error: {
+					media_error: {
+						title: "Chyba",
+						text:  "Média nelze získat z následujícího důvodů:"
+					},
+					value: {
+						PLAY_GEOIP_DENIED: "Video je geograficky blokováno z Vaší současné země."
+					}
 				}
 			}
 		}
