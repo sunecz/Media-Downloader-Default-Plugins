@@ -32,6 +32,8 @@ import sune.app.mediadown.configuration.Configuration.ConfigurationProperty;
 import sune.app.mediadown.entity.Episode;
 import sune.app.mediadown.entity.MediaEngine;
 import sune.app.mediadown.entity.Program;
+import sune.app.mediadown.gui.Dialog;
+import sune.app.mediadown.language.Translation;
 import sune.app.mediadown.media.Media;
 import sune.app.mediadown.media.MediaFormat;
 import sune.app.mediadown.media.MediaLanguage;
@@ -70,6 +72,11 @@ public final class NovaVoyoEngine implements MediaEngine {
 	
 	// Allow to create an instance when registering the engine
 	NovaVoyoEngine() {
+	}
+	
+	private static final Translation translation() {
+		String path = "plugin." + PLUGIN.getContext().getPlugin().instance().name();
+		return MediaDownloader.translation().getTranslation(path);
 	}
 	
 	@Override
@@ -400,6 +407,13 @@ public final class NovaVoyoEngine implements MediaEngine {
 			return seasons;
 		}
 		
+		private static final void displayError(VoyoError error) {
+			Translation tr = translation().getTranslation("error");
+			String message = tr.getSingle("value." + error.type());
+			tr = tr.getTranslation("media_error");
+			Dialog.showContentInfo(tr.getSingle("title", "name", error.event()), tr.getSingle("text"), message);
+		}
+		
 		public static final ListTask<Program> getPrograms(Sort sort) throws Exception {
 			return ListTask.of((task) -> {
 				for(Category category : CATEGORIES) {
@@ -459,8 +473,10 @@ public final class NovaVoyoEngine implements MediaEngine {
 								}
 							}
 							// FALL-THROUGH
-						default:
-							throw new IllegalStateException("Error " + error.event() + ": " + error.type());
+						default: {
+							displayError(error);
+							return; // Do not continue
+						}
 					}
 				}
 				
