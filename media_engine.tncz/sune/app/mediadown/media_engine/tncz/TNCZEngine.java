@@ -11,9 +11,12 @@ import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 
 import javafx.scene.image.Image;
+import sune.app.mediadown.MediaDownloader;
 import sune.app.mediadown.entity.Episode;
 import sune.app.mediadown.entity.MediaEngine;
 import sune.app.mediadown.entity.Program;
+import sune.app.mediadown.gui.Dialog;
+import sune.app.mediadown.language.Translation;
 import sune.app.mediadown.media.Media;
 import sune.app.mediadown.media.MediaFormat;
 import sune.app.mediadown.media.MediaLanguage;
@@ -71,6 +74,11 @@ public final class TNCZEngine implements MediaEngine {
 	
 	// Allow to create an instance when registering the engine
 	TNCZEngine() {
+	}
+	
+	private static final Translation translation() {
+		String path = "plugin." + PLUGIN.getContext().getPlugin().instance().name();
+		return MediaDownloader.translation().getTranslation(path);
 	}
 	
 	private static final String mediaTitle(JSONCollection streamInfo) {
@@ -214,7 +222,17 @@ public final class TNCZEngine implements MediaEngine {
 				return; // Do not continue
 			}
 			
-			int begin = content.indexOf(TXT_PLAYER_CONFIG_BEGIN) + TXT_PLAYER_CONFIG_BEGIN.length();
+			int begin = content.indexOf(TXT_PLAYER_CONFIG_BEGIN);
+			
+			// Video is not available, probably due to licensing issues
+			if(begin < 0) {
+				Translation tr = translation().getTranslation("error.media_unavailable");
+				String message = HTML.parse(content).selectFirst(".b-player .e-title").text();
+				Dialog.showContentInfo(tr.getSingle("title"), tr.getSingle("text"), message);
+				return; // Do not continue
+			}
+			
+			begin += TXT_PLAYER_CONFIG_BEGIN.length();
 			String conScript = Utils.bracketSubstring(content, '{', '}', false, begin, content.length());
 			
 			if(!conScript.isEmpty()) {
