@@ -1,0 +1,28 @@
+{
+	plugin: {
+		server: {
+			sledovanitv: {
+				title: "SledovaniTV.cz",
+				configuration: {
+					group: {
+						general: "SledovaniTV.cz"
+					},
+					fields: {
+						authData_email:    "Email",
+						authData_password: "Heslo"
+					}
+				},
+				error: {
+					media_error: {
+						title: "Chyba",
+						text:  "Média nelze získat z následujícího důvodů:"
+					},
+					value: {
+						not_logged_in: "Nejste přihlášeni. Prosím, nastavte Vaše přihlašovací údaje k účtu "
+							+ "v nastavení programu."
+					}
+				}
+			}
+		}
+	}
+}

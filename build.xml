@@ -58,9 +58,10 @@
 		<antcall target="build-downloader"><param name="var.name" value="smf" /></antcall>
 		<antcall target="build-downloader"><param name="var.name" value="wms" /></antcall>
 		<!-- Servers -->
-		<antcall target="build-server"><param name="var.name" value="html5"   /></antcall>
-		<antcall target="build-server"><param name="var.name" value="youtube" /></antcall>
-		<antcall target="build-server"><param name="var.name" value="direct"  /></antcall>
+		<antcall target="build-server"><param name="var.name" value="html5"       /></antcall>
+		<antcall target="build-server"><param name="var.name" value="youtube"     /></antcall>
+		<antcall target="build-server"><param name="var.name" value="direct"      /></antcall>
+		<antcall target="build-server"><param name="var.name" value="sledovanitv" /></antcall>
 		<!-- DRM engines -->
 		<antcall target="build-drm-engine"><param name="var.name" value="ceskatelevize" /></antcall>
 		<antcall target="build-drm-engine"><param name="var.name" value="novavoyo"      /></antcall>

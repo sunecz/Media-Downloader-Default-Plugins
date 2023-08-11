@@ -24,6 +24,7 @@ module sune.app.mediadown.default_plugins {
 	exports sune.app.mediadown.server.html5;
 	exports sune.app.mediadown.server.youtube;
 	exports sune.app.mediadown.server.direct;
+	exports sune.app.mediadown.server.sledovanitv;
 	exports sune.app.mediadown.drm_engine.ceskatelevize;
 	exports sune.app.mediadown.drm_engine.novavoyo;
 	exports sune.app.mediadown.drm_engine.iprima;
