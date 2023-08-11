@@ -6,19 +6,15 @@ import java.util.List;
 
 import javafx.scene.Node;
 import javafx.scene.control.ComboBox;
+import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
-import javafx.scene.control.Tab;
-import javafx.scene.control.TabPane;
-import javafx.stage.Stage;
+import javafx.scene.layout.VBox;
 import sune.app.mediadown.MediaDownloader;
+import sune.app.mediadown.concurrent.Threads;
 import sune.app.mediadown.configuration.Configuration.ConfigurationProperty;
 import sune.app.mediadown.entity.MediaEngines;
-import sune.app.mediadown.gui.ProgressWindow;
-import sune.app.mediadown.gui.ProgressWindow.ProgressAction;
-import sune.app.mediadown.gui.ProgressWindow.ProgressContext;
 import sune.app.mediadown.gui.form.Form;
 import sune.app.mediadown.gui.form.FormField;
-import sune.app.mediadown.gui.window.ConfigurationWindow;
 import sune.app.mediadown.gui.window.ConfigurationWindow.ConfigurationFormFieldProperty;
 import sune.app.mediadown.gui.window.ConfigurationWindow.FormFieldSupplier;
 import sune.app.mediadown.gui.window.ConfigurationWindow.FormFieldSupplierFactory;
@@ -131,11 +127,11 @@ public final class IPrimaEnginePlugin extends PluginBase {
 			return translation;
 		}
 		
-		private static final String saveAudioDevice(String audioDeviceAlternativeName) {
+		private static final String valueSave(String audioDeviceAlternativeName) {
 			return audioDeviceAlternativeName.replaceAll("\\\\", "/");
 		}
 		
-		private static final String loadAudioDevice(String string) {
+		private static final String valueLoad(String string) {
 			return Utils.removeStringQuotes(string).replaceAll("/", "\\\\");
 		}
 		
@@ -160,90 +156,84 @@ public final class IPrimaEnginePlugin extends PluginBase {
 			
 			private volatile boolean itemsLoaded = false;
 			
+			private final VBox wrapper;
 			private final ComboBox<Profile> control;
+			private final Label lblProgress;
 			private String loadedValue;
 			
 			public ProfileSelectField(T property, String name, String title) {
 				super(property, name, title);
+				wrapper = new VBox(5.0);
 				control = new ComboBox<>();
 				control.setCellFactory((p) -> new ProfileCell());
 				control.setButtonCell(new ProfileCell());
 				control.setMaxWidth(Double.MAX_VALUE);
-				
-				FXUtils.onWindowShow(control, () -> {
-					ConfigurationWindow window = (ConfigurationWindow) control.getScene().getWindow();
-					TabPane tabPane = (TabPane) window.getContent().getCenter();
-					
-					String tabTitle = translationOf("configuration.group").getSingle("general");
-					Tab tab = tabPane.getTabs().stream()
-						.filter((t) -> t.getText().equals(tabTitle))
-						.findFirst().orElse(null);
-					
-					if(tab != null) {
-						FXUtils.once(tab.selectedProperty(), (so, sov, snv) -> {
-							if(!snv) return; // Should not happen
-							loadItems();
-						});
+				lblProgress = new Label();
+				wrapper.getChildren().addAll(control, lblProgress);
+				FXUtils.onWindowShow(control, this::loadItems);
+			}
+			
+			private final void enableSelect(boolean enable) {
+				FXUtils.thread(() -> control.setDisable(!enable));
+			}
+			
+			private final void progressText(String text) {
+				FXUtils.thread(() -> {
+					if(text == null) {
+						wrapper.getChildren().remove(lblProgress);
+					} else {
+						lblProgress.setText(text);
 					}
 				});
 			}
 			
 			private final void loadItems() {
-				Stage parent = (Stage) control.getScene().getWindow();
-				
-				ProgressWindow.submitAction(parent, new ProgressAction() {
+				Threads.execute(() -> {
+					enableSelect(false);
+					progressText(translation().getSingle("progress.log_in"));
 					
-					@Override
-					public void action(ProgressContext context) {
-						context.setProgress(ProgressContext.PROGRESS_INDETERMINATE);
-						context.setText(translation().getSingle("progress.log_in"));
-						
-						// Must be logged in first
-						Ignore.callVoid(() -> IPrimaAuthenticator.getSessionData(), MediaDownloader::error);
-						
-						context.setText(translation().getSingle("progress.profiles"));
-						
-						Ignore.callVoid(() -> {
-							List<Profile> profiles = profiles();
-							profiles.add(0, automaticProfile());
-							
-							Profile selected = profiles.stream()
-								.filter((d) -> d.id().equals(loadedValue))
-								.findFirst().orElse(null);
-							
-							FXUtils.thread(() -> {
-								control.getItems().setAll(profiles);
-								
-								if(selected != null) {
-									control.getSelectionModel().select(selected);
-								}
-							});
-						}, MediaDownloader::error);
-						
-						itemsLoaded = true;
-						context.setProgress(ProgressContext.PROGRESS_DONE);
-					}
+					// Must be logged in first
+					Ignore.callVoid(() -> IPrimaAuthenticator.getSessionData(), MediaDownloader::error);
 					
-					@Override
-					public void cancel() {
-						// Currently not cancelable
-					}
+					progressText(translation().getSingle("progress.profiles"));
+					
+					Ignore.callVoid(() -> {
+						List<Profile> profiles = profiles();
+						profiles.add(0, automaticProfile());
+						
+						Profile selected = profiles.stream()
+							.filter((d) -> d.id().equals(loadedValue))
+							.findFirst().orElse(null);
+						
+						FXUtils.thread(() -> {
+							control.getItems().setAll(profiles);
+							
+							if(selected != null) {
+								control.getSelectionModel().select(selected);
+							}
+						});
+					}, MediaDownloader::error);
+					
+					progressText(null);
+					enableSelect(true);
+					
+					itemsLoaded = true;
 				});
 			}
 			
 			@Override
 			public Node render(Form form) {
-				return control;
+				return wrapper;
 			}
 			
 			@Override
 			public void value(SSDValue value, SSDType type) {
-				loadedValue = loadAudioDevice(value.stringValue());
+				loadedValue = valueLoad(value.stringValue());
 			}
 			
 			@Override
 			public Object value() {
-				return saveAudioDevice(
+				return valueSave(
 					itemsLoaded
 						? control.getSelectionModel().getSelectedItem().id()
 						: loadedValue
