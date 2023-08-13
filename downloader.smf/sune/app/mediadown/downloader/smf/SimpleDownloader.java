@@ -151,6 +151,19 @@ public final class SimpleDownloader implements Download, DownloadResult {
 		pipelineResult = DownloadPipelineResult.doConversion(output, inputs, Metadata.of("duration", duration));
 	}
 	
+	protected final List<Path> temporaryFiles(int count) {
+		List<Path> tempFiles = new ArrayList<>(count);
+		String fileNameNoType = Utils.fileNameNoType(dest.getFileName().toString());
+		
+		for(int i = 0; i < count; ++i) {
+			Path tempFile = dest.getParent().resolve(fileNameNoType + "." + i + ".part");
+			Ignore.callVoid(() -> NIO.deleteFile(tempFile));
+			tempFiles.add(tempFile);
+		}
+		
+		return tempFiles;
+	}
+	
 	@Override
 	public final void start() throws Exception {
 		if(state.is(TaskStates.STARTED) && state.is(TaskStates.RUNNING)) {
@@ -180,17 +193,11 @@ public final class SimpleDownloader implements Download, DownloadResult {
 		
 		downloadTracker = new DownloadTracker(size);
 		trackerManager.tracker(downloadTracker);
-		List<Path> tempFiles = new ArrayList<>(mediaHolders.size());
+		
 		try {
-			String fileNameNoType = Utils.fileNameNoType(dest.getFileName().toString());
-			for(int i = 0, l = mediaHolders.size(); i < l; ++i) {
-				Path tempFile = dest.getParent().resolve(fileNameNoType + "." + i + ".part");
-				Ignore.callVoid(() -> NIO.deleteFile(tempFile));
-				tempFiles.add(tempFile);
-			}
+			List<Path> tempFiles = temporaryFiles(mediaHolders.size());
 			
 			DownloadEventHandler handler = new DownloadEventHandler(downloadTracker);
-			downloader.addEventListener(DownloadEvent.BEGIN, handler::onBegin);
 			downloader.addEventListener(DownloadEvent.UPDATE, handler::onUpdate);
 			downloader.addEventListener(DownloadEvent.ERROR, handler::onError);
 			
@@ -408,23 +415,21 @@ public final class SimpleDownloader implements Download, DownloadResult {
 	private final class DownloadEventHandler {
 		
 		private final DownloadTracker tracker;
-		private long lastSize;
+		private final AtomicLong lastSize = new AtomicLong();
 		
 		public DownloadEventHandler(DownloadTracker tracker) {
 			this.tracker = Objects.requireNonNull(tracker);
 		}
 		
-		public void onBegin(DownloadContext context) {
-			lastSize = 0L;
-		}
-		
 		public void onUpdate(DownloadContext context) {
 			DownloadTracker downloadTracker = (DownloadTracker) context.trackerManager().tracker();
 			long current = downloadTracker.current();
-			long delta = current - lastSize;
+			long delta = current - lastSize.get();
 			
 			tracker.update(delta);
-			lastSize = current;
+			lastSize.set(current);
+			
+			eventRegistry.call(DownloadEvent.UPDATE, SimpleDownloader.this);
 		}
 		
 		public void onError(DownloadContext context) {
