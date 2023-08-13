@@ -450,10 +450,6 @@ final class IPrimaHelper {
 				return CALLBACK_EXIT; // Do not continue
 			}
 			
-			// Another fixing and tidying up
-			content = Utils.replaceUnicodeEscapeSequences(content);
-			content = content.replace("\\n", "");
-			content = content.replace("\\/", "/");
 			Document document = HTML.parse(content);
 			
 			if(!getEpisodesFromDocument(program, document, null, adder)) {

@@ -261,9 +261,6 @@ final class PrimaPlus implements IPrima {
 				String title = episodeData.getString("title");
 				String uri = episodeData.getString("additionals.webUrl");
 				
-				title = Utils.replaceUnicodeEscapeSequences(title);
-				uri = Utils.replaceUnicodeEscapeSequences(uri);
-				
 				int numEpisode = episodeData.getInt("additionals.episodeNumber");
 				
 				StringBuilder fullTitle = new StringBuilder();
