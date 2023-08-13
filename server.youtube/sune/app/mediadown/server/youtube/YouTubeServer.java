@@ -84,7 +84,7 @@ public class YouTubeServer implements Server {
 				
 				String playerConfig = Utils.bracketSubstring(scriptHTML, '{', '}', false, matcher.end() - 1, scriptHTML.length());
 				JSONCollection dataConfig = JavaScript.readObject(playerConfig);
-				String title = Utils.replaceUnicodeEscapeSequences(dataConfig.getString("videoDetails.title"));
+				String title = dataConfig.getString("videoDetails.title");
 				JSONCollection formatsConfig = dataConfig.getCollection("streamingData.adaptiveFormats");
 				List<Tuple> videos = new ArrayList<>();
 				List<Tuple> audios = new ArrayList<>();
@@ -125,7 +125,7 @@ public class YouTubeServer implements Server {
 					String videoURL = null;
 					// Video's URL does not need to be signed
 					if(format.has("url")) {
-						videoURL = JavaScript.replaceUnicodeEscapeSequences(format.getString("url"));
+						videoURL = format.getString("url");
 					}
 					// Video's URL must be signed
 					else {
@@ -135,7 +135,6 @@ public class YouTubeServer implements Server {
 						// Cannot get the cipher, just skip the source
 						if(cipher == null)
 							continue;
-						cipher = JavaScript.replaceUnicodeEscapeSequences(cipher);
 						videoURL = YT.decipher(cipher, ctx);
 					}
 					
