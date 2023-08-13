@@ -127,8 +127,13 @@ public final class SimpleDownloader implements Download, DownloadResult {
 					worker.submit(() -> {
 						Request request = Request.of(mh.media().uri()).headers(HEADERS).HEAD();
 						long size = Ignore.defaultValue(() -> Web.size(request), MediaConstants.UNKNOWN_SIZE);
-						mh.size(size);
-						if(size > 0L) theSize.getAndAdd(size);
+						
+						// Since we use AcceleratedFileDownloader, treat zero bytes as unknown
+						if(size > 0L) {
+							theSize.getAndAdd(size);
+							mh.size(size);
+						}
+						
 						tracker.progress(counter.incrementAndGet() / count);
 					});
 				}
