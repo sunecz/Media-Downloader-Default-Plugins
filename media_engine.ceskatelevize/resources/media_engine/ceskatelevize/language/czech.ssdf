@@ -9,7 +9,7 @@
 						text:  "Média nelze získat z následujícího důvodů:"
 					},
 					value: {
-						media_unavailable: "Video již není dostupné"
+						media_unavailable: "Video není dostupné: %{message}"
 					}
 				}
 			}

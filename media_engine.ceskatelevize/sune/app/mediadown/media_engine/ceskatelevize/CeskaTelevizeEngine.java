@@ -98,11 +98,21 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		return hostParts.length > 1 && hostParts[0].equalsIgnoreCase(required);
 	}
 	
-	private static final void displayError(String name) {
+	private static final void displayError(String name, Object... args) {
 		Translation tr = translation().getTranslation("error");
-		String message = tr.getSingle("value." + name);
+		String message = tr.getSingle("value." + name, args);
 		tr = tr.getTranslation("media_error");
 		Dialog.showContentInfo(tr.getSingle("title"), tr.getSingle("text"), message);
+	}
+	
+	private static final String extractErrorMessage(URI uri) {
+		try {
+			return HTML.from(uri).selectFirst("main [class^='errorTitle']").text().trim();
+		} catch(Exception ex) {
+			// Ignore, will just display empty error message
+		}
+		
+		return "";
 	}
 	
 	@Override
@@ -149,7 +159,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			
 			List<ExtractJob> jobs = new ArrayList<>();
 			MediaSource source = MediaSource.of(this);
-			ct.getExtractJobs(HTML.from(uri), jobs);
+			ct.extractJobs(uri, HTML.from(uri), jobs);
 			
 			for(ExtractJob job : jobs) {
 				URI videoUri = job.uri();
@@ -722,22 +732,25 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 	
 	private static final class SourceInfo {
 		
+		private final URI sourceUri;
 		private final String type;
 		private final String idec;
 		
-		private SourceInfo(String type, String idec) {
+		private SourceInfo(URI sourceUri, String type, String idec) {
+			this.sourceUri = Objects.requireNonNull(sourceUri);
 			this.type = Objects.requireNonNull(type);
 			this.idec = Objects.requireNonNull(idec);
 		}
 		
-		public static final SourceInfo ofEpisode(String idec) {
-			return new SourceInfo("episode", idec);
+		public static final SourceInfo ofEpisode(URI sourceUri, String idec) {
+			return new SourceInfo(sourceUri, "episode", idec);
 		}
 		
-		public static final SourceInfo ofBonus(String idec) {
-			return new SourceInfo("bonus", idec);
+		public static final SourceInfo ofBonus(URI sourceUri, String idec) {
+			return new SourceInfo(sourceUri, "bonus", idec);
 		}
 		
+		public URI sourceUri() { return sourceUri; }
 		public String type() { return type; }
 		public String idec() { return idec; }
 	}
@@ -825,11 +838,18 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 				
 				String uri;
 				try(Response.OfStream response = Web.requestStream(Request.of(ENDPOINT).POST(body))) {
+					// Some videos that are currently unavailable but will be available in the future
+					// return error code of 500. Display an error message rather than an exception.
+					if(response.statusCode() != 200) {
+						displayError("media_unavailable", "message", extractErrorMessage(source.sourceUri()));
+						return null; // Do not continue
+					}
+					
 					JSONCollection json = JSON.read(response.stream());
 					uri = json.getString("url");
 					
 					if(uri.startsWith("error")) {
-						displayError("media_unavailable");
+						displayError("media_unavailable", "message", extractErrorMessage(source.sourceUri()));
 						return null; // Do not continue
 					}
 				}
@@ -1180,7 +1200,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 	
 	private static interface CT {
 		
-		void getExtractJobs(Document document, List<ExtractJob> jobs) throws Exception;
+		void extractJobs(URI sourceUri, Document document, List<ExtractJob> jobs) throws Exception;
 		boolean isCompatible(URI uri);
 	}
 	
@@ -1238,14 +1258,14 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		public static final CT_iVysilani getInstance() { return _Singleton.getInstance(); }
 		
 		@Override
-		public final void getExtractJobs(Document document, List<ExtractJob> jobs) throws Exception {
+		public final void extractJobs(URI sourceUri, Document document, List<ExtractJob> jobs) throws Exception {
 			WebMediaMetadata metadata = WebMediaMetadataExtractor.extract(document);
 			
 			if(metadata == null) {
 				return; // Unable to obtain the ID
 			}
 			
-			SourceInfo source = SourceInfo.ofEpisode(metadata.idec());
+			SourceInfo source = SourceInfo.ofEpisode(sourceUri, metadata.idec());
 			
 			// Try to obtain the media title from its linking data and document
 			LinkingData ld = LinkingData.from(document).stream()
@@ -1273,14 +1293,14 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		public static final CT_Porady getInstance() { return _Singleton.getInstance(); }
 		
 		@Override
-		public final void getExtractJobs(Document document, List<ExtractJob> jobs) throws Exception {
+		public final void extractJobs(URI sourceUri, Document document, List<ExtractJob> jobs) throws Exception {
 			WebMediaMetadata metadata = WebMediaMetadataExtractor.extract(document);
 			
 			if(metadata == null) {
 				return; // Unable to obtain the ID
 			}
 			
-			SourceInfo source = SourceInfo.ofEpisode(metadata.idec());
+			SourceInfo source = SourceInfo.ofEpisode(sourceUri, metadata.idec());
 			
 			// Try to obtain the media title from its linking data and document
 			LinkingData ld = LinkingData.from(document).stream()
@@ -1308,7 +1328,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		public static final CT_Decko getInstance() { return _Singleton.getInstance(); }
 		
 		@Override
-		public final void getExtractJobs(Document document, List<ExtractJob> jobs) throws Exception {
+		public final void extractJobs(URI sourceUri, Document document, List<ExtractJob> jobs) throws Exception {
 			// On a Decko show's page there are all episodes, therefore we have to return media of all episodes
 			// that are present there. This is a little bit more complicated since not all episodes are present
 			// on the page when the page is loaded and other episodes are loaded dynamically using AJAX.
@@ -1348,7 +1368,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			
 			CT_Porady ctInstance = CT_Porady.getInstance();
 			for(Episode episode : task.list()) {
-				ctInstance.getExtractJobs(HTML.from(episode.uri()), jobs);
+				ctInstance.extractJobs(null, HTML.from(episode.uri()), jobs);
 			}
 		}
 		
@@ -1374,7 +1394,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		public static final CT_24 getInstance() { return _Singleton.getInstance(); }
 		
 		@Override
-		public final void getExtractJobs(Document document, List<ExtractJob> jobs) throws Exception {
+		public final void extractJobs(URI sourceUri, Document document, List<ExtractJob> jobs) throws Exception {
 			String playerHash = null;
 			
 			for(Element elScript : document.select("script")) {
@@ -1398,7 +1418,8 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 				
 				// Add all the videos on the page
 				for(Element elVideo : document.select(SELECTOR_VIDEO)) {
-					SourceInfo source = SourceInfo.ofEpisode(regexSanitizeIdec.replaceAll(elVideo.attr("data-idec"), ""));
+					String idec = regexSanitizeIdec.replaceAll(elVideo.attr("data-idec"), "");
+					SourceInfo source = SourceInfo.ofEpisode(sourceUri, idec);
 					URI uri = Net.uri(Utils.format(URL_PLAYER_IFRAME, "url", elVideo.attr("data-url"), "hash", playerHash));
 					jobs.add(new ExtractJob(uri, ExtractMethod.SOURCE_INFO, source, title));
 				}
@@ -1423,7 +1444,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		public static final CT_Sport getInstance() { return _Singleton.getInstance(); }
 		
 		@Override
-		public final void getExtractJobs(Document document, List<ExtractJob> jobs) throws Exception {
+		public final void extractJobs(URI sourceUri, Document document, List<ExtractJob> jobs) throws Exception {
 			Set<String> allowedNames = Set.of("id", "key", "date", "requestSource", "quality", "region", "title");
 			List<JSONCollection> items = new ArrayList<>();
 			Set<String> ids = new HashSet<>();
@@ -1493,7 +1514,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 					JSONCollection result = JSON.read(response.stream());
 					
 					for(JSONCollection playlistItem : result.getCollection("RESULT.playlist").collectionsIterable()) {
-						SourceInfo source = SourceInfo.ofEpisode(playlistItem.getString("id"));
+						SourceInfo source = SourceInfo.ofEpisode(sourceUri, playlistItem.getString("id"));
 						URI uri = Net.uri(playlistItem.getString("streamUrls.main"));
 						jobs.add(new ExtractJob(uri, ExtractMethod.NONE, source, title));
 					}
@@ -1516,7 +1537,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		public static final CT_Art getInstance() { return _Singleton.getInstance(); }
 		
 		@Override
-		public final void getExtractJobs(Document document, List<ExtractJob> jobs) throws Exception {
+		public final void extractJobs(URI sourceUri, Document document, List<ExtractJob> jobs) throws Exception {
 			// Try to obtain the document's title from meta tags first, then from the title tag
 			String title = Opt.of(document.selectFirst("meta[property='og:title']"))
 				.ifTrue(Objects::nonNull)
@@ -1535,7 +1556,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 					continue; // Unsupported
 				}
 				
-				SourceInfo source = SourceInfo.ofBonus(bonus.value());
+				SourceInfo source = SourceInfo.ofBonus(sourceUri, bonus.value());
 				jobs.add(new ExtractJob(uri, ExtractMethod.SOURCE_INFO, source, title));
 			}
 		}
@@ -1556,7 +1577,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		public static final CT_Edu getInstance() { return _Singleton.getInstance(); }
 		
 		@Override
-		public final void getExtractJobs(Document document, List<ExtractJob> jobs) throws Exception {
+		public final void extractJobs(URI sourceUri, Document document, List<ExtractJob> jobs) throws Exception {
 			// Try to obtain the document's title from linking data first, then from the title tag
 			String title = Opt.of(LinkingData.from(document).stream()
 			                        .filter((l) -> l.type().equals("VideoObject"))
@@ -1576,7 +1597,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 					                                              : e.getKey().toLowerCase()) + '='
 					          + JavaScript.encodeURIComponent(e.getValue()))
 					.reduce("", (a, b) -> a + '&' + b);
-				SourceInfo source = SourceInfo.ofEpisode(elVideo.attr("data-idec"));
+				SourceInfo source = SourceInfo.ofEpisode(sourceUri, elVideo.attr("data-idec"));
 				URI uri = Net.uri(URL + endpoint + '?' + urlData.substring(1));
 				jobs.add(new ExtractJob(uri, ExtractMethod.SOURCE_INFO, source, title));
 			}

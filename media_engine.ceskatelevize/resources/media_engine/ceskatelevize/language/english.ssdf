@@ -9,7 +9,7 @@
 						text:  "Media cannot be obtained due to the following reason:"
 					},
 					value: {
-						media_unavailable: "Video is no longer available"
+						media_unavailable: "Video is not available: %{message}"
 					}
 				}
 			}
