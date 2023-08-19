@@ -29,7 +29,6 @@ import sune.app.mediadown.plugin.Plugins;
 import sune.app.mediadown.util.FXUtils;
 import sune.app.mediadown.util.Password;
 import sune.app.mediadown.util.Utils;
-import sune.app.mediadown.util.Utils.Ignore;
 import sune.util.ssdf2.SSDType;
 import sune.util.ssdf2.SSDValue;
 
@@ -192,33 +191,46 @@ public final class IPrimaEnginePlugin extends PluginBase {
 					enableSelect(false);
 					progressText(translation().getSingle("progress.log_in"));
 					
-					// Must be logged in first
-					Ignore.callVoid(() -> IPrimaAuthenticator.getSessionData(), MediaDownloader::error);
-					
-					progressText(translation().getSingle("progress.profiles"));
-					
-					Ignore.callVoid(() -> {
-						List<Profile> profiles = profiles();
-						profiles.add(0, automaticProfile());
+					try {
+						IPrimaAuthenticator.SessionData session = IPrimaAuthenticator.getSessionData();
 						
-						Profile selected = profiles.stream()
-							.filter((d) -> d.id().equals(loadedValue))
-							.findFirst().orElse(null);
-						
-						FXUtils.thread(() -> {
-							control.getItems().setAll(profiles);
+						if(session != null) {
+							progressText(translation().getSingle("progress.profiles"));
 							
-							if(selected != null) {
-								control.getSelectionModel().select(selected);
-							}
-						});
-					}, MediaDownloader::error);
-					
-					progressText(null);
-					enableSelect(true);
-					
-					itemsLoaded = true;
+							List<Profile> profiles = profiles();
+							profiles.add(0, automaticProfile());
+							
+							Profile selected = profiles.stream()
+								.filter((d) -> d.id().equals(loadedValue))
+								.findFirst().orElse(null);
+							
+							FXUtils.thread(() -> {
+								control.getItems().setAll(profiles);
+								
+								if(selected != null) {
+									control.getSelectionModel().select(selected);
+								}
+							});
+							
+							enableSelect(true);
+						}
+					} catch(Exception ex) {
+						MediaDownloader.error(ex);
+					} finally {
+						progressText(null);
+						itemsLoaded = true;
+					}
 				});
+			}
+			
+			private final String selectedProfileId() {
+				Profile profile = control.getSelectionModel().getSelectedItem();
+				
+				if(profile == null) {
+					return "auto";
+				}
+				
+				return profile.id();
 			}
 			
 			@Override
@@ -235,7 +247,7 @@ public final class IPrimaEnginePlugin extends PluginBase {
 			public Object value() {
 				return valueSave(
 					itemsLoaded
-						? control.getSelectionModel().getSelectedItem().id()
+						? selectedProfileId()
 						: loadedValue
 				);
 			}
