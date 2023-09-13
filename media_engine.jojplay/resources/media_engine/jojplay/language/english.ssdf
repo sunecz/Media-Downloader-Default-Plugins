@@ -11,6 +11,18 @@
 						authData_email:    "Email",
 						authData_password: "Password"
 					}
+				},
+				error: {
+					media_error: {
+						title: "Error: %{name}s",
+						text:  "Media cannot be obtained due to the following reason:"
+					},
+					value: {
+						UNAUTHENTICATED:   "You are not logged in. Please, set your account credentials "
+							+ "in the application's configuration.",
+						PERMISSION_DENIED: "You don't have access to this media. This is probably due to "
+							+ "not having high enough tarif."
+					}
 				}
 			}
 		}

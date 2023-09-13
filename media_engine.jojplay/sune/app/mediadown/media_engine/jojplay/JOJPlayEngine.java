@@ -26,12 +26,15 @@ import java.util.stream.Collectors;
 import java.util.zip.GZIPInputStream;
 
 import javafx.scene.image.Image;
+import sune.app.mediadown.MediaDownloader;
 import sune.app.mediadown.concurrent.StateMutex;
 import sune.app.mediadown.concurrent.SyncObject;
 import sune.app.mediadown.configuration.Configuration.ConfigurationProperty;
 import sune.app.mediadown.entity.Episode;
 import sune.app.mediadown.entity.MediaEngine;
 import sune.app.mediadown.entity.Program;
+import sune.app.mediadown.gui.Dialog;
+import sune.app.mediadown.language.Translation;
 import sune.app.mediadown.media.Media;
 import sune.app.mediadown.media.MediaLanguage;
 import sune.app.mediadown.media.MediaMetadata;
@@ -64,6 +67,11 @@ public final class JOJPlayEngine implements MediaEngine {
 	
 	// Allow to create an instance when registering the engine
 	JOJPlayEngine() {
+	}
+	
+	private static final Translation translation() {
+		String path = "plugin." + PLUGIN.getContext().getPlugin().instance().name();
+		return MediaDownloader.translation().getTranslation(path);
 	}
 	
 	@Override
@@ -187,8 +195,10 @@ public final class JOJPlayEngine implements MediaEngine {
 			"row-Wk9CJI0YsEzdbKmLAld3k", // Staré klasiky
 		};
 		
+		private static final URI URI_SOURCES = Net.uri("https://europe-west3-tivio-production.cloudfunctions.net/getSourceUrl");
+		
 		private static final FirebaseChannel openChannel() throws Exception {
-			return FirebaseChannel.open(Authenticator.login());
+			return FirebaseChannel.open(Authenticator.idToken());
 		}
 		
 		private static final String extractTagType(String tag) {
@@ -286,6 +296,36 @@ public final class JOJPlayEngine implements MediaEngine {
 			return MediaUtils.mediaTitle(programName, numSeason, numEpisode, episodeName);
 		}
 		
+		private static final String sourceUrlRequestBody(String videoId) {
+			JSONCollection requestData = JSONCollection.empty();
+			requestData.set("id", videoId);
+			requestData.set("documentType", "video");
+			
+			JSONCollection capabilities = JSONCollection.emptyArray();
+			requestData.set("capabilities", capabilities);
+			
+			for(String videoFormat : List.of("dash", "hls")) {
+				JSONCollection capability = JSONCollection.empty();
+				capability.set("codec", "h264");
+				capability.set("protocol", videoFormat);
+				capability.set("encryption", "none");
+				capabilities.add(capability);
+			}
+			
+			JSONCollection requestBody = JSONCollection.empty();
+			requestBody.set("data", requestData);
+			
+			return requestBody.toString(true);
+		}
+		
+		private static final void displayError(JSONCollection errorInfo) {
+			Translation tr = translation().getTranslation("error");
+			String errorName = errorInfo.getString("status");
+			String message = tr.getSingle("value." + errorName);
+			tr = tr.getTranslation("media_error");
+			Dialog.showContentInfo(tr.getSingle("title", "name", errorName), tr.getSingle("text"), message);
+		}
+		
 		public static final ListTask<Program> getPrograms() throws Exception {
 			return ListTask.of((task) -> {
 				try(FirebaseChannel channel = openChannel()) {
@@ -365,13 +405,43 @@ public final class JOJPlayEngine implements MediaEngine {
 						throw new IllegalStateException("Unable to obtain media information");
 					}
 					
+					String videoId = Utils.afterLast(document.getString("name"), "/");
+					String body = sourceUrlRequestBody(videoId);
+					
+					Request.Builder builder = Web.Request.of(URI_SOURCES)
+						.header("Referer", "https://play.joj.sk/");
+					
+					// Currently, there is only one video source URL available
+					List<String> urls = new ArrayList<>(1);
+					
+					do {
+						Request request = builder.POST(body, "application/json");
+						
+						try(Response.OfStream response = Web.requestStream(request)) {
+							JSONCollection json = JSON.read(response.stream());
+							
+							JSONCollection error;
+							if((error = json.getCollection("error")) != null) {
+								// Monetized media requires authorization, add the Authorization header,
+								// if that's the case.
+								if(error.getString("message", "").equals("User is not logged in")) {
+									builder = builder.header("Authorization", "Bearer " + Authenticator.idToken());
+									continue; // Retry
+								}
+								
+								displayError(error);
+								return; // Do not continue
+							}
+							
+							urls.add(json.getString("result.url"));
+						}
+					} while(task.isRunning() && urls.isEmpty());
+					
 					URI sourceURI = uri;
 					MediaSource source = MediaSource.of(engine);
 					String title = mediaTitle(document);
 					
-					for(JSONCollection item
-							: document.getCollection("fields.sources.arrayValue.values").collectionsIterable()) {
-						String url = item.getString("mapValue.fields.url.stringValue");
+					for(String url : urls) {
 						MediaLanguage language = MediaLanguage.UNKNOWN;
 						MediaMetadata metadata = MediaMetadata.empty();
 						
@@ -392,6 +462,7 @@ public final class JOJPlayEngine implements MediaEngine {
 		protected static final class Authenticator {
 			
 			private static final URI URI_LOGIN;
+			private static String idToken;
 			
 			static {
 				URI_LOGIN = Net.uri("https://www.googleapis.com/identitytoolkit/v3/relyingparty/verifyPassword?key=" + APP_KEY);
@@ -417,8 +488,17 @@ public final class JOJPlayEngine implements MediaEngine {
 				}				
 			}
 			
-			public static String login() throws Exception {
-				return doLogin(AuthenticationData.email(), AuthenticationData.password());
+			public static final boolean isLoggedIn() {
+				return idToken != null;
+			}
+			
+			public static final String login() throws Exception {
+				idToken = doLogin(AuthenticationData.email(), AuthenticationData.password());
+				return idToken;
+			}
+			
+			public static final String idToken() throws Exception {
+				return isLoggedIn() ? idToken : login();
 			}
 			
 			private static final class AuthenticationData {

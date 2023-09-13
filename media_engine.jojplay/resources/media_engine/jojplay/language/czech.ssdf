@@ -11,6 +11,18 @@
 						authData_email:    "Email",
 						authData_password: "Heslo"
 					}
+				},
+				error: {
+					media_error: {
+						title: "Chyba: %{name}s",
+						text:  "Média nelze získat z následujícího důvodu:"
+					},
+					value: {
+						UNAUTHENTICATED:   "Nejste přihlášeni. Prosím, nastavte Vaše přihlašovací údaje "
+							+ "k účtu v nastavení programu.",
+						PERMISSION_DENIED: "K tomuto médiu nemáte přístup. Toto je pravděpodobně způsobeno "
+							+ "nedostatečně vysokým tarifem."
+					}
 				}
 			}
 		}
