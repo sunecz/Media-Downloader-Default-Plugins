@@ -21,6 +21,8 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiFunction;
+import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.stream.Collectors;
 import java.util.zip.GZIPInputStream;
@@ -48,7 +50,6 @@ import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginConfiguration;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.task.ListTask;
-import sune.app.mediadown.util.CheckedFunction;
 import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.JSON.JSONCollection;
 import sune.app.mediadown.util.JSON.JSONNode;
@@ -153,86 +154,12 @@ public final class JOJPlayEngine implements MediaEngine {
 		private static final String TYPE_SERIES = "series";
 		private static final String TYPE_VIDEO = "video";
 		
-		private static final int MAX_ARRAY_LENGTH_OP_IN = 30;
 		private static final Regex REGEX_URI_PLAYER = Regex.of("^/?player/([^/]+)$");
-		
-		private static final String[] ROWS_TV_SERIES = new String[] {
-			"row-U6Q7n-pRrId2BQhuuNVtw", // Sitkomy
-			"row-L4Hr3IvVyI9lv53ygkx6R", // Drámy
-			"row-9rKncobnFUUva6fG1egWV", // Dokumentárne seriály
-			"row-0YPbYcre13g7Gacn4zyE2", // Kriminálne seriály
-			"row-pWoCYvBcZKrl5_D3kLyRl", // Zábavné Relácie
-			"row-zUtlpx6F0LTbBt4A2aS-x", // Reality show
-			"row-v-PrDUqpQP0nrYMp7uie6", // Komediálne
-			"row-y0eB7rXMiBLXsrLLiCOHU", // Súťažné relácie
-			"row-BrTpsmp3MBlswgEYOzDB1", // Talkshow
-			"row-gQ97VWUEkcLrzp2UNFAXW", // Magazíny
-			"row-T5nvQgzklL8pPyfz0XkO1", // Rodinné seriály
-		};
-		
-		private static final String[] ROWS_MOVIES = new String[] {
-			"row-6YffydJ-Xq028VyDoPSRK", // Akčné filmy
-			"row-Xml3FWqA2UZKE-qQ2q4gV", // Komédie
-			"row-JOnrTJCz6noxw1l2zeW0a", // Dokumentárne filmy
-			"row-P0pGBymVMQ50YNvoAfzFn", // Rodinné filmy
-			"row-nuEpDPqyW_wAQSuAVkz-9", // Drámy
-			"row-3pNgAi_I7A7w59r0u8aCi", // Československé klasiky
-			"row-YoAgr96kD3ieWFF3B6BNz", // Romantické filmy
-			"row-KAnhqdlS_S2AabKeB1FKa", // Sci-fi a Fantasy filmy
-			"row-Uvj3bVytsMcrMO2VQ0QSe", // Dobrodružné filmy
-			"row-ek20x44KNB0kGauAMSMGi", // Thrillery
-			"row-DEBG8iWL4HtGL5Cu_sXtX", // Horory
-			"row--1OfC2dDVu5-lkT2-6uxs", // Životopisné filmy
-			"row-dRSrMKet1CsxtAcJq-Cjx", // Nemecké filmy
-			"row-TfOrrlhWbX0QEaNk5ZPhY", // Európske filmy
-			"row-y9Jr95kedVi6t2uaBKT49", // Krátkometrážné filmy
-		};
-		
-		private static final String[] ROWS_KIDS = new String[] {
-			"row-1hXc4UKWclp_u8zIWiNI0", // Filmové Rozprávky
-			"row-FqANF3TC-0llEviah1cVP", // Detské seriály
-			"row-SUcjbviX0evzaBWBWuGVY", // JOJKO
-			"row-Wk9CJI0YsEzdbKmLAld3k", // Staré klasiky
-		};
 		
 		private static final URI URI_SOURCES = Net.uri("https://europe-west3-tivio-production.cloudfunctions.net/getSourceUrl");
 		
 		private static final FirebaseChannel openChannel() throws Exception {
 			return FirebaseChannel.open(Authenticator.idToken());
-		}
-		
-		private static final String extractTagType(String tag) {
-			tag = tag.substring(DATABASE.length() + "/documents/".length());
-			
-			if(tag.startsWith("organizations")) {
-				tag = tag.substring("/organizations/".length() + ORGANIZATION_ID.length());
-			}
-			
-			return Utils.beforeFirst(tag, "/");
-		}
-		
-		private static final List<String> filterTags(List<String> tags, String type) {
-			return tags.stream().filter((tag) -> extractTagType(tag).equals(type)).collect(Collectors.toList());
-		}
-		
-		private static final void loopTags(ListTask<Program> task, List<String> tags,
-				CheckedFunction<List<String>, List<JSONCollection>> action,
-				CheckedFunction<JSONCollection, Program> creator)
-				throws Exception {
-			final int numTagsPerRequest = MAX_ARRAY_LENGTH_OP_IN;
-			
-			// Optimize the query, i.e. pack as many tags at once as the API allows.
-			for(int i = 0, l = tags.size(); i < l; i += numTagsPerRequest) {
-				List<String> tagsView = tags.subList(i, Math.min(l, i + numTagsPerRequest));
-				
-				for(JSONCollection item : action.apply(tagsView)) {
-					Program program = creator.apply(item);
-					
-					if(!task.add(program)) {
-						return; // Do not continue
-					}
-				}
-			}
 		}
 		
 		private static final String resolveFieldValue(JSONCollection field) {
@@ -247,15 +174,6 @@ public final class JOJPlayEngine implements MediaEngine {
 			}
 			
 			return null;
-		}
-		
-		@SafeVarargs
-		private static final <T> List<T> concat(T[]... arrays) {
-			int size = 0;
-			for(T[] array : arrays) size += array.length;
-			List<T> list = new ArrayList<>(size);
-			for(T[] array : arrays) list.addAll(List.of(array));
-			return list;
 		}
 		
 		private static final <T> Iterable<T> reversed(List<T> list) {
@@ -329,25 +247,23 @@ public final class JOJPlayEngine implements MediaEngine {
 		public static final ListTask<Program> getPrograms() throws Exception {
 			return ListTask.of((task) -> {
 				try(FirebaseChannel channel = openChannel()) {
-					List<String> rowTags = new ArrayList<>();
-					
-					for(String rowId : concat(API.ROWS_TV_SERIES, API.ROWS_MOVIES, API.ROWS_KIDS)) {
-						rowTags.addAll(channel.rowTags(rowId));
-					}
-					
-					loopTags(task, filterTags(rowTags, "tags"), channel::tagItems, (item) -> {
+					ListTask<Program> tvShows = channel.tvShows((item) -> {
 						String slug = Utils.afterLast(item.getString("name"), "/");
-						String title = resolveFieldValue(item.getCollection("fields.name"));
+						String title = Utils.unquote(resolveFieldValue(item.getCollection("fields.name")));
 						URI uri = Net.uri("https://play.joj.sk/series/" + slug);
 						return new Program(uri, title, "ref", item.getString("name"), "type", TYPE_SERIES);
 					});
+					tvShows.forwardAdd(task);
+					tvShows.startAndWait();
 					
-					loopTags(task, filterTags(rowTags, "videos"), channel::videoItems, (item) -> {
+					ListTask<Program> movies = channel.movies((item) -> {
 						String slug = Utils.afterLast(item.getString("name"), "/");
 						String title = resolveFieldValue(item.getCollection("fields.name"));
 						URI uri = Net.uri("https://play.joj.sk/videos/" + slug);
 						return new Program(uri, title, "ref", item.getString("name"), "type", TYPE_VIDEO);
 					});
+					movies.forwardAdd(task);
+					movies.startAndWait();
 				}
 			});
 		}
@@ -479,9 +395,11 @@ public final class JOJPlayEngine implements MediaEngine {
 				json.set("returnSecureToken", true);
 				String body = json.toString();
 				
-				try(Response.OfString response = Web.request(Request.of(URI_LOGIN)
-				                	.addHeader("Referer", "https://play.joj.sk/")
-				                	.POST(body, "application/json"))) {
+				try(Response.OfString response = Web.request(
+						Request.of(URI_LOGIN)
+							.addHeader("Referer", "https://play.joj.sk/")
+							.POST(body, "application/json")
+				)) {
 					JSONCollection data = JSON.read(response.body());
 					String idToken = data.getString("idToken");
 					return idToken;
@@ -809,11 +727,95 @@ public final class JOJPlayEngine implements MediaEngine {
 				}
 			}
 			
+			private static final boolean isTvShow(JSONCollection document) {
+				JSONCollection metadata = document.getCollection("fields.metadata.arrayValue.values");
+				
+				if(metadata == null) {
+					return false;
+				}
+				
+				return Utils.stream(metadata.collectionsIterable())
+					.filter((c) -> "tvProfiSerialId".equals(c.getString("mapValue.fields.key.stringValue")))
+					.findFirst().isPresent();
+			}
+			
+			private static final boolean isMovie(JSONCollection document) {
+				// This is a little bit tricky and not perfect, but it should suffice in most cases.
+				// It checks for common traits (properties, values, ...) that a movie should have.
+				return (
+					( document.has("fields.urlName")) &&
+					(!document.has("fields.originalVideoRef") || document.has("fields.originalVideoRef.nullValue")) &&
+					(!document.has("fields.externals.mapValue.fields.tvProfiSeriesName"))
+				);
+			}
+			
 			private final void openConnection() throws Exception {
 				connection.open();
 				connection.removeTarget(TARGET_ID_INITIAL);
 				// Wait for all responses to be received before doing something else
 				connection.responses(TARGET_ID_INITIAL, RESPONSE_ID_INITIAL);
+			}
+			
+			public final <T> ListTask<T> tvShows(Function<JSONCollection, T> mapper) throws Exception {
+				return items(QUERY_PARENT, "tags", Function.identity(), FirebaseChannel::isTvShow, mapper);
+			}
+			
+			public final <T> ListTask<T> movies(Function<JSONCollection, T> mapper) throws Exception {
+				return items(QUERY_ROOT_PARENT, "videos", (query) -> {
+					return query.where(
+						new StructuredQuery.Where.Composite(
+							StructuredQuery.Where.LogicalOperation.AND,
+							new StructuredQuery.Where.FieldString(
+								"contentType",
+								StructuredQuery.Where.Operation.EQUAL,
+								"FILM"
+							),
+							new StructuredQuery.Where.FieldArray(
+								"externals.tvProfiType",
+								StructuredQuery.Where.Operation.IN,
+								List.of(
+									new StructuredQuery.Where.SimpleValue.OfString("movie"),
+									new StructuredQuery.Where.SimpleValue.OfString("film"),
+									new StructuredQuery.Where.SimpleValue.OfString("dokument")
+								)
+							)
+						)
+					);
+				}, FirebaseChannel::isMovie, mapper);
+			}
+			
+			public final <T> ListTask<T> items(String parent, String collectionId,
+					Function<StructuredQuery.Builder, StructuredQuery.Builder> queryMapper,
+					Predicate<JSONCollection> filter, Function<JSONCollection, T> mapper) throws Exception {
+				return ListTask.of((task) -> {
+					StructuredQuery builder = queryMapper.apply(
+						new StructuredQuery.Builder()
+							.parent(parent)
+							.from(new StructuredQuery.From.Collection(collectionId))
+					).build();
+					
+					FirestoreResponse.OfReference response = addTarget(builder);
+					connection.removeTarget(response.requestTargetId());
+					List<FirestoreResponse.OfContent> data = connection.responses(response);
+					connection.throwIfException();
+					
+					for(FirestoreResponse.OfDocumentChange item
+							: FirebaseChannel.<FirestoreResponse.OfDocumentChange>filterContent(
+								data,
+								FirestoreResponse.OfContent.ContentType.DOCUMENT_CHANGE
+							)
+					) {
+						JSONCollection document = item.document();
+						
+						if(!filter.test(document)) {
+							continue; // Ignore
+						}
+						
+						if(!task.add(mapper.apply(document))) {
+							return; // Do not continue
+						}
+					}
+				});
 			}
 			
 			public final List<JSONCollection> items(String parent, String collectionId, List<String> refs)
@@ -852,14 +854,17 @@ public final class JOJPlayEngine implements MediaEngine {
 				return items;
 			}
 			
+			@SuppressWarnings("unused")
 			public final List<JSONCollection> tagItems(List<String> tagRefs) throws Exception {
 				return items(QUERY_PARENT, "tags", tagRefs);
 			}
 			
+			@SuppressWarnings("unused")
 			public final List<JSONCollection> videoItems(List<String> videoRefs) throws Exception {
 				return items(QUERY_ROOT_PARENT, "videos", videoRefs);
 			}
 			
+			@SuppressWarnings("unused")
 			public final List<String> rowTags(String rowId) throws Exception {
 				List<String> tags = new ArrayList<>();
 				
@@ -961,10 +966,10 @@ public final class JOJPlayEngine implements MediaEngine {
 						.where(new StructuredQuery.Where.Composite(
 							StructuredQuery.Where.LogicalOperation.AND,
 							new StructuredQuery.Where.FieldArray(
-      							"tags",
-      							StructuredQuery.Where.Operation.ARRAY_CONTAINS_ANY,
-      							new StructuredQuery.Where.SimpleValue.OfReference(programRef)
-      						),
+								"tags",
+								StructuredQuery.Where.Operation.ARRAY_CONTAINS_ANY,
+								new StructuredQuery.Where.SimpleValue.OfReference(programRef)
+							),
 							new StructuredQuery.Where.FieldString(
 								"publishedStatus",
 								StructuredQuery.Where.Operation.EQUAL,
@@ -1261,6 +1266,7 @@ public final class JOJPlayEngine implements MediaEngine {
 						synchronized(responses) {
 							response = responses.get(id);
 						}
+						
 						
 						if(response != null) {
 							if(response.targetId() != targetId) {
@@ -1562,7 +1568,6 @@ public final class JOJPlayEngine implements MediaEngine {
 					
 					protected abstract void setValue(JSONCollection data, String name);
 					
-					@SuppressWarnings("unused")
 					protected static final class OfString extends SimpleValue {
 						
 						private final String value;
