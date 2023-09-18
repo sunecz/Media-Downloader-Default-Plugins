@@ -1017,7 +1017,7 @@ final class PrimaPlus implements IPrima {
 					
 					if(json instanceof JSONCollection) parent.set(name, (JSONCollection) json); else
 					if(json instanceof JSONObject)     parent.set(name, (JSONObject) json);
-					else                              parent.setNull(name);
+					else                               parent.setNull(name);
 					
 					return;
 				}
@@ -1046,7 +1046,7 @@ final class PrimaPlus implements IPrima {
 					
 					if(json instanceof JSONCollection) parent.add((JSONCollection) json); else
 					if(json instanceof JSONObject)     parent.add((JSONObject) json);
-					else                              parent.addNull();
+					else                               parent.addNull();
 					
 					return;
 				}
@@ -1065,23 +1065,23 @@ final class PrimaPlus implements IPrima {
 			}
 			
 			private static final JSONCollection constructMap(Map<?, ?> map) {
-				JSONCollection ssdMap = JSONCollection.empty();
+				JSONCollection jsonMap = JSONCollection.empty();
 				
 				for(Entry<?, ?> entry : map.entrySet()) {
-					setObjectParam(ssdMap, String.valueOf(entry.getKey()), entry.getValue());
+					setObjectParam(jsonMap, String.valueOf(entry.getKey()), entry.getValue());
 				}
 				
-				return ssdMap;
+				return jsonMap;
 			}
 			
 			private static final JSONCollection constructArray(List<?> list) {
-				JSONCollection ssdArray = JSONCollection.emptyArray();
+				JSONCollection jsonArray = JSONCollection.emptyArray();
 				
 				for(Object item : list) {
-					addObjectParam(ssdArray, item);
+					addObjectParam(jsonArray, item);
 				}
 				
-				return ssdArray;
+				return jsonArray;
 			}
 			
 			private static final void addObjectParam(JSONCollection parent, Object value) {
