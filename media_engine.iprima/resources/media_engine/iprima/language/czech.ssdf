@@ -29,7 +29,28 @@
 						text:  "Média nelze získat z následujícího důvodů:"
 					},
 					value: {
-						PLAY_GEOIP_DENIED: "Video je geograficky blokováno z Vaší současné země."
+						USER_SLOT_LIMIT_COUNT:     "Dosažen limit počtu zařízení.",
+						USER_SLOT_LIMIT_CHANGE:    "Dosažen limit maximálního počtu změn.",
+						PLAY_ADMIT_INVALID:        "Video nebylo nalezeno.",
+						PLAY_ACCESS_TOKEN_INVALID: "Video nebylo nalezeno.",
+						PLAY_STREAM_NOT_FOUND:     "Video nebylo nalezeno.",
+						PLAY_GEOIP_DENIED:         "Video je geograficky blokováno z Vaší současné země.",
+						PLAY_GEOIP_ANONYMOUS:      "Vaše současné VPN či Proxy není povoleno.",
+						PLAY_STREAM_DISABLED:      "Litujeme, video není dostupné.",
+						PLAY_NOT_PUBLISHED:        "Litujeme, video není dostupné z licenčních důvodů.",
+						PLAY_ACCESS_TOKEN_EXPIRED: "Přihlášení vypršelo, zkuste se prosím znovu přihlásit.",
+						USER_PROF_NOT_FOUND:       "Video nelze přehrát. Nebyl nalezen profil uživatele.",
+						USER_NOT_ALLOWED:          "Pro přehrání videa nemáte dostatečné oprávnění.",
+						USER_ANONYMOUS:            "Pro přehrání videa je nutné přihlášení.",
+						ARG_MISSING:               "Požadované video není dostupné.",
+						ARG_WRONG:                 "Požadované video není dostupné.",
+						NO_SUCH_OBJECT:            "Požadované video není dostupné.",
+						INVALID_STATE:             "Požadované video není dostupné.",
+						ARG_FORMAT:                "Požadované video není dostupné.",
+						REQ_SYNTAX:                "Požadované video není dostupné.",
+						APP_VERSION_MISMATCH:      "Požadované video není dostupné.",
+						SRV_INTERNAL_ERROR:        "Požadované video není dostupné.",
+						SRV_NOT_IMPL:              "Požadované video není dostupné."
 					}
 				}
 			}

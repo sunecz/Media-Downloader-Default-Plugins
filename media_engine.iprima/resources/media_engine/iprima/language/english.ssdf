@@ -29,7 +29,28 @@
 						text:  "Media cannot be obtained due to the following reason:"
 					},
 					value: {
-						PLAY_GEOIP_DENIED: "Video is Geo-blocked from your current country."
+						USER_SLOT_LIMIT_COUNT:     "Device limit reached.",
+						USER_SLOT_LIMIT_CHANGE:    "Maximum number of changes limit reached.",
+						PLAY_ADMIT_INVALID:        "Video not found.",
+						PLAY_ACCESS_TOKEN_INVALID: "Video not found.",
+						PLAY_STREAM_NOT_FOUND:     "Video not found.",
+						PLAY_GEOIP_DENIED:         "The video is geo-blocked from your current country.",
+						PLAY_GEOIP_ANONYMOUS:      "Your current VPN or Proxy is not allowed.",
+						PLAY_STREAM_DISABLED:      "Sorry, the video is not available.",
+						PLAY_NOT_PUBLISHED:        "Sorry, the video is not available for licensing reasons.",
+						PLAY_ACCESS_TOKEN_EXPIRED: "Login timed out, please try logging in again.",
+						USER_PROF_NOT_FOUND:       "The video cannot be played. User profile not found.",
+						USER_NOT_ALLOWED:          "You do not have sufficient permissions to play the video.",
+						USER_ANONYMOUS:            "Login is required to play the video.",
+						ARG_MISSING:               "The requested video is not available.",
+						ARG_WRONG:                 "The requested video is not available.",
+						NO_SUCH_OBJECT:            "The requested video is not available.",
+						INVALID_STATE:             "The requested video is not available.",
+						ARG_FORMAT:                "The requested video is not available.",
+						REQ_SYNTAX:                "The requested video is not available.",
+						APP_VERSION_MISMATCH:      "The requested video is not available.",
+						SRV_INTERNAL_ERROR:        "The requested video is not available.",
+						SRV_NOT_IMPL:              "The requested video is not available.",
 					}
 				}
 			}
