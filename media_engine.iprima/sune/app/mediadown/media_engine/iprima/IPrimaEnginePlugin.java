@@ -62,9 +62,6 @@ public final class IPrimaEnginePlugin extends PluginBase {
 			= new PluginConfiguration.Builder(getContext().getPlugin().instance().name());
 		String group = builder.name() + ".general";
 		
-		builder.addProperty(ConfigurationProperty.ofBoolean("useDefaultAuthData")
-			.inGroup(group)
-			.withDefaultValue(true));
 		builder.addProperty(ConfigurationProperty.ofString("authData_email")
 			.inGroup(group));
 		builder.addProperty(ConfigurationProperty.ofType("authData_password", Password.class)

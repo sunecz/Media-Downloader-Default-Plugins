@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 import org.jsoup.nodes.Document;
@@ -420,29 +421,23 @@ public final class IPrimaAuthenticator {
 		private AuthenticationData() {
 		}
 		
-		private static final <T> T valueOrElse(String propertyName, Supplier<T> orElse) {
-			return Optional.<ConfigurationProperty<T>>ofNullable(configuration().property(propertyName))
-						.map(ConfigurationProperty::value).orElseGet(orElse);
+		private static final ConfigurationProperty<String> stringProperty(String name) {
+			return configuration().property(name);
 		}
 		
-		public static final boolean areDefaultDataUsed() {
-			return valueOrElse("useDefaultAuthData", () -> true);
-		}
-		
-		public static final String defaultEmail() {
-			return Obf.a();
-		}
-		
-		public static final String defaultPassword() {
-			return Obf.b();
+		private static final String valueOrElse(String propertyName, Supplier<String> orElse) {
+			return Optional.ofNullable(stringProperty(propertyName))
+						.map(ConfigurationProperty::value)
+						.filter(Predicate.not(String::isBlank))
+						.orElseGet(orElse);
 		}
 		
 		public static final String email() {
-			return areDefaultDataUsed() ? defaultEmail() : valueOrElse("authData_email", AuthenticationData::defaultEmail);
+			return valueOrElse("authData_email", Obf::a);
 		}
 		
 		public static final String password() {
-			return areDefaultDataUsed() ? defaultPassword() : valueOrElse("authData_password", AuthenticationData::defaultPassword);
+			return valueOrElse("authData_password", Obf::b);
 		}
 	}
 	
