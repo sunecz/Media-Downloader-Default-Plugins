@@ -13,6 +13,7 @@ import java.util.function.Supplier;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 
+import sune.app.mediadown.concurrent.VarLoader;
 import sune.app.mediadown.configuration.Configuration;
 import sune.app.mediadown.configuration.Configuration.ConfigurationProperty;
 import sune.app.mediadown.media_engine.iprima.IPrimaAuthenticator.ProfileManager.Profile;
@@ -36,7 +37,7 @@ public final class IPrimaAuthenticator {
 	private static final String URL_USER_AUTH;
 	private static final String URL_PROFILE_SELECT;
 	
-	private static SessionData SESSION_DATA;
+	private static final VarLoader<SessionData> sessionData = VarLoader.ofChecked(IPrimaAuthenticator::initSessionData);
 	
 	static {
 		URL_OAUTH_LOGIN = "https://auth.iprima.cz/oauth2/login";
@@ -142,25 +143,27 @@ public final class IPrimaAuthenticator {
 		return IPrimaHelper.configuration();
 	}
 	
-	public static final SessionData getSessionData() throws Exception {
-		if(SESSION_DATA == null) {
-			SessionTokens tokens = sessionTokens(loginOAuth(
-				AuthenticationData.email(),
-				AuthenticationData.password()
-			));
-			boolean success = userAuth(authorize(tokens));
-			
-			if(success) {
-				SESSION_DATA = new SessionData(
-					tokens.rawString(), tokens.accessToken(),
-					// The device ID must be obtained AFTER logging in
-					DeviceManager.deviceId(),
-					ProfileManager.profiles().get(0).id()
-				);
-			}
+	private static final SessionData initSessionData() throws Exception {
+		SessionTokens tokens = sessionTokens(loginOAuth(
+			AuthenticationData.email(),
+			AuthenticationData.password()
+		));
+		boolean success = userAuth(authorize(tokens));
+		
+		if(!success) {
+			throw new IllegalStateException("Unsuccessful log in");
 		}
 		
-		return SESSION_DATA;
+		return new SessionData(
+			tokens.rawString(), tokens.accessToken(),
+			// The device ID must be obtained AFTER logging in
+			DeviceManager.deviceId(),
+			ProfileManager.profiles().get(0).id()
+		);
+	}
+	
+	public static final SessionData getSessionData() throws Exception {
+		return sessionData.valueChecked();
 	}
 	
 	public static final class ProfileManager {

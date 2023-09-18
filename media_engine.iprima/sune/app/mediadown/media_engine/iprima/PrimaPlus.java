@@ -21,6 +21,7 @@ import java.util.stream.Stream;
 
 import sune.app.mediadown.MediaDownloader;
 import sune.app.mediadown.concurrent.Threads;
+import sune.app.mediadown.concurrent.VarLoader;
 import sune.app.mediadown.entity.Episode;
 import sune.app.mediadown.entity.Program;
 import sune.app.mediadown.gui.Dialog;
@@ -109,8 +110,7 @@ final class PrimaPlus implements IPrima {
 		private static final int MAX_OFFSET = 1000;
 		
 		private final IPrima iprima;
-		private IPrimaAuthenticator.SessionData sessionData;
-		private HttpHeaders sessionHeaders;
+		private final VarLoader<HttpHeaders> sessionHeaders = VarLoader.ofChecked(this::initSessionHeaders);
 		
 		public API(IPrima iprima) {
 			this.iprima = Objects.requireNonNull(iprima);
@@ -279,33 +279,39 @@ final class PrimaPlus implements IPrima {
 			return episodes;
 		}
 		
-		private final IPrimaAuthenticator.SessionData logIn() {
+		private final HttpHeaders initSessionHeaders() throws Exception {
+			// It is important to specify the referer, otherwise the response code is 403.
+			Map<String, String> mutRequestHeaders = Utils.toMap("Referer", "https://www.iprima.cz/");
+			IPrimaAuthenticator.SessionData sessionData = logIn();
+			
 			if(sessionData == null) {
-				try {
-					// Try to log in to the iPrima website using the internal account to have HD sources available.
-					sessionData = IPrimaAuthenticator.getSessionData();
-				} catch(Exception ex) {
-					// Notify the user that the HD sources may not be available due to inability to log in.
-					MediaDownloader.error(new IllegalStateException("Unable to log in to the iPrima website.", ex));
-				}
+				throw new IllegalStateException("Session data are null");
 			}
 			
-			return sessionData;
+			Utils.merge(mutRequestHeaders, sessionData.requestHeaders());
+			return Web.Headers.ofSingleMap(mutRequestHeaders);
+		}
+		
+		private final IPrimaAuthenticator.SessionData logIn() {
+			try {
+				return IPrimaAuthenticator.getSessionData();
+			} catch(Exception ex) {
+				// Notify the user that the HD sources may not be available due to inability to log in.
+				MediaDownloader.error(new IllegalStateException("Unable to log in to the iPrima website.", ex));
+			}
+			
+			return null;
 		}
 		
 		private final HttpHeaders logInHeaders() {
-			if(sessionHeaders == null) {
-				// It is important to specify the referer, otherwise the response code is 403.
-				Map<String, String> mutRequestHeaders = Utils.toMap("Referer", "https://www.iprima.cz/");
-				
-				IPrimaAuthenticator.SessionData sessionData = logIn();
-				if(sessionData != null) {
-					Utils.merge(mutRequestHeaders, sessionData.requestHeaders());
-					sessionHeaders = Web.Headers.ofSingleMap(mutRequestHeaders);
-				}
+			try {
+				return sessionHeaders.valueChecked();
+			} catch(Exception ex) {
+				// Notify the user that the HD sources may not be available due to inability to log in.
+				MediaDownloader.error(new IllegalStateException("Unable to obtain authentication headers.", ex));
 			}
 			
-			return sessionHeaders;
+			return Web.Headers.empty();
 		}
 		
 		private final String accessToken() {
