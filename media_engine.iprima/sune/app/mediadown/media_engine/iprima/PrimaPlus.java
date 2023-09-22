@@ -791,6 +791,12 @@ final class PrimaPlus implements IPrima {
 					return ty(JSON.read(json));
 				}
 				
+				private static final boolean json_hotfix_isEmpty(JSONCollection collection) {
+					// JSONCollection::length() throws NPE if inner nodes collection is null,
+					// therefore use the currenly safer iterator approach.
+					return !collection.iterator().hasNext();
+				}
+				
 				private static final JSONNode checkNode(JSONNode node) {
 					return node != null ? node : JSONObject.ofNull();
 				}
@@ -888,7 +894,7 @@ final class PrimaPlus implements IPrima {
 					
 					if(dObj == null
 							|| !(isCollection = dObj.isCollection())
-							|| ((JSONCollection) dObj).isEmpty()) {
+							|| json_hotfix_isEmpty((JSONCollection) dObj)) {
 						a[t] = dObj;
 						return a[t];
 					}
