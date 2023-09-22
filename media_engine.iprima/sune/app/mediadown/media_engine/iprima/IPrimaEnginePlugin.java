@@ -34,7 +34,7 @@ import sune.util.ssdf2.SSDValue;
 
 @Plugin(name          = "media_engine.iprima",
 	    title         = "plugin.media_engine.iprima.title",
-	    version       = "00.02.09-0008",
+	    version       = "00.02.09-0009",
 	    author        = "Sune",
 	    updateBaseURL = "https://app.sune.tech/mediadown/dat/plugin/0002/media_engine/iprima/",
 	    updatable     = true,
