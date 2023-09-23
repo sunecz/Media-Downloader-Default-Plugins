@@ -1,9 +1,10 @@
 package sune.app.mediadown.media_engine.iprima;
 
+import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpHeaders;
 import java.util.ArrayList;
-import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -12,15 +13,13 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Objects;
 import java.util.Set;
-import java.util.concurrent.ConcurrentSkipListSet;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.TimeUnit;
-import java.util.function.Function;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.BiFunction;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import java.util.zip.GZIPInputStream;
 
 import sune.app.mediadown.MediaDownloader;
-import sune.app.mediadown.concurrent.Threads;
 import sune.app.mediadown.concurrent.VarLoader;
 import sune.app.mediadown.entity.Episode;
 import sune.app.mediadown.entity.Program;
@@ -38,7 +37,7 @@ import sune.app.mediadown.media.VideoMedia;
 import sune.app.mediadown.media.VideoMediaContainer;
 import sune.app.mediadown.media.type.SeparatedVideoMediaContainer;
 import sune.app.mediadown.media_engine.iprima.IPrimaEngine.IPrima;
-import sune.app.mediadown.media_engine.iprima.IPrimaHelper.ProgramWrapper;
+import sune.app.mediadown.media_engine.iprima.IPrimaHelper.SimpleExecutor;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper.ThreadedSpawnableTaskQueue;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper._Singleton;
 import sune.app.mediadown.net.Net;
@@ -58,32 +57,22 @@ final class PrimaPlus implements IPrima {
 	
 	private static final String SUBDOMAIN = "www";
 	
-	private API api;
-	
 	PrimaPlus() {}
 	public static final PrimaPlus getInstance() { return _Singleton.getInstance(); }
 	
-	private final API api() {
-		if(api == null) {
-			api = new API(this);
-		}
-		
-		return api;
-	}
-	
 	@Override
 	public ListTask<Program> getPrograms(IPrimaEngine engine) throws Exception {
-		return api().getPrograms(engine);
+		return API.getPrograms(this, engine);
 	}
 	
 	@Override
 	public ListTask<Episode> getEpisodes(IPrimaEngine engine, Program program) throws Exception {
-		return api().getEpisodes(engine, program);
+		return API.getEpisodes(this, engine, program);
 	}
 	
 	@Override
 	public ListTask<Media> getMedia(IPrimaEngine engine, URI uri) throws Exception {
-		return api().getMedia(engine, uri);
+		return API.getMedia(this, engine, uri);
 	}
 	
 	@Override
@@ -101,7 +90,8 @@ final class PrimaPlus implements IPrima {
 		
 		private static final HttpHeaders HEADERS = Web.Headers.ofSingle(
 			"Accept", "application/json",
-			"Content-Type", "application/json"
+			"Content-Type", "application/json",
+			"Accept-Encoding", "gzip"
 		);
 		
 		private static final int EXIT_CALLBACK = -1;
@@ -109,16 +99,24 @@ final class PrimaPlus implements IPrima {
 		
 		private static final int MAX_OFFSET = 1000;
 		
-		private final IPrima iprima;
-		private final VarLoader<HttpHeaders> sessionHeaders = VarLoader.ofChecked(this::initSessionHeaders);
+		private static final VarLoader<HttpHeaders> sessionHeaders = VarLoader.ofChecked(API::initSessionHeaders);
 		
-		public API(IPrima iprima) {
-			this.iprima = Objects.requireNonNull(iprima);
+		private API() {
 		}
 		
 		private static final JSONCollection doRawRequest(String body) throws Exception {
 			try(Response.OfStream response = Web.requestStream(Request.of(URL_ENDPOINT).headers(HEADERS).POST(body))) {
-				return JSON.read(response.stream()).getCollection("result");
+				InputStream stream = response.stream();
+				boolean isGzip = response.headers()
+					.firstValue("Content-Encoding")
+					.filter((v) -> v.equalsIgnoreCase("gzip"))
+					.isPresent();
+				
+				if(isGzip) {
+					stream = new GZIPInputStream(stream);
+				}
+				
+				return JSON.read(stream).getCollection("result");
 			}
 		}
 		
@@ -132,7 +130,7 @@ final class PrimaPlus implements IPrima {
 			return doRawRequest(json.toString(true));
 		}
 		
-		private final List<String> listGenres() throws Exception {
+		private static final List<String> listGenres() throws Exception {
 			final String method = "vdm.frontend.genre.list";
 			
 			List<String> genres = new ArrayList<>();
@@ -151,7 +149,7 @@ final class PrimaPlus implements IPrima {
 			return genres;
 		}
 		
-		private final JSONCollection listNextItems(String stripId, String recommId, int offset, int limit)
+		private static final JSONCollection listNextItems(String stripId, String recommId, int offset, int limit)
 				throws Exception {
 			final String method = "strip.strip.nextItems.vdm";
 			final String deviceType = "WEB";
@@ -168,13 +166,12 @@ final class PrimaPlus implements IPrima {
 			return result.getCollection("data");
 		}
 		
-		private final <T, P> int parseItems(ListTask<P> task, JSONCollection items, Collection<T> list,
-				Function<JSONCollection, T> transformer, Function<T, P> unwrapper) throws Exception {
+		private static final <T> int parseItems(ListTask<T> task, IPrima iprima, JSONCollection items,
+				Set<T> existing, BiFunction<IPrima, JSONCollection, T> transformer) throws Exception {
 			for(JSONCollection item : items.collectionsIterable()) {
-				T value = transformer.apply(item);
+				T value = transformer.apply(iprima, item);
 				
-				list.add(value);
-				if(!task.add(unwrapper.apply(value))) {
+				if(existing.add(value) && !task.add(value)) {
 					return EXIT_CALLBACK; // Do not continue
 				}
 			}
@@ -182,7 +179,7 @@ final class PrimaPlus implements IPrima {
 			return EXIT_SUCCESS;
 		}
 		
-		private final Program stripItemToProgram(JSONCollection item) {
+		private static final Program stripItemToProgram(IPrima iprima, JSONCollection item) {
 			String id = item.getString("id");
 			String title = item.getString("title");
 			String type = item.getString("type");
@@ -202,11 +199,7 @@ final class PrimaPlus implements IPrima {
 			return new Program(Net.uri(uri), title, "source", iprima, "id", id, "type", type);
 		}
 		
-		private final ProgramWrapper stripItemToProgramWrapper(JSONCollection item) {
-			return new ProgramWrapper(stripItemToProgram(item));
-		}
-		
-		private final List<Season> listSeasons(String programId) throws Exception {
+		private static final List<Season> listSeasons(String programId) throws Exception {
 			final String method = "vdm.frontend.season.list.hbbtv";
 			
 			List<Season> seasons = new ArrayList<>();
@@ -230,7 +223,7 @@ final class PrimaPlus implements IPrima {
 			return seasons;
 		}
 		
-		private final List<Episode> listEpisodes(Program program, String seasonId) throws Exception {
+		private static final List<Episode> listEpisodes(Program program, String seasonId) throws Exception {
 			final String method = "vdm.frontend.episodes.list.hbbtv";
 			
 			List<Episode> episodes = new ArrayList<>();
@@ -279,7 +272,7 @@ final class PrimaPlus implements IPrima {
 			return episodes;
 		}
 		
-		private final HttpHeaders initSessionHeaders() throws Exception {
+		private static final HttpHeaders initSessionHeaders() throws Exception {
 			// It is important to specify the referer, otherwise the response code is 403.
 			Map<String, String> mutRequestHeaders = Utils.toMap("Referer", "https://www.iprima.cz/");
 			IPrimaAuthenticator.SessionData sessionData = logIn();
@@ -292,7 +285,7 @@ final class PrimaPlus implements IPrima {
 			return Web.Headers.ofSingleMap(mutRequestHeaders);
 		}
 		
-		private final IPrimaAuthenticator.SessionData logIn() {
+		private static final IPrimaAuthenticator.SessionData logIn() {
 			try {
 				return IPrimaAuthenticator.getSessionData();
 			} catch(Exception ex) {
@@ -303,7 +296,7 @@ final class PrimaPlus implements IPrima {
 			return null;
 		}
 		
-		private final HttpHeaders logInHeaders() {
+		private static final HttpHeaders logInHeaders() {
 			try {
 				return sessionHeaders.valueChecked();
 			} catch(Exception ex) {
@@ -314,7 +307,7 @@ final class PrimaPlus implements IPrima {
 			return Web.Headers.empty();
 		}
 		
-		private final String accessToken() {
+		private static final String accessToken() {
 			IPrimaAuthenticator.SessionData sessionData = logIn();
 			return sessionData != null ? sessionData.accessToken() : null;
 		}
@@ -323,114 +316,77 @@ final class PrimaPlus implements IPrima {
 			Translation tr = IPrimaHelper.translation().getTranslation("error");
 			String message = tr.getSingle("value." + errorInfo.getString("errorCode"));
 			tr = tr.getTranslation("media_error");
-			Dialog.showContentInfo(tr.getSingle("title"), tr.getSingle("text"), message);
+			Dialog.showContentError(tr.getSingle("title"), tr.getSingle("text"), message);
 		}
 		
-		public final ListTask<Program> getPrograms(IPrimaEngine engine) throws Exception {
+		public static final ListTask<Program> getPrograms(IPrima iprima, IPrimaEngine engine) throws Exception {
 			return ListTask.of((task) -> {
-				final String method = "strip.strip.bulkItems.vdm";
-				final String deviceType = "WEB";
+				// Note: Obtaining the list of programs is not stable using this method.
+				//       Since there is no currently known other method how to obtain
+				//       a stable list of programs, at least for me, we are stuck with
+				//       this method.
+				Set<Program> existing = Collections.newSetFromMap(new ConcurrentHashMap<>());
 				
-				Set<ProgramWrapper> programs = new ConcurrentSkipListSet<>();
-				
-				final List<String> stripsMovies = List.of(
-					"8138baa8-c933-4015-b7ea-17ac7a679da4", // Movies (Recommended)
-					"8ab51da8-1890-4e78-8770-cbee59a3976a", // Movies (For you)
-					"7d92a9fa-a958-4d62-9ae9-2e2726c5a348", // Movies (Most watched)
-					"7fe91a63-682b-4c19-a472-5431d528e8ff"  // Movies (From TV)
+				final List<String> strips = List.of(
+					"8ab51da8-1890-4e78-8770-cbee59a3976a", // Seriály
+					"1d0e2451-bcfa-4ecc-a9d7-5d062ad9bf1c", // Seriály (Nejnovější)
+					"82bee2e2-32ef-4323-ab1e-5f973bf5f0a6", // Pořady z TV
+					"8138baa8-c933-4015-b7ea-17ac7a679da4", // Filmy (Doporučené)
+					"3a2c25d8-4384-4945-ba37-ead972fb216d", // Filmy (Nejnovější)
+					"7d92a9fa-a958-4d62-9ae9-2e2726c5a348"  // Filmy (Nejsledovanější)
 				);
 				
-				final List<String> stripsTVShows = List.of(
-	  				"bbe97653-dcff-4599-bf6d-5459e8d6eef4", // TV shows
-					"82bee2e2-32ef-4323-ab1e-5f973bf5f0a6"  // TV shows (For you)
-	  			);
-				
 				List<StripGroup> stripGroups = new ArrayList<>();
+				stripGroups.add(new StripGroup(strips, List.of()));
 				
-				// Must separate movies to genres since there is an offset limit that
-				// is otherwise reached.
+				// Must also obtain the strips filtered by a genre, since some programs
+				// are not always visible in the non-filtered list.
 				for(String genre : listGenres()) {
-					stripGroups.add(new StripGroup(stripsMovies, List.of(new Filter("genre", genre))));
+					stripGroups.add(new StripGroup(strips, List.of(new Filter("genre", genre))));
 				}
 				
-				stripGroups.add(new StripGroup(stripsTVShows, List.of()));
+				final String method = "strip.strip.bulkItems.vdm";
+				final String deviceType = "WEB";
+				final int perPage = 100;
+				final int numMaxThreads = Math.max(1, Runtime.getRuntime().availableProcessors() / 2);
+				final int numMaxFixed = Math.min(stripGroups.size(), numMaxThreads);
 				
-				final int numMaxProcessors = Math.max(1, Runtime.getRuntime().availableProcessors() / 2);
-				final int perPage = 64;
-				
-				ThreadedSpawnableTaskQueue<NextItemsTaskArgs, Integer> queue
-						= (new ThreadedSpawnableTaskQueue<>(numMaxProcessors) {
-					
-					@Override
-					protected Integer runTask(NextItemsTaskArgs args) throws Exception {
-						JSONCollection strip = listNextItems(args.stripId(), args.recommId(), args.offset(), perPage);
-						JSONCollection items = strip.getCollection("items");
-						
-						int result;
-						if((result = parseItems(task, items, programs, API.this::stripItemToProgramWrapper,
-								ProgramWrapper::program)) != EXIT_SUCCESS) {
-							return result;
-						}
-						
-						boolean hasNextItems = strip.getBoolean("isNextItems");
-						
-						if(!shouldShutdown(result) && hasNextItems) {
-							int nextOffset = args.offset() + perPage;
+				try(
+					ThreadedSpawnableTaskQueue<NextItemsTaskArgs, Integer> queue = new ProgramTasks(
+						numMaxThreads, task, iprima, existing, perPage
+					);
+					SimpleExecutor<Void> executor = SimpleExecutor.ofFixed(numMaxFixed);
+				) {
+					for(StripGroup stripGroup : stripGroups) {
+						executor.addTask(() -> {
+							JSONCollection result = doRequest(
+								method,
+								"deviceType", deviceType,
+								"stripIds", stripGroup.stripIds(),
+								"limit", perPage,
+								"filter", stripGroup.filter()
+							);
 							
-							if(nextOffset < MAX_OFFSET) {
-								addTask(new NextItemsTaskArgs(args.stripId(), args.recommId(), nextOffset));
+							for(JSONCollection strip : result.getCollection("data").collectionsIterable()) {
+								String stripId = strip.name();
+								String recommId = strip.getString("recommId");
+								boolean hasNextItems = strip.getBoolean("isNextItems");
+								JSONCollection items = strip.getCollection("items");
+								
+								parseItems(task, iprima, items, existing, API::stripItemToProgram);
+								
+								if(hasNextItems) {
+									queue.addTask(new NextItemsTaskArgs(stripId, recommId, perPage));
+								}
 							}
-						}
-						
-						return result;
-					}
-					
-					@Override
-					protected boolean shouldShutdown(Integer val) {
-						return val != EXIT_SUCCESS;
-					}
-				});
-				
-				ExecutorService executor = Threads.Pools.newFixed(Math.min(stripGroups.size(), numMaxProcessors));
-				
-				for(StripGroup stripGroup : stripGroups) {
-					executor.submit(Utils.callable(() -> {
-						JSONCollection result = doRequest(
-							method,
-							"deviceType", deviceType,
-							"stripIds", stripGroup.stripIds(),
-							"limit", perPage,
-							"filter", stripGroup.filter()
-						);
-						
-						for(JSONCollection strip : result.getCollection("data").collectionsIterable()) {
-							String stripId = strip.name();
-							String recommId = strip.getString("recommId");
-							boolean hasNextItems = strip.getBoolean("isNextItems");
-							JSONCollection items = strip.getCollection("items");
-							
-							parseItems(task, items, programs, this::stripItemToProgramWrapper, ProgramWrapper::program);
-							
-							if(hasNextItems) {
-								queue.addTask(new NextItemsTaskArgs(stripId, recommId, perPage));
-							}
-						}
-					}));
-				}
-				
-				executor.shutdown();
-				executor.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS);
-				queue.await();
-				
-				for(ProgramWrapper wrapper : programs) {
-					if(!task.add(wrapper.program())) {
-						return;
+						});
 					}
 				}
 			});
 		}
 		
-		public final ListTask<Episode> getEpisodes(IPrimaEngine engine, Program program) throws Exception {
+		public static final ListTask<Episode> getEpisodes(IPrima iprima, IPrimaEngine engine, Program program)
+				throws Exception {
 			return ListTask.of((task) -> {
 				// Handle movies separately since they do not have any episodes
 				String type;
@@ -464,7 +420,7 @@ final class PrimaPlus implements IPrima {
 			});
 		}
 		
-		public final ListTask<Media> getMedia(IPrimaEngine engine, URI uri) throws Exception {
+		public static final ListTask<Media> getMedia(IPrima iprima, IPrimaEngine engine, URI uri) throws Exception {
 			return ListTask.of((task) -> {
 				// Always log in first to ensure the data are correct
 				HttpHeaders requestHeaders = logInHeaders();
@@ -674,6 +630,51 @@ final class PrimaPlus implements IPrima {
 			
 			public List<Filter> filter() {
 				return filter;
+			}
+		}
+		
+		private static final class ProgramTasks extends ThreadedSpawnableTaskQueue<NextItemsTaskArgs, Integer> {
+			
+			private final ListTask<Program> task;
+			private final IPrima iprima;
+			private final Set<Program> existing;
+			private final int perPage;
+			
+			public ProgramTasks(int maxThreads, ListTask<Program> task, IPrima iprima, Set<Program> existing,
+					int perPage) {
+				super(maxThreads);
+				this.task = task;
+				this.iprima = iprima;
+				this.existing = existing;
+				this.perPage = perPage;
+			}
+			
+			@Override
+			protected Integer runTask(NextItemsTaskArgs args) throws Exception {
+				JSONCollection strip = listNextItems(args.stripId(), args.recommId(), args.offset(), perPage);
+				JSONCollection items = strip.getCollection("items");
+				
+				int result;
+				if((result = parseItems(task, iprima, items, existing, API::stripItemToProgram)) != EXIT_SUCCESS) {
+					return result;
+				}
+				
+				boolean hasNextItems = strip.getBoolean("isNextItems");
+				
+				if(!shouldShutdown(result) && hasNextItems) {
+					int nextOffset = args.offset() + perPage;
+					
+					if(nextOffset < MAX_OFFSET) {
+						addTask(new NextItemsTaskArgs(args.stripId(), args.recommId(), nextOffset));
+					}
+				}
+				
+				return result;
+			}
+			
+			@Override
+			protected boolean shouldShutdown(Integer val) {
+				return val != EXIT_SUCCESS;
 			}
 		}
 		

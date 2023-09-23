@@ -51,6 +51,7 @@ import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginConfiguration;
 import sune.app.mediadown.task.ListTask;
 import sune.app.mediadown.util.CheckedFunction;
+import sune.app.mediadown.util.CheckedRunnable;
 import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.JSON.JSONCollection;
 import sune.app.mediadown.util.JSON.JSONType;
@@ -82,7 +83,7 @@ final class IPrimaHelper {
 			Map<String, Object> urlArgs, CheckedFunction<Map<String, Object>, String> urlBuilder,
 	        CheckedPentaFunction<IPrima, S, String, Map<String, Object>, CheckedFunction<T, Boolean>, Integer> callback,
 	        TriFunction<T, Integer, Integer, Wrapper<T>> wrapperCtor, Set<Wrapper<T>> accumulator) throws Exception {
-		(new ThreadedSpawnableTaskQueue<Integer, Integer>(2) {
+		try(ThreadedSpawnableTaskQueue<Integer, Integer> queue = new ThreadedSpawnableTaskQueue<Integer, Integer>(2) {
 			
 			private final AtomicInteger lastOffset = new AtomicInteger();
 			
@@ -120,7 +121,9 @@ final class IPrimaHelper {
 			protected boolean shouldShutdown(Integer val) {
 				return val == CALLBACK_EXIT;
 			}
-		}).addTask(0).await();
+		}) {
+			queue.addTask(0);
+		}
 	}
 	
 	public static final int compareNatural(String a, String b) {
@@ -890,55 +893,6 @@ final class IPrimaHelper {
 		}
 	}
 	
-	static final class ProgramWrapper implements Comparable<ProgramWrapper> {
-		
-		private static final Comparator<ProgramWrapper> comparator;
-		
-		static {
-			comparator = Comparator
-				.<ProgramWrapper>nullsLast((a, b) -> compareNatural(a.program.title(), b.program.title()))
-				.thenComparing((e) -> e.program.uri());
-		}
-		
-		private final Program program;
-		
-		public ProgramWrapper(Program program) {
-			this.program = Objects.requireNonNull(program);
-		}
-		
-		@Override
-		public int hashCode() {
-			return Objects.hash(program);
-		}
-		
-		@Override
-		public boolean equals(Object obj) {
-			if(this == obj)
-				return true;
-			if(obj == null)
-				return false;
-			if(getClass() != obj.getClass())
-				return false;
-			ProgramWrapper other = (ProgramWrapper) obj;
-			// Do not compare program data
-			return Objects.equals(program.uri(), other.program.uri())
-						&& program.title().equalsIgnoreCase(other.program.title());
-		}
-		
-		@Override
-		public int compareTo(ProgramWrapper w) {
-			if(Objects.requireNonNull(w) == this) {
-				return 0;
-			}
-			
-			return comparator.compare(this, w);
-		}
-		
-		public Program program() {
-			return program;
-		}
-	}
-	
 	static final class EpisodeWrapper extends Wrapper<Episode> {
 		
 		private static final Comparator<Wrapper<Episode>> comparator;
@@ -993,7 +947,92 @@ final class IPrimaHelper {
 		}
 	}
 	
-	static abstract class ThreadedSpawnableTaskQueue<P, R> {
+	static final class SimpleExecutor<R> implements AutoCloseable {
+		
+		private final ExecutorService executor;
+		private final AtomicReference<Exception> exception = new AtomicReference<>();
+		private final CounterLock counter = new CounterLock();
+		private final AtomicBoolean isShutdown = new AtomicBoolean();
+		
+		public SimpleExecutor(ExecutorService executor) {
+			this.executor = Objects.requireNonNull(executor);
+		}
+		
+		public static final <R> SimpleExecutor<R> ofFixed(int numThreads) {
+			return new SimpleExecutor<>(Threads.Pools.newFixed(numThreads));
+		}
+		
+		public final SimpleExecutor<R> addTask(CheckedRunnable runnable) {
+			return addTask(Utils.callable(runnable));
+		}
+		
+		public final SimpleExecutor<R> addTask(Callable<R> callable) {
+			if(isShutdown.get()) {
+				return this;
+			}
+			
+			counter.increment();
+			executor.submit(new Task(callable));
+			return this;
+		}
+		
+		public final void await() throws Exception {
+			counter.await();
+			
+			executor.shutdownNow();
+			executor.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS);
+			
+			Exception ex;
+			if((ex = exception.get()) != null) {
+				throw ex;
+			}
+		}
+		
+		@Override
+		public void close() throws Exception {
+			await();
+		}
+		
+		private final class Task implements Callable<R> {
+			
+			private final Callable<R> callable;
+			
+			public Task(Callable<R> callable) {
+				this.callable = Objects.requireNonNull(callable);
+			}
+			
+			@Override
+			public R call() throws Exception {
+				boolean shouldShutdown = false;
+				
+				try {
+					return callable.call();
+				} catch(UncheckedIOException ex) {
+					IOException cause = ex.getCause();
+					
+					if(cause instanceof ClosedByInterruptException) {
+						// Interrupted, ignore
+						return null;
+					}
+					
+					shouldShutdown = exception.compareAndSet(null, ex);
+					throw ex; // Propagate
+				} catch(Exception ex) {
+					shouldShutdown = exception.compareAndSet(null, ex);
+					throw ex; // Propagate
+				} finally {
+					counter.decrement();
+					
+					if(shouldShutdown) {
+						isShutdown.set(true);
+						counter.free();
+					}
+				}
+			}
+		}
+	}
+	
+	static abstract class ThreadedSpawnableTaskQueue<P, R> implements AutoCloseable {
 		
 		private final ExecutorService executor;
 		private final AtomicReference<Exception> exception = new AtomicReference<>();
@@ -1027,6 +1066,11 @@ final class IPrimaHelper {
 			if((ex = exception.get()) != null) {
 				throw ex;
 			}
+		}
+		
+		@Override
+		public void close() throws Exception {
+			await();
 		}
 		
 		private final class Task implements Callable<R> {
@@ -1063,6 +1107,7 @@ final class IPrimaHelper {
 					
 					if(shouldShutdown) {
 						isShutdown.set(true);
+						counter.free();
 					}
 				}
 			}

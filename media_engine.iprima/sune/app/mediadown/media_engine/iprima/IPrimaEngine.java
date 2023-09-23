@@ -1,9 +1,10 @@
 package sune.app.mediadown.media_engine.iprima;
 
 import java.net.URI;
+import java.util.Collections;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ConcurrentSkipListSet;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
 
 import javafx.scene.image.Image;
@@ -17,13 +18,14 @@ import sune.app.mediadown.media_engine.iprima.IPrimaHelper.DefaultMediaObtainer;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper.DefaultMediaObtainerNewURL;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper.PlayIDsMediaObtainer;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper.PrimaAPIProgramObtainer;
-import sune.app.mediadown.media_engine.iprima.IPrimaHelper.ProgramWrapper;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper.SnippetEpisodeObtainer;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper.StaticProgramObtainer;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper._Singleton;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.task.ListTask;
+import sune.app.mediadown.task.ListTask.ListTaskEvent;
+import sune.app.mediadown.util.Utils.Ignore;
 
 public final class IPrimaEngine implements MediaEngine {
 	
@@ -83,23 +85,23 @@ public final class IPrimaEngine implements MediaEngine {
 	@Override
 	public ListTask<Program> getPrograms() throws Exception {
 		return ListTask.of((task) -> {
-			Set<ProgramWrapper> accumulator = new ConcurrentSkipListSet<>();
+			Set<Program> existing = Collections.newSetFromMap(new ConcurrentHashMap<>());
 			
 			(new ConcurrentLoop<IPrima>() {
 				
 				@Override
 				protected void iteration(IPrima web) throws Exception {
 					ListTask<Program> t = web.getPrograms(IPrimaEngine.this);
-					t.forwardAdd(accumulator, ProgramWrapper::new);
+					t.addEventListener(ListTaskEvent.ADD, (pair) -> {
+						Program p = (Program) pair.b;
+						
+						if(existing.add(p)) {
+							Ignore.callVoid(() -> task.add(p));
+						}
+					});
 					t.startAndWait();
 				}
 			}).iterate(SUPPORTED_WEBS);
-			
-			for(ProgramWrapper wrapper : accumulator) {
-				if(!task.add(wrapper.program())) {
-					return;
-				}
-			}
 		});
 	}
 	
