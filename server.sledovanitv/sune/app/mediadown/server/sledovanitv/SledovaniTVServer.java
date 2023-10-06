@@ -116,7 +116,8 @@ public class SledovaniTVServer implements Server {
 		String host = uri.getHost();
 		if(host.startsWith("www.")) // www prefix
 			host = host.substring(4);
-		if(!host.equals("sledovanitv.cz"))
+		if(!host.equals("sledovanitv.cz")
+				&& !host.equals("sledovanietv.sk"))
 			return false;
 		// Otherwise, it is probably compatible URL
 		return true;
