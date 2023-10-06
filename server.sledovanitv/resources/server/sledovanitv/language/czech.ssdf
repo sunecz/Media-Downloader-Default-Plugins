@@ -2,10 +2,10 @@
 	plugin: {
 		server: {
 			sledovanitv: {
-				title: "SledovaniTV.cz",
+				title: "SledovaniTV",
 				configuration: {
 					group: {
-						general: "SledovaniTV.cz"
+						general: "SledovaniTV"
 					},
 					fields: {
 						authData_email:    "Email",
