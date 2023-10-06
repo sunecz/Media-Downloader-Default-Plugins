@@ -14,11 +14,13 @@ import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 
 import javafx.scene.image.Image;
+import sune.app.mediadown.MediaDownloader;
 import sune.app.mediadown.entity.Episode;
 import sune.app.mediadown.entity.MediaEngine;
 import sune.app.mediadown.entity.Program;
+import sune.app.mediadown.gui.Dialog;
+import sune.app.mediadown.language.Translation;
 import sune.app.mediadown.media.Media;
-import sune.app.mediadown.media.MediaFormat;
 import sune.app.mediadown.media.MediaLanguage;
 import sune.app.mediadown.media.MediaMetadata;
 import sune.app.mediadown.media.MediaSource;
@@ -74,6 +76,11 @@ public final class MarkizaPlusEngine implements MediaEngine {
 	
 	// Allow to create an instance when registering the engine
 	MarkizaPlusEngine() {
+	}
+	
+	private static final Translation translation() {
+		String path = "plugin." + PLUGIN.getContext().getPlugin().instance().name();
+		return MediaDownloader.translation().getTranslation(path);
 	}
 	
 	private final int parseEpisodeList(ListTask<Episode> task, Program program, Elements elItems,
@@ -300,44 +307,50 @@ public final class MarkizaPlusEngine implements MediaEngine {
 			Element iframe = document.selectFirst(SEL_PLAYER_IFRAME);
 			
 			if(iframe == null) {
-				return;
+				return; // Do not continue
 			}
 			
 			String iframeUrl = iframe.absUrl("data-src");
 			String content = Web.request(Request.of(Net.uri(iframeUrl)).GET()).body();
 			
-			if(content != null && !content.isEmpty()) {
-				int begin = content.indexOf(TXT_PLAYER_CONFIG_BEGIN) + TXT_PLAYER_CONFIG_BEGIN.length() - 1;
-				String conScript = Utils.bracketSubstring(content, '(', ')', false, begin, content.length());
-				conScript = Utils.bracketSubstring(conScript, '{', '}', false, conScript.indexOf('{', 1), conScript.length());
+			if(content == null || content.isEmpty()) {
+				return; // Do not continue
+			}
+			
+			int begin = content.indexOf(TXT_PLAYER_CONFIG_BEGIN);
+			
+			// Video is not available, probably due to licensing issues
+			if(begin < 0) {
+				Translation tr = translation().getTranslation("error.media_unavailable");
+				String message = HTML.parse(content).selectFirst(".b-player .e-title").text();
+				Dialog.showContentInfo(tr.getSingle("title"), tr.getSingle("text"), message);
+				return; // Do not continue
+			}
+			
+			begin += TXT_PLAYER_CONFIG_BEGIN.length() - 1;
+			String conScript = Utils.bracketSubstring(content, '{', '}', false, begin, content.length());
+			
+			if(!conScript.isEmpty()) {
+				JSONCollection scriptData = JavaScript.readObject(conScript);
 				
-				if(!conScript.isEmpty()) {
-					JSONCollection scriptData = JavaScript.readObject(conScript);
+				if(scriptData != null) {
+					JSONCollection tracks = scriptData.getCollection("tracks");
+					URI sourceUri = uri;
+					MediaSource source = MediaSource.of(this);
+					String title = mediaTitle(scriptData.getCollection("plugins.measuring.streamInfo"), document);
 					
-					if(scriptData != null) {
-						JSONCollection tracks = scriptData.getCollection("tracks");
-						URI sourceUri = uri;
-						MediaSource source = MediaSource.of(this);
-						
-						for(JSONCollection node : tracks.collectionsIterable()) {
-							MediaFormat format = MediaFormat.fromName(node.name());
+					for(JSONCollection node : tracks.collectionsIterable()) {
+						for(JSONCollection coll : ((JSONCollection) node).collectionsIterable()) {
+							String videoUrl = coll.getString("src");
+							MediaLanguage language = MediaLanguage.ofCode(coll.getString("lang"));
 							
-							for(JSONCollection coll : ((JSONCollection) node).collectionsIterable()) {
-								String videoUrl = coll.getString("src");
-								
-								if(format == MediaFormat.UNKNOWN) {
-									format = MediaFormat.fromPath(videoUrl);
-								}
-								
-								MediaLanguage language = MediaLanguage.ofCode(coll.getString("lang"));
-								String title = mediaTitle(scriptData.getCollection("plugins.measuring.streamInfo"), document);
-								List<Media> media = MediaUtils.createMedia(source, Net.uri(videoUrl), sourceUri,
-									title, language, MediaMetadata.empty());
-								
-								for(Media m : media) {
-									if(!task.add(m)) {
-										return; // Do not continue
-									}
+							List<Media> media = MediaUtils.createMedia(
+								source, Net.uri(videoUrl), sourceUri, title, language, MediaMetadata.empty()
+							);
+							
+							for(Media m : media) {
+								if(!task.add(m)) {
+									return; // Do not continue
 								}
 							}
 						}
