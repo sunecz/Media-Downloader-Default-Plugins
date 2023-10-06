@@ -400,7 +400,7 @@ public final class NovaVoyoEngine implements MediaEngine {
 				// Since some programs have seasons in the ascending order and
 				// some have them in the descending order, we must extract the number
 				// of a season from the text itself.
-				int number = Utils.extractInt(elItem.textNodes().get(0).text());
+				int number = Utils.extractInt(elItem.textNodes().get(0).text(), 0);
 				seasons.add(new Season(id, number));
 			}
 			
