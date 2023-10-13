@@ -1,5 +1,6 @@
 package sune.app.mediadown.media_engine.iprima;
 
+import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient.Redirect;
 import java.net.http.HttpHeaders;
@@ -7,17 +8,17 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
-import java.util.function.Predicate;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 
+import sune.app.mediadown.authentication.CredentialsManager;
 import sune.app.mediadown.concurrent.VarLoader;
 import sune.app.mediadown.configuration.Configuration;
-import sune.app.mediadown.configuration.Configuration.ConfigurationProperty;
 import sune.app.mediadown.media_engine.iprima.IPrimaAuthenticator.ProfileManager.Profile;
+import sune.app.mediadown.media_engine.iprima.IPrimaEnginePlugin.IPrimaCredentials;
 import sune.app.mediadown.net.HTML;
 import sune.app.mediadown.net.Net;
 import sune.app.mediadown.net.Web;
@@ -25,9 +26,11 @@ import sune.app.mediadown.net.Web.Request;
 import sune.app.mediadown.net.Web.Response;
 import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.JSON.JSONCollection;
+import sune.app.mediadown.util.Opt;
 import sune.app.mediadown.util.Property;
 import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
+import sune.app.mediadown.util.Utils.Ignore;
 import sune.util.ssdf2.SSDCollection;
 
 public final class IPrimaAuthenticator {
@@ -421,23 +424,29 @@ public final class IPrimaAuthenticator {
 		private AuthenticationData() {
 		}
 		
-		private static final ConfigurationProperty<String> stringProperty(String name) {
-			return configuration().property(name);
+		private static final String credentialsName() {
+			return IPrimaHelper.credentialsName();
 		}
 		
-		private static final String valueOrElse(String propertyName, Supplier<String> orElse) {
-			return Optional.ofNullable(stringProperty(propertyName))
-						.map(ConfigurationProperty::value)
-						.filter(Predicate.not(String::isBlank))
-						.orElseGet(orElse);
+		private static final IPrimaCredentials credentials() throws IOException {
+			return (IPrimaCredentials) CredentialsManager.instance().get(credentialsName());
+		}
+		
+		private static final String valueOrElse(Function<IPrimaCredentials, String> getter, Supplier<String> orElse) {
+			return Ignore.supplier(
+				() -> Opt.of(getter.apply(credentials()))
+							.ifFalse(String::isBlank)
+							.orElseGet(orElse),
+				orElse
+			);
 		}
 		
 		public static final String email() {
-			return valueOrElse("authData_email", Obf::a);
+			return valueOrElse(IPrimaCredentials::email, Obf::a);
 		}
 		
 		public static final String password() {
-			return valueOrElse("authData_password", Obf::b);
+			return valueOrElse(IPrimaCredentials::password, Obf::b);
 		}
 	}
 	

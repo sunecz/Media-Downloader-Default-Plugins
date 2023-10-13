@@ -144,6 +144,10 @@ final class IPrimaHelper {
 		return MediaDownloader.translation().getTranslation(path);
 	}
 	
+	public static final String credentialsName() {
+		return "plugin/" + PLUGIN.getContext().getPlugin().instance().name().replace('.', '/');
+	}
+	
 	private static abstract class DefaultMediaObtainerBase {
 		
 		protected DefaultMediaObtainerBase() {

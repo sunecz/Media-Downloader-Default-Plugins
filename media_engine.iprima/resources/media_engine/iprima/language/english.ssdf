@@ -3,23 +3,17 @@
 		media_engine: {
 			iprima: {
 				title: "iPrima",
-				configuration: {
-					group: {
-						general: "iPrima"
+				credentials: {
+					label: {
+						email:    "Email",
+						password: "Password",
+						profile:  "Profile"
 					},
-					fields: {
-						useDefaultAuthData: "Use default authentication data",
-						authData_email:     "Email",
-						authData_password:  "Password",
-						profile:            "Profile"
-					},
-					values: {
-						profile: {
-							profile_auto: "Automatically",
-							progress: {
-								log_in:   "Logging in...",
-								profiles: "Obtaining existing profiles..."
-							}
+					profile: {
+						profile_auto: "Automatically",
+						progress: {
+							log_in:   "Logging in...",
+							profiles: "Obtaining existing profiles..."
 						}
 					}
 				},

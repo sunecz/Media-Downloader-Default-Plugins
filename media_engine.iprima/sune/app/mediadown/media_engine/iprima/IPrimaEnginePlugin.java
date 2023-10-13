@@ -1,23 +1,28 @@
 package sune.app.mediadown.media_engine.iprima;
 
-import static sune.app.mediadown.gui.window.ConfigurationWindow.registerFormField;
-
+import java.io.IOException;
 import java.util.List;
+import java.util.Objects;
 
-import javafx.scene.Node;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
+import javafx.scene.control.PasswordField;
+import javafx.scene.control.TextField;
+import javafx.scene.layout.GridPane;
+import javafx.scene.layout.Pane;
+import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 import sune.app.mediadown.MediaDownloader;
+import sune.app.mediadown.authentication.CredentialsMigrator;
+import sune.app.mediadown.authentication.CredentialsUtils;
+import sune.app.mediadown.authentication.EmailCredentials;
 import sune.app.mediadown.concurrent.Threads;
 import sune.app.mediadown.configuration.Configuration.ConfigurationProperty;
 import sune.app.mediadown.entity.MediaEngines;
-import sune.app.mediadown.gui.form.Form;
-import sune.app.mediadown.gui.form.FormField;
-import sune.app.mediadown.gui.window.ConfigurationWindow.ConfigurationFormFieldProperty;
-import sune.app.mediadown.gui.window.ConfigurationWindow.FormFieldSupplier;
-import sune.app.mediadown.gui.window.ConfigurationWindow.FormFieldSupplierFactory;
+import sune.app.mediadown.gui.GUI.CredentialsRegistry;
+import sune.app.mediadown.gui.GUI.CredentialsRegistry.CredentialsEntry;
+import sune.app.mediadown.gui.GUI.CredentialsRegistry.CredentialsType;
 import sune.app.mediadown.language.Translation;
 import sune.app.mediadown.media_engine.iprima.IPrimaAuthenticator.ProfileManager;
 import sune.app.mediadown.media_engine.iprima.IPrimaAuthenticator.ProfileManager.Profile;
@@ -25,12 +30,9 @@ import sune.app.mediadown.plugin.Plugin;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginConfiguration;
 import sune.app.mediadown.plugin.PluginLoaderContext;
-import sune.app.mediadown.plugin.Plugins;
 import sune.app.mediadown.util.FXUtils;
+import sune.app.mediadown.util.NIO;
 import sune.app.mediadown.util.Password;
-import sune.app.mediadown.util.Utils;
-import sune.util.ssdf2.SSDType;
-import sune.util.ssdf2.SSDValue;
 
 @Plugin(name          = "media_engine.iprima",
 	    title         = "plugin.media_engine.iprima.title",
@@ -44,42 +46,53 @@ public final class IPrimaEnginePlugin extends PluginBase {
 	
 	private static final String NAME = "iprima";
 	
-	private static boolean customFieldsRegistered = false;
-	
 	private String translatedTitle;
 	private PluginConfiguration.Builder configuration;
+	private boolean credentialsMigrated;
 	
-	private static final String fullPropertyName(String propertyName) {
-		return "media_engine.iprima." + propertyName;
-	}
-	
-	private static final Translation translationOf(String translationPath) {
-		return Plugins.getLoaded("media_engine.iprima").getInstance().translation().getTranslation(translationPath);
-	}
-	
-	private final void initConfiguration() {
+	private final void initConfiguration() throws IOException {
 		PluginConfiguration.Builder builder
 			= new PluginConfiguration.Builder(getContext().getPlugin().instance().name());
 		String group = builder.name() + ".general";
 		
-		builder.addProperty(ConfigurationProperty.ofString("authData_email")
-			.inGroup(group));
-		builder.addProperty(ConfigurationProperty.ofType("authData_password", Password.class)
-			.inGroup(group)
-			.withTransformer(Password::value, Password::new));
-		builder.addProperty(ConfigurationProperty.ofString("profile")
-			.inGroup(group)
-			.withDefaultValue("auto"));
-		
-		if(!customFieldsRegistered) {
-			registerFormField(ProfileSelectFormFieldSupplierFactory.of(
-				fullPropertyName("profile")
-			));
-			
-			customFieldsRegistered = true;
+		if(!CredentialsMigrator.isMigrated(credentialsName())) {
+			builder.addProperty(ConfigurationProperty.ofString("authData_email")
+				.inGroup(group));
+			builder.addProperty(ConfigurationProperty.ofType("authData_password", Password.class)
+				.inGroup(group)
+				.withTransformer(Password::value, Password::new));
+			builder.addProperty(ConfigurationProperty.ofString("profile")
+				.inGroup(group)
+				.withDefaultValue("auto"));
 		}
 		
 		configuration = builder;
+	}
+	
+	private final String credentialsName() {
+		return "plugin/" + getContext().getPlugin().instance().name().replace('.', '/');
+	}
+	
+	private final void initCredentials() throws IOException {
+		String name = credentialsName();
+		
+		Translation translation = translation().getTranslation("credentials");
+		CredentialsRegistry.registerType(new IPrimaCredentialsType(translation));
+		
+		CredentialsRegistry.registerEntry(
+			CredentialsEntry.of(name, translatedTitle, this::getIcon)
+		);
+		
+		if(CredentialsMigrator.isMigrated(name)) {
+			return; // Nothing to do
+		}
+		
+		CredentialsMigrator
+			.ofConfiguration(configuration, "authData_email", "authData_password", "profile")
+			.asCredentials(IPrimaCredentials.class, String.class, String.class, String.class)
+			.migrate(name);
+		
+		credentialsMigrated = true;
 	}
 	
 	@Override
@@ -88,6 +101,20 @@ public final class IPrimaEnginePlugin extends PluginBase {
 		MediaEngines.add(NAME, IPrimaEngine.class);
 		initConfiguration();
 		IPrimaHelper.setPlugin(PluginLoaderContext.getContext().getInstance());
+	}
+	
+	@Override
+	public void beforeBuildConfiguration() throws Exception {
+		initCredentials();
+	}
+	
+	@Override
+	public void afterBuildConfiguration() throws Exception {
+		if(credentialsMigrated) {
+			// Save the configuration so that the migrated fields are removed
+			PluginConfiguration configuration = getContext().getConfiguration();
+			NIO.save(configuration.path(), configuration.data().toString());
+		}
 	}
 	
 	@Override
@@ -105,68 +132,126 @@ public final class IPrimaEnginePlugin extends PluginBase {
 		return translatedTitle;
 	}
 	
-	private static final class ProfileSelectFormFieldSupplierFactory implements FormFieldSupplierFactory {
+	protected static final class IPrimaCredentials extends EmailCredentials {
 		
-		private static Translation translation;
-		
-		private final String propertyName;
-		
-		private ProfileSelectFormFieldSupplierFactory(String propertyName) {
-			this.propertyName = propertyName;
+		public IPrimaCredentials() {
+			super();
+			defineFields(
+				"profile", "auto"
+			);
 		}
 		
-		private static final Translation translation() {
-			if(translation == null) {
-				translation = translationOf("configuration.values.profile");
-			}
-			
-			return translation;
+		public IPrimaCredentials(byte[] email, byte[] password, byte[] profile) {
+			super(email, password);
+			defineFields(
+				"profile", profile
+			);
 		}
 		
-		private static final String valueSave(String audioDeviceAlternativeName) {
-			return audioDeviceAlternativeName.replaceAll("\\\\", "/");
+		public IPrimaCredentials(String email, String password, String profile) {
+			this(
+				CredentialsUtils.bytes(email),
+				CredentialsUtils.bytes(password),
+				CredentialsUtils.bytes(profile)
+			);
 		}
 		
-		private static final String valueLoad(String string) {
-			return Utils.removeStringQuotes(string).replaceAll("/", "\\\\");
+		public String profile() {
+			return isInitialized() ? CredentialsUtils.string(get("profile")) : null;
 		}
+	}
+	
+	protected static class IPrimaCredentialsType extends CredentialsType<IPrimaCredentials> {
 		
-		public static final ProfileSelectFormFieldSupplierFactory of(String propertyName) {
-			return new ProfileSelectFormFieldSupplierFactory(propertyName);
-		}
+		private final Translation translation;
 		
-		private final List<Profile> profiles() throws Exception {
-			return ProfileManager.profiles();
-		}
-		
-		private final Profile automaticProfile() {
-			return new Profile("auto", translation().getSingle("profile_auto"));
+		protected IPrimaCredentialsType(Translation translation) {
+			super(IPrimaCredentials.class);
+			this.translation = Objects.requireNonNull(translation);
 		}
 		
 		@Override
-		public FormFieldSupplier create(String name, ConfigurationFormFieldProperty fieldProperty) {
-			return name.equals(propertyName) ? ProfileSelectField::new : null;
+		public Pane create() {
+			GridPane grid = new GridPane();
+			grid.setHgap(5.0);
+			grid.setVgap(5.0);
+			Translation tr = translation.getTranslation("label");
+			Label lblEmail = new Label(tr.getSingle("email"));
+			TextField txtEmail = new TextField();
+			txtEmail.getStyleClass().add("field-email");
+			Label lblPassword = new Label(tr.getSingle("password"));
+			PasswordField txtPassword = new PasswordField();
+			txtPassword.getStyleClass().add("field-password");
+			Label lblProfile = new Label(tr.getSingle("profile"));
+			ProfileSelect cmbProfile = new ProfileSelect(translation.getTranslation("profile"));
+			cmbProfile.getStyleClass().add("field-profile");
+			grid.getChildren().addAll(
+				lblEmail, txtEmail,
+				lblPassword, txtPassword,
+				lblProfile, cmbProfile
+			);
+			GridPane.setConstraints(lblEmail, 0, 0);
+			GridPane.setConstraints(txtEmail, 1, 0);
+			GridPane.setConstraints(lblPassword, 0, 1);
+			GridPane.setConstraints(txtPassword, 1, 1);
+			GridPane.setConstraints(lblProfile, 0, 2);
+			GridPane.setConstraints(cmbProfile, 1, 2);
+			GridPane.setHgrow(txtEmail, Priority.ALWAYS);
+			GridPane.setHgrow(txtPassword, Priority.ALWAYS);
+			GridPane.setHgrow(cmbProfile, Priority.ALWAYS);
+			return grid;
 		}
 		
-		private final class ProfileSelectField<T> extends FormField<T> {
+		@Override
+		public void load(Pane pane, IPrimaCredentials credentials) {
+			GridPane grid = (GridPane) pane;
+			TextField txtEmail = (TextField) grid.lookup(".field-email");
+			PasswordField txtPassword = (PasswordField) grid.lookup(".field-password");
+			ProfileSelect cmbProfile = (ProfileSelect) grid.lookup(".field-profile");
+			txtEmail.setText(credentials.email());
+			txtPassword.setText(credentials.password());
+			cmbProfile.value(credentials.profile());
+		}
+		
+		@Override
+		public IPrimaCredentials save(Pane pane) {
+			GridPane grid = (GridPane) pane;
+			TextField txtEmail = (TextField) grid.lookup(".field-email");
+			PasswordField txtPassword = (PasswordField) grid.lookup(".field-password");
+			ProfileSelect cmbProfile = (ProfileSelect) grid.lookup(".field-profile");
+			String email = txtEmail.getText();
+			String password = txtPassword.getText();
+			String profile = cmbProfile.value();
+			return new IPrimaCredentials(email, password, profile);
+		}
+		
+		private final class ProfileSelect extends VBox {
 			
 			private volatile boolean itemsLoaded = false;
 			
-			private final VBox wrapper;
+			private final Translation translation;
 			private final ComboBox<Profile> control;
 			private final Label lblProgress;
 			private String loadedValue;
 			
-			public ProfileSelectField(T property, String name, String title) {
-				super(property, name, title);
-				wrapper = new VBox(5.0);
+			public ProfileSelect(Translation translation) {
+				super(5.0);
+				this.translation = translation;
 				control = new ComboBox<>();
 				control.setCellFactory((p) -> new ProfileCell());
 				control.setButtonCell(new ProfileCell());
 				control.setMaxWidth(Double.MAX_VALUE);
 				lblProgress = new Label();
-				wrapper.getChildren().addAll(control, lblProgress);
+				getChildren().addAll(control, lblProgress);
 				FXUtils.onWindowShow(control, this::loadItems);
+			}
+			
+			private final List<Profile> profiles() throws Exception {
+				return ProfileManager.profiles();
+			}
+			
+			private final Profile automaticProfile() {
+				return new Profile("auto", translation.getSingle("profile_auto"));
 			}
 			
 			private final void enableSelect(boolean enable) {
@@ -176,7 +261,7 @@ public final class IPrimaEnginePlugin extends PluginBase {
 			private final void progressText(String text) {
 				FXUtils.thread(() -> {
 					if(text == null) {
-						wrapper.getChildren().remove(lblProgress);
+						getChildren().remove(lblProgress);
 					} else {
 						lblProgress.setText(text);
 					}
@@ -186,13 +271,13 @@ public final class IPrimaEnginePlugin extends PluginBase {
 			private final void loadItems() {
 				Threads.execute(() -> {
 					enableSelect(false);
-					progressText(translation().getSingle("progress.log_in"));
+					progressText(translation.getSingle("progress.log_in"));
 					
 					try {
 						IPrimaAuthenticator.SessionData session = IPrimaAuthenticator.getSessionData();
 						
 						if(session != null) {
-							progressText(translation().getSingle("progress.profiles"));
+							progressText(translation.getSingle("progress.profiles"));
 							
 							List<Profile> profiles = profiles();
 							profiles.add(0, automaticProfile());
@@ -230,23 +315,12 @@ public final class IPrimaEnginePlugin extends PluginBase {
 				return profile.id();
 			}
 			
-			@Override
-			public Node render(Form form) {
-				return wrapper;
+			public void value(String profileId) {
+				loadedValue = profileId;
 			}
 			
-			@Override
-			public void value(SSDValue value, SSDType type) {
-				loadedValue = valueLoad(value.stringValue());
-			}
-			
-			@Override
-			public Object value() {
-				return valueSave(
-					itemsLoaded
-						? selectedProfileId()
-						: loadedValue
-				);
+			public String value() {
+				return itemsLoaded ? selectedProfileId() : loadedValue;
 			}
 		}
 		
