@@ -3,15 +3,6 @@
 		media_engine: {
 			jojplay: {
 				title: "JOJ Play",
-				configuration: {
-					group: {
-						general: "JOJ Play"
-					},
-					fields: {
-						authData_email:    "Email",
-						authData_password: "Password"
-					}
-				},
 				error: {
 					media_error: {
 						title: "Error: %{name}s",
