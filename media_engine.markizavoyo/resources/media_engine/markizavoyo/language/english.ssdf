@@ -2,16 +2,7 @@
 	plugin: {
 		media_engine: {
 			markizavoyo: {
-				title: "Voyo (Markíza)",
-				configuration: {
-					group: {
-						general: "Voyo (Markíza)"
-					},
-					fields: {
-						authData_email:    "Email",
-						authData_password: "Password"
-					}
-				}
+				title: "Voyo (Markíza)"
 			}
 		}
 	}
