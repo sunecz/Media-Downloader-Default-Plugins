@@ -1,18 +1,20 @@
 package sune.app.mediadown.server.sledovanitv;
 
+import java.io.IOException;
 import java.net.HttpCookie;
 import java.net.URI;
 import java.net.http.HttpClient.Redirect;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
+import java.util.function.Function;
 
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 
 import javafx.scene.image.Image;
 import sune.app.mediadown.MediaDownloader;
-import sune.app.mediadown.configuration.Configuration.ConfigurationProperty;
+import sune.app.mediadown.authentication.CredentialsManager;
+import sune.app.mediadown.authentication.EmailCredentials;
 import sune.app.mediadown.entity.Server;
 import sune.app.mediadown.gui.Dialog;
 import sune.app.mediadown.language.Translation;
@@ -27,12 +29,13 @@ import sune.app.mediadown.net.Web;
 import sune.app.mediadown.net.Web.Request;
 import sune.app.mediadown.net.Web.Response;
 import sune.app.mediadown.plugin.PluginBase;
-import sune.app.mediadown.plugin.PluginConfiguration;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.task.ListTask;
 import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.JSON.JSONCollection;
+import sune.app.mediadown.util.Opt;
 import sune.app.mediadown.util.Utils;
+import sune.app.mediadown.util.Utils.Ignore;
 
 public class SledovaniTVServer implements Server {
 	
@@ -205,21 +208,29 @@ public class SledovaniTVServer implements Server {
 			private AuthenticationData() {
 			}
 			
-			private static final PluginConfiguration configuration() {
-				return PLUGIN.getContext().getConfiguration();
+			private static final String credentialsName() {
+				return "plugin/" + PLUGIN.getContext().getPlugin().instance().name().replace('.', '/');
 			}
 			
-			private static final <T> T value(String propertyName, T defaultValue) {
-				return Optional.<ConfigurationProperty<T>>ofNullable(configuration().property(propertyName))
-							.map(ConfigurationProperty::value).orElse(defaultValue);
+			private static final EmailCredentials credentials() throws IOException {
+				return (EmailCredentials) CredentialsManager.instance().get(credentialsName());
+			}
+			
+			private static final String valueOrElse(Function<EmailCredentials, String> getter, String orElse) {
+				return Ignore.defaultValue(
+					() -> Opt.of(getter.apply(credentials()))
+								.ifFalse(String::isBlank)
+								.orElse(orElse),
+					orElse
+				);
 			}
 			
 			public static final String email() {
-				return value("authData_email", "");
+				return valueOrElse(EmailCredentials::email, "");
 			}
 			
 			public static final String password() {
-				return value("authData_password", "");
+				return valueOrElse(EmailCredentials::password, "");
 			}
 		}
 	}
