@@ -17,7 +17,6 @@ import java.util.List;
 import java.util.ListIterator;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiFunction;
@@ -29,9 +28,10 @@ import java.util.zip.GZIPInputStream;
 
 import javafx.scene.image.Image;
 import sune.app.mediadown.MediaDownloader;
+import sune.app.mediadown.authentication.CredentialsManager;
+import sune.app.mediadown.authentication.EmailCredentials;
 import sune.app.mediadown.concurrent.StateMutex;
 import sune.app.mediadown.concurrent.SyncObject;
-import sune.app.mediadown.configuration.Configuration.ConfigurationProperty;
 import sune.app.mediadown.entity.Episode;
 import sune.app.mediadown.entity.MediaEngine;
 import sune.app.mediadown.entity.Program;
@@ -47,14 +47,15 @@ import sune.app.mediadown.net.Web;
 import sune.app.mediadown.net.Web.Request;
 import sune.app.mediadown.net.Web.Response;
 import sune.app.mediadown.plugin.PluginBase;
-import sune.app.mediadown.plugin.PluginConfiguration;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.task.ListTask;
 import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.JSON.JSONCollection;
 import sune.app.mediadown.util.JSON.JSONNode;
+import sune.app.mediadown.util.Opt;
 import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
+import sune.app.mediadown.util.Utils.Ignore;
 
 public final class JOJPlayEngine implements MediaEngine {
 	
@@ -424,21 +425,29 @@ public final class JOJPlayEngine implements MediaEngine {
 				private AuthenticationData() {
 				}
 				
-				private static final PluginConfiguration configuration() {
-					return PLUGIN.getContext().getConfiguration();
+				private static final String credentialsName() {
+					return "plugin/" + PLUGIN.getContext().getPlugin().instance().name().replace('.', '/');
 				}
 				
-				private static final <T> T value(String propertyName, T defaultValue) {
-					return Optional.<ConfigurationProperty<T>>ofNullable(configuration().property(propertyName))
-								.map(ConfigurationProperty::value).orElse(defaultValue);
+				private static final EmailCredentials credentials() throws IOException {
+					return (EmailCredentials) CredentialsManager.instance().get(credentialsName());
+				}
+				
+				private static final String valueOrElse(Function<EmailCredentials, String> getter, String orElse) {
+					return Ignore.defaultValue(
+						() -> Opt.of(getter.apply(credentials()))
+									.ifFalse(String::isBlank)
+									.orElse(orElse),
+						orElse
+					);
 				}
 				
 				public static final String email() {
-					return value("authData_email", "");
+					return valueOrElse(EmailCredentials::email, "");
 				}
 				
 				public static final String password() {
-					return value("authData_password", "");
+					return valueOrElse(EmailCredentials::password, "");
 				}
 			}
 		}
