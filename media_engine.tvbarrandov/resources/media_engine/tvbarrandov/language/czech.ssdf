@@ -3,15 +3,6 @@
 		media_engine: {
 			tvbarrandov: {
 				title: "TV Barrandov",
-				configuration: {
-					group: {
-						general: "TV Barrandov"
-					},
-					fields: {
-						authData_username: "Uživatelské jméno",
-						authData_password: "Heslo"
-					}
-				},
 				dialog: {
 					obtain_episodes: {
 						title: "Upřesnit výběr epizod",

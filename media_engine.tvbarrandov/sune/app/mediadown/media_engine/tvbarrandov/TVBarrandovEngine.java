@@ -1,5 +1,6 @@
 package sune.app.mediadown.media_engine.tvbarrandov;
 
+import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpHeaders;
 import java.time.LocalDate;
@@ -10,6 +11,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Function;
 import java.util.regex.Matcher;
 
 import org.jsoup.nodes.Document;
@@ -30,7 +32,8 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 import javafx.scene.text.Font;
 import sune.app.mediadown.MediaDownloader;
-import sune.app.mediadown.configuration.Configuration.ConfigurationProperty;
+import sune.app.mediadown.authentication.CredentialsManager;
+import sune.app.mediadown.authentication.UsernameCredentials;
 import sune.app.mediadown.entity.Episode;
 import sune.app.mediadown.entity.MediaEngine;
 import sune.app.mediadown.entity.MediaGetter;
@@ -53,13 +56,13 @@ import sune.app.mediadown.net.Web;
 import sune.app.mediadown.net.Web.Request;
 import sune.app.mediadown.net.Web.Response;
 import sune.app.mediadown.plugin.PluginBase;
-import sune.app.mediadown.plugin.PluginConfiguration;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.task.ListTask;
 import sune.app.mediadown.util.FXUtils;
 import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.JSON.JSONCollection;
 import sune.app.mediadown.util.JavaScript;
+import sune.app.mediadown.util.Opt;
 import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Utils.Ignore;
@@ -690,21 +693,29 @@ public final class TVBarrandovEngine implements MediaEngine {
 		private Authenticator() {
 		}
 		
-		private static final PluginConfiguration configuration() {
-			return PLUGIN.getContext().getConfiguration();
+		private static final String credentialsName() {
+			return "plugin/" + PLUGIN.getContext().getPlugin().instance().name().replace('.', '/');
 		}
 		
-		private static final <T> T valueOrElse(String propertyName, T orElse) {
-			return Optional.<ConfigurationProperty<T>>ofNullable(configuration().property(propertyName))
-					       .map(ConfigurationProperty::value).orElse(orElse);
+		private static final UsernameCredentials credentials() throws IOException {
+			return (UsernameCredentials) CredentialsManager.instance().get(credentialsName());
 		}
 		
-		private static final String username() {
-			return valueOrElse("authData_username", "");
+		private static final String valueOrElse(Function<UsernameCredentials, String> getter, String orElse) {
+			return Ignore.defaultValue(
+				() -> Opt.of(getter.apply(credentials()))
+							.ifFalse(String::isBlank)
+							.orElse(orElse),
+				orElse
+			);
 		}
 		
-		private static final String password() {
-			return valueOrElse("authData_password", "");
+		public static final String username() {
+			return valueOrElse(UsernameCredentials::username, "");
+		}
+		
+		public static final String password() {
+			return valueOrElse(UsernameCredentials::password, "");
 		}
 		
 		public static final boolean areLoginDetailsPresent() {
