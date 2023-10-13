@@ -45,7 +45,6 @@ public final class SledovaniTVServerPlugin extends PluginBase {
 				.withDefaultValue(""));
 		}
 		
-		builder.addProperty(ConfigurationProperty.ofArray("devicesToRemove").asHidden(true));
 		configuration = builder;
 	}
 	
