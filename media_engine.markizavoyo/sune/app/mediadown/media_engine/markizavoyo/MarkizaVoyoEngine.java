@@ -1,5 +1,6 @@
 package sune.app.mediadown.media_engine.markizavoyo;
 
+import java.io.IOException;
 import java.net.CookieStore;
 import java.net.HttpCookie;
 import java.net.URI;
@@ -27,8 +28,9 @@ import org.jsoup.select.Elements;
 import javafx.scene.image.Image;
 import sune.app.mediadown.MediaDownloader;
 import sune.app.mediadown.Shared;
+import sune.app.mediadown.authentication.CredentialsManager;
+import sune.app.mediadown.authentication.EmailCredentials;
 import sune.app.mediadown.configuration.Configuration;
-import sune.app.mediadown.configuration.Configuration.ConfigurationProperty;
 import sune.app.mediadown.entity.Episode;
 import sune.app.mediadown.entity.MediaEngine;
 import sune.app.mediadown.entity.Program;
@@ -70,6 +72,10 @@ public final class MarkizaVoyoEngine implements MediaEngine {
 	
 	// Allow to create an instance when registering the engine
 	MarkizaVoyoEngine() {
+	}
+	
+	private static final String credentialsName() {
+		return "plugin/" + PLUGIN.getContext().getPlugin().instance().name().replace('.', '/');
 	}
 	
 	@Override
@@ -808,26 +814,14 @@ public final class MarkizaVoyoEngine implements MediaEngine {
 		private Authenticator() {
 		}
 		
-		private static final PluginConfiguration configuration() {
-			return PLUGIN.getContext().getConfiguration();
-		}
-		
-		private static final <T> T valueOrElse(String propertyName, T orElse) {
-			return Optional.<ConfigurationProperty<T>>ofNullable(configuration().property(propertyName))
-					       .map(ConfigurationProperty::value).orElse(orElse);
-		}
-		
-		private static final String username() {
-			return valueOrElse("authData_email", "");
-		}
-		
-		private static final String password() {
-			return valueOrElse("authData_password", "");
+		private static final EmailCredentials credentials() throws IOException {
+			return (EmailCredentials) CredentialsManager.instance().get(credentialsName());
 		}
 		
 		private static final boolean login(String username, String password) throws Exception {
-			if(username.isEmpty() || password.isEmpty())
+			if(username.isEmpty() || password.isEmpty()) {
 				return false;
+			}
 			
 			URI uri = Net.uri(URL_LOGIN);
 			Document document = HTML.from(uri);
@@ -850,11 +844,15 @@ public final class MarkizaVoyoEngine implements MediaEngine {
 		}
 		
 		public static final boolean login() throws Exception {
-			return login(username(), password());
+			try(EmailCredentials credentials = credentials()) {
+				return login(credentials.email(), credentials.password());
+			}
 		}
 		
-		public static final boolean areLoginDetailsPresent() {
-			return !username().isEmpty() && !password().isEmpty();
+		public static final boolean areLoginDetailsPresent() throws Exception {
+			try(EmailCredentials credentials = credentials()) {
+				return !credentials.email().isEmpty() && !credentials.password().isEmpty();
+			}
 		}
 	}
 	
