@@ -424,12 +424,8 @@ public final class IPrimaAuthenticator {
 		private AuthenticationData() {
 		}
 		
-		private static final String credentialsName() {
-			return IPrimaHelper.credentialsName();
-		}
-		
 		private static final IPrimaCredentials credentials() throws IOException {
-			return (IPrimaCredentials) CredentialsManager.instance().get(credentialsName());
+			return (IPrimaCredentials) CredentialsManager.instance().get(IPrimaHelper.credentialsName());
 		}
 		
 		private static final String valueOrElse(Function<IPrimaCredentials, String> getter, Supplier<String> orElse) {
