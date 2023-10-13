@@ -3,15 +3,6 @@
 		media_engine: {
 			novavoyo: {
 				title: "Voyo (Nova)",
-				configuration: {
-					group: {
-						general: "Voyo (Nova)"
-					},
-					fields: {
-						authData_email:    "Email",
-						authData_password: "Heslo"
-					}
-				},
 				error: {
 					media_error: {
 						title: "Chyba: %{name}s",
