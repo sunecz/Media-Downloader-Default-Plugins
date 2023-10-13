@@ -41,7 +41,8 @@ public final class JOJPlayEnginePlugin extends PluginBase {
 				.inGroup(group));
 			builder.addProperty(ConfigurationProperty.ofType("authData_password", Password.class)
 				.inGroup(group)
-				.withTransformer(Password::value, Password::new));
+				.withTransformer(Password::value, Password::new)
+				.withDefaultValue(""));
 		}
 		
 		configuration = builder;
