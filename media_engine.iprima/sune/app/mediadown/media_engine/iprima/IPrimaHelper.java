@@ -197,7 +197,7 @@ final class IPrimaHelper {
 				Map<String, String> mutRequestHeaders = Utils.toMap("Referer", "https://www.iprima.cz/");
 				try {
 					// Try to log in to the iPrima website using the internal account to have HD sources available.
-					IPrimaAuthenticator.SessionData sessionData = IPrimaAuthenticator.getSessionData();
+					PrimaAuthenticator.SessionData sessionData = PrimaAuthenticator.sessionData();
 					Utils.merge(mutRequestHeaders, sessionData.requestHeaders());
 				} catch(Exception ex) {
 					// Notify the user that the HD sources may not be available due to inability to log in.
@@ -828,7 +828,7 @@ final class IPrimaHelper {
 				Map<String, String> mutRequestHeaders = Utils.toMap("Referer", "https://www.iprima.cz/");
 				try {
 					// Try to log in to the iPrima website using the internal account to have HD sources available.
-					IPrimaAuthenticator.SessionData sessionData = IPrimaAuthenticator.getSessionData();
+					PrimaAuthenticator.SessionData sessionData = PrimaAuthenticator.sessionData();
 					Utils.merge(mutRequestHeaders, sessionData.requestHeaders());
 				} catch(Exception ex) {
 					// Notify the user that the HD sources may not be available due to inability to log in.

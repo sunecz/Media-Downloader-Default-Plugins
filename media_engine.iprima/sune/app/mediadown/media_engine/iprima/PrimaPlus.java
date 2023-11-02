@@ -1,6 +1,5 @@
 package sune.app.mediadown.media_engine.iprima;
 
-import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpHeaders;
 import java.util.ArrayList;
@@ -17,7 +16,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiFunction;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
-import java.util.zip.GZIPInputStream;
 
 import sune.app.mediadown.MediaDownloader;
 import sune.app.mediadown.concurrent.VarLoader;
@@ -40,10 +38,11 @@ import sune.app.mediadown.media_engine.iprima.IPrimaEngine.IPrima;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper.SimpleExecutor;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper.ThreadedSpawnableTaskQueue;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper._Singleton;
+import sune.app.mediadown.media_engine.iprima.PrimaCommon.JSONSerializable;
+import sune.app.mediadown.media_engine.iprima.PrimaCommon.RPC;
 import sune.app.mediadown.net.Net;
 import sune.app.mediadown.net.Web;
 import sune.app.mediadown.net.Web.Request;
-import sune.app.mediadown.net.Web.Response;
 import sune.app.mediadown.task.ListTask;
 import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.JSON.JSONCollection;
@@ -82,17 +81,9 @@ final class PrimaPlus implements IPrima {
 	
 	private static final class API {
 		
-		private static final URI URL_ENDPOINT = Net.uri("https://gateway-api.prod.iprima.cz/json-rpc/");
-		
 		private static final String URL_API_PLAY = "https://api.play-backend.iprima.cz/api/v1/products/play/ids-%{play_id}s";
 		private static final String URL_BASE_MOVIE = "https://www.iprima.cz/filmy/";
 		private static final String URL_BASE_SERIES = "https://www.iprima.cz/serialy/";
-		
-		private static final HttpHeaders HEADERS = Web.Headers.ofSingle(
-			"Accept", "application/json",
-			"Content-Type", "application/json",
-			"Accept-Encoding", "gzip"
-		);
 		
 		private static final int EXIT_CALLBACK = -1;
 		private static final int EXIT_SUCCESS = 0;
@@ -104,37 +95,11 @@ final class PrimaPlus implements IPrima {
 		private API() {
 		}
 		
-		private static final JSONCollection doRawRequest(String body) throws Exception {
-			try(Response.OfStream response = Web.requestStream(Request.of(URL_ENDPOINT).headers(HEADERS).POST(body))) {
-				InputStream stream = response.stream();
-				boolean isGzip = response.headers()
-					.firstValue("Content-Encoding")
-					.filter((v) -> v.equalsIgnoreCase("gzip"))
-					.isPresent();
-				
-				if(isGzip) {
-					stream = new GZIPInputStream(stream);
-				}
-				
-				return JSON.read(stream).getCollection("result");
-			}
-		}
-		
-		private static final JSONCollection doRequest(String method, Object... params) throws Exception {
-			return doRequest(method, Utils.toMap(params));
-		}
-		
-		private static final JSONCollection doRequest(String method, Map<Object, Object> params) throws Exception {
-			JSONCollection json = APIRequest.bodyOf(method, params);
-			json.setNull("params.profileId");
-			return doRawRequest(json.toString(true));
-		}
-		
 		private static final List<String> listGenres() throws Exception {
 			final String method = "vdm.frontend.genre.list";
 			
 			List<String> genres = new ArrayList<>();
-			JSONCollection result = doRequest(method);
+			JSONCollection result = RPC.request(method);
 			
 			for(JSONCollection genre : result.getCollection("data").collectionsIterable()) {
 				String type = genre.getString("type");
@@ -154,7 +119,7 @@ final class PrimaPlus implements IPrima {
 			final String method = "strip.strip.nextItems.vdm";
 			final String deviceType = "WEB";
 			
-			JSONCollection result = doRequest(
+			JSONCollection result = RPC.request(
 				method,
 				"deviceType", deviceType,
 				"stripId", stripId,
@@ -203,7 +168,7 @@ final class PrimaPlus implements IPrima {
 			final String method = "vdm.frontend.season.list.hbbtv";
 			
 			List<Season> seasons = new ArrayList<>();
-			JSONCollection result = doRequest(
+			JSONCollection result = RPC.request(
 				method,
 				"_accessToken", accessToken(),
 				"id", programId,
@@ -227,7 +192,7 @@ final class PrimaPlus implements IPrima {
 			final String method = "vdm.frontend.episodes.list.hbbtv";
 			
 			List<Episode> episodes = new ArrayList<>();
-			JSONCollection result = doRequest(
+			JSONCollection result = RPC.request(
 				method,
 				"_accessToken", accessToken(),
 				"id", seasonId,
@@ -275,7 +240,7 @@ final class PrimaPlus implements IPrima {
 		private static final HttpHeaders initSessionHeaders() throws Exception {
 			// It is important to specify the referer, otherwise the response code is 403.
 			Map<String, String> mutRequestHeaders = Utils.toMap("Referer", "https://www.iprima.cz/");
-			IPrimaAuthenticator.SessionData sessionData = logIn();
+			PrimaAuthenticator.SessionData sessionData = logIn();
 			
 			if(sessionData == null) {
 				throw new IllegalStateException("Session data are null");
@@ -285,9 +250,9 @@ final class PrimaPlus implements IPrima {
 			return Web.Headers.ofSingleMap(mutRequestHeaders);
 		}
 		
-		private static final IPrimaAuthenticator.SessionData logIn() {
+		private static final PrimaAuthenticator.SessionData logIn() {
 			try {
-				return IPrimaAuthenticator.getSessionData();
+				return PrimaAuthenticator.sessionData();
 			} catch(Exception ex) {
 				// Notify the user that the HD sources may not be available due to inability to log in.
 				MediaDownloader.error(new IllegalStateException("Unable to log in to the iPrima website.", ex));
@@ -308,7 +273,7 @@ final class PrimaPlus implements IPrima {
 		}
 		
 		private static final String accessToken() {
-			IPrimaAuthenticator.SessionData sessionData = logIn();
+			PrimaAuthenticator.SessionData sessionData = logIn();
 			return sessionData != null ? sessionData.accessToken() : null;
 		}
 		
@@ -359,7 +324,7 @@ final class PrimaPlus implements IPrima {
 				) {
 					for(StripGroup stripGroup : stripGroups) {
 						executor.addTask(() -> {
-							JSONCollection result = doRequest(
+							JSONCollection result = RPC.request(
 								method,
 								"deviceType", deviceType,
 								"stripIds", stripGroup.stripIds(),
@@ -588,11 +553,6 @@ final class PrimaPlus implements IPrima {
 					}
 				}
 			});
-		}
-		
-		private static interface JSONSerializable {
-			
-			JSONNode toJSON();
 		}
 		
 		private static final class Filter implements JSONSerializable {
@@ -994,133 +954,6 @@ final class PrimaPlus implements IPrima {
 				public static final JSONCollection parse(String content) {
 					return T0(content);
 				}
-			}
-		}
-		
-		private static final class APIRequest {
-			
-			private APIRequest() {
-			}
-			
-			private static final void setHeader(JSONCollection json) {
-				json.set("id", "1");
-				json.set("jsonrpc", "2.0");
-			}
-			
-			private static final void setPrimitiveParam(JSONCollection parent, String name, Object value) {
-				if(value == null) {
-					parent.setNull(name);
-					return;
-				}
-				
-				if(value instanceof JSONSerializable) {
-					JSONNode json = ((JSONSerializable) value).toJSON();
-					
-					if(json instanceof JSONCollection) parent.set(name, (JSONCollection) json); else
-					if(json instanceof JSONObject)     parent.set(name, (JSONObject) json);
-					else                               parent.setNull(name);
-					
-					return;
-				}
-				
-				Class<?> clazz = value.getClass();
-				
-				if(clazz == Boolean.class) 	 parent.set(name, (Boolean) value); else
-		        if(clazz == Byte.class) 	 parent.set(name, (Byte) value); else
-		        if(clazz == Character.class) parent.set(name, (Character) value); else
-		        if(clazz == Short.class) 	 parent.set(name, (Short) value); else
-		        if(clazz == Integer.class) 	 parent.set(name, (Integer) value); else
-		        if(clazz == Long.class) 	 parent.set(name, (Long) value); else
-		        if(clazz == Float.class) 	 parent.set(name, (Float) value); else
-		        if(clazz == Double.class) 	 parent.set(name, (Double) value);
-		        else                         parent.set(name, String.valueOf(value));
-			}
-			
-			private static final void addPrimitiveParam(JSONCollection parent, Object value) {
-				if(value == null) {
-					parent.addNull();
-					return;
-				}
-				
-				if(value instanceof JSONSerializable) {
-					JSONNode json = ((JSONSerializable) value).toJSON();
-					
-					if(json instanceof JSONCollection) parent.add((JSONCollection) json); else
-					if(json instanceof JSONObject)     parent.add((JSONObject) json);
-					else                               parent.addNull();
-					
-					return;
-				}
-				
-				Class<?> clazz = value.getClass();
-				
-				if(clazz == Boolean.class) 	 parent.add((Boolean) value); else
-		        if(clazz == Byte.class) 	 parent.add((Byte) value); else
-		        if(clazz == Character.class) parent.add((Character) value); else
-		        if(clazz == Short.class) 	 parent.add((Short) value); else
-		        if(clazz == Integer.class) 	 parent.add((Integer) value); else
-		        if(clazz == Long.class) 	 parent.add((Long) value); else
-		        if(clazz == Float.class) 	 parent.add((Float) value); else
-		        if(clazz == Double.class) 	 parent.add((Double) value);
-		        else                         parent.add(String.valueOf(value));
-			}
-			
-			private static final JSONCollection constructMap(Map<?, ?> map) {
-				JSONCollection jsonMap = JSONCollection.empty();
-				
-				for(Entry<?, ?> entry : map.entrySet()) {
-					setObjectParam(jsonMap, String.valueOf(entry.getKey()), entry.getValue());
-				}
-				
-				return jsonMap;
-			}
-			
-			private static final JSONCollection constructArray(List<?> list) {
-				JSONCollection jsonArray = JSONCollection.emptyArray();
-				
-				for(Object item : list) {
-					addObjectParam(jsonArray, item);
-				}
-				
-				return jsonArray;
-			}
-			
-			private static final void addObjectParam(JSONCollection parent, Object value) {
-				if(value instanceof Map) {
-					parent.add(constructMap((Map<?, ?>) value));
-				} else if(value instanceof List) {
-					parent.add(constructArray((List<?>) value));
-				} else {
-					addPrimitiveParam(parent, value);
-				}
-			}
-			
-			private static final void setObjectParam(JSONCollection parent, String name, Object value) {
-				if(value instanceof Map) {
-					parent.set(name, constructMap((Map<?, ?>) value));
-				} else if(value instanceof List) {
-					parent.set(name, constructArray((List<?>) value));
-				} else {
-					setPrimitiveParam(parent, name, value);
-				}
-			}
-			
-			private static final JSONCollection paramsOf(Map<Object, Object> params) {
-				JSONCollection json = JSONCollection.empty();
-				
-				for(Entry<Object, Object> entry : params.entrySet()) {
-					setObjectParam(json, String.valueOf(entry.getKey()), entry.getValue());
-				}
-				
-				return json;
-			}
-			
-			public static final JSONCollection bodyOf(String method, Map<Object, Object> params) {
-				JSONCollection json = JSONCollection.empty();
-				setHeader(json);
-				json.set("method", method);
-				json.set("params", paramsOf(params));
-				return json;
 			}
 		}
 	}

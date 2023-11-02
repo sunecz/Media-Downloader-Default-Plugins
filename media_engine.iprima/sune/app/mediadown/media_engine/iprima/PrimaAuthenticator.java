@@ -3,13 +3,14 @@ package sune.app.mediadown.media_engine.iprima;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient.Redirect;
-import java.net.http.HttpHeaders;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -17,8 +18,10 @@ import org.jsoup.nodes.Element;
 import sune.app.mediadown.authentication.CredentialsManager;
 import sune.app.mediadown.concurrent.VarLoader;
 import sune.app.mediadown.configuration.Configuration;
-import sune.app.mediadown.media_engine.iprima.IPrimaAuthenticator.ProfileManager.Profile;
 import sune.app.mediadown.media_engine.iprima.IPrimaEnginePlugin.IPrimaCredentials;
+import sune.app.mediadown.media_engine.iprima.PrimaAuthenticator.Devices.Device;
+import sune.app.mediadown.media_engine.iprima.PrimaAuthenticator.Profiles.Profile;
+import sune.app.mediadown.media_engine.iprima.PrimaCommon.RPC;
 import sune.app.mediadown.net.HTML;
 import sune.app.mediadown.net.Net;
 import sune.app.mediadown.net.Web;
@@ -27,13 +30,11 @@ import sune.app.mediadown.net.Web.Response;
 import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.JSON.JSONCollection;
 import sune.app.mediadown.util.Opt;
-import sune.app.mediadown.util.Property;
-import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Utils.Ignore;
 import sune.util.ssdf2.SSDCollection;
 
-public final class IPrimaAuthenticator {
+public final class PrimaAuthenticator {
 	
 	private static final String URL_OAUTH_LOGIN;
 	private static final String URL_OAUTH_TOKEN;
@@ -41,7 +42,8 @@ public final class IPrimaAuthenticator {
 	private static final String URL_USER_AUTH;
 	private static final String URL_PROFILE_SELECT;
 	
-	private static final VarLoader<SessionData> sessionData = VarLoader.ofChecked(IPrimaAuthenticator::initSessionData);
+	private static final VarLoader<SessionTokens> sessionTokens;
+	private static final VarLoader<SessionData> sessionData;
 	
 	static {
 		URL_OAUTH_LOGIN = "https://auth.iprima.cz/oauth2/login";
@@ -49,11 +51,12 @@ public final class IPrimaAuthenticator {
 		URL_OAUTH_AUTHORIZE = "https://auth.iprima.cz/oauth2/authorize";
 		URL_USER_AUTH = "https://www.iprima.cz/sso/login?auth_token_code=%{code}s";
 		URL_PROFILE_SELECT = "https://auth.iprima.cz/user/profile-select-perform/%{profile_id}s?continueUrl=/user/login";
+		sessionTokens = VarLoader.ofChecked(PrimaAuthenticator::initSessionTokens);
+		sessionData = VarLoader.ofChecked(PrimaAuthenticator::initSessionData);
 	}
 	
-	@FunctionalInterface private static interface _Callback<P, R> { R call(P param) throws Exception; }
-	private static final <C extends AutoCloseable, R> R tryAndClose(C closeable, _Callback<C, R> action) throws Exception {
-		try(closeable) { return action.call(closeable); }
+	// Forbid anyone to create an instance of this class
+	private PrimaAuthenticator() {
 	}
 	
 	private static final String loginOAuth(String email, String password) throws Exception {
@@ -75,9 +78,9 @@ public final class IPrimaAuthenticator {
 	
 	private static final List<Profile> profiles(Response.OfString response) throws Exception {
 		String url = response.uri().toString();
-		return ProfileManager.isProfileSelectPage(url)
-					? ProfileManager.extractProfiles(response.body())
-					: ProfileManager.profiles();
+		return Profiles.isProfileSelectPage(url)
+					? Profiles.extractProfiles(response.body())
+					: Profiles.list();
 	}
 	
 	private static final String selectConfiguredProfile(Response.OfString response) throws Exception {
@@ -117,8 +120,9 @@ public final class IPrimaAuthenticator {
 			"redirect_uri", "https://auth.iprima.cz/sso/auth-check"
 		);
 		
-		return tryAndClose(Web.requestStream(Request.of(Net.uri(URL_OAUTH_TOKEN)).POST(body)),
-		                   (response) -> SessionTokens.parse(JSON.read(response.stream())));
+		try(Response.OfStream response = Web.requestStream(Request.of(Net.uri(URL_OAUTH_TOKEN)).POST(body))) {
+			return SessionTokens.parse(JSON.read(response.stream()));
+		}
 	}
 	
 	private static final String authorize(SessionTokens tokens) throws Exception {
@@ -129,8 +133,9 @@ public final class IPrimaAuthenticator {
 		);
 		
 		URI uri = Net.uri(URL_OAUTH_AUTHORIZE + '?' + query);
-		return tryAndClose(Web.requestStream(Request.of(uri).GET()),
-		                   (response) -> JSON.read(response.stream()).getString("code", null));
+		try(Response.OfStream response = Web.requestStream(Request.of(uri).GET())) {
+			return JSON.read(response.stream()).getString("code", null);
+		}
 	}
 	
 	private static final boolean userAuth(String code) throws Exception {
@@ -139,44 +144,110 @@ public final class IPrimaAuthenticator {
 		}
 		
 		URI uri = Net.uri(Utils.format(URL_USER_AUTH, "code", code));
-		return tryAndClose(Web.requestStream(Request.of(uri).followRedirects(Redirect.NEVER).GET()),
-		                   (response) -> response.statusCode() == 302);
+		try(Response.OfStream response = Web.requestStream(Request.of(uri).followRedirects(Redirect.NEVER).GET())) {
+			return response.statusCode() == 302;
+		}
 	}
 	
 	private static final Configuration configuration() {
 		return IPrimaHelper.configuration();
 	}
 	
-	private static final SessionData initSessionData() throws Exception {
-		SessionTokens tokens = sessionTokens(loginOAuth(
+	private static final SessionTokens initSessionTokens() throws Exception {
+		return sessionTokens(loginOAuth(
 			AuthenticationData.email(),
 			AuthenticationData.password()
 		));
+	}
+	
+	private static final SessionData initSessionData() throws Exception {
+		SessionTokens tokens = sessionTokens();
 		boolean success = userAuth(authorize(tokens));
 		
 		if(!success) {
 			throw new IllegalStateException("Unsuccessful log in");
 		}
 		
-		return new SessionData(
-			tokens.rawString(), tokens.accessToken(),
-			// The device ID must be obtained AFTER logging in
-			DeviceManager.deviceId(),
-			ProfileManager.profiles().get(0).id()
-		);
+		String profileId = Cached.profile().id();
+		String deviceId = Cached.device().id();
+		
+		return new SessionData(tokens.rawString(), tokens.accessToken(), profileId, deviceId);
 	}
 	
-	public static final SessionData getSessionData() throws Exception {
+	private static final SessionTokens sessionTokens() throws Exception {
+		return sessionTokens.valueChecked();
+	}
+	
+	public static final SessionData sessionData() throws Exception {
 		return sessionData.valueChecked();
 	}
 	
-	public static final class ProfileManager {
+	public static final List<Profile> profiles() throws Exception {
+		return Cached.profiles();
+	}
+	
+	public static final Profile profile() throws Exception {
+		return Cached.profile();
+	}
+	
+	public static final Device device() throws Exception {
+		return Cached.device();
+	}
+	
+	private static final class Cached {
+		
+		private static final VarLoader<List<Profile>> profiles = VarLoader.ofChecked(Profiles::list);
+		private static final VarLoader<Profile> profile = VarLoader.ofChecked(Cached::getProfile);
+		private static final VarLoader<Device> device = VarLoader.ofChecked(Cached::getDevice);
+		
+		// Forbid anyone to create an instance of this class
+		private Cached() {
+		}
+		
+		private static final Profile getProfile() throws Exception {
+			List<Profile> profiles = profiles();
+			String profileId = AuthenticationData.profile();
+			
+			if(profileId.equalsIgnoreCase("auto")) {
+				return profiles.get(0);
+			}
+			
+			return profiles.stream()
+						.filter((p) -> p.id().equalsIgnoreCase(profileId))
+						.findFirst().orElse(null);
+		}
+		
+		private static final Device getDevice() throws Exception {
+			Device device = Devices.getDefault();
+			
+			if(device == null) {
+				device = Devices.createDefault();
+			}
+			
+			return device;
+		}
+		
+		public static final List<Profile> profiles() throws Exception {
+			return profiles.valueChecked();
+		}
+		
+		public static final Profile profile() throws Exception {
+			return profile.valueChecked();
+		}
+		
+		public static final Device device() throws Exception {
+			return device.valueChecked();
+		}
+	}
+	
+	public static final class Profiles {
 		
 		private static final String URL_PROFILE_PAGE = "https://auth.iprima.cz/user/profile-select";
-		
 		private static final String SELECTOR_PROFILE = ".profile-select";
 		
-		private static List<Profile> profiles;
+		// Forbid anyone to create an instance of this class
+		private Profiles() {
+		}
 		
 		public static final boolean isProfileSelectPage(String url) {
 			return url.startsWith(URL_PROFILE_PAGE);
@@ -195,16 +266,8 @@ public final class IPrimaAuthenticator {
 			return profiles;
 		}
 		
-		private static final List<Profile> listProfiles() throws Exception {
+		public static final List<Profile> list() throws Exception {
 			return extractProfiles(Web.request(Request.of(Net.uri(URL_PROFILE_PAGE)).GET()).body());
-		}
-		
-		public static final List<Profile> profiles() throws Exception {
-			if(profiles == null) {
-				profiles = listProfiles();
-			}
-			
-			return profiles;
 		}
 		
 		public static final class Profile {
@@ -217,95 +280,84 @@ public final class IPrimaAuthenticator {
 				this.name = Objects.requireNonNull(name);
 			}
 			
-			public String id() {
-				return id;
-			}
-			
-			public String name() {
-				return name;
-			}
+			public String id() { return id; }
+			public String name() { return name; }
 		}
 	}
 	
-	public static final class DeviceManager {
+	public static final class Devices {
 		
-		private static final String DEVICE_NAME = "Media Downloader";
-		private static final String DEVICE_TYPE = "WEB";
+		private static final String DEFAULT_DEVICE_NAME = "Media Downloader";
+		private static final String DEFAULT_DEVICE_TYPE = "WEB";
 		
-		private static final String URL_LIST_DEVICES = "https://auth.iprima.cz/user/zarizeni";
-		private static final String URL_ADD_DEVICE = "https://prima.iprima.cz/iprima-api/PlayApiProxy/Proxy/AddNewUserSlot";
-		private static final String URL_REMOVE_DEVICE = "https://auth.iprima.cz/user/zarizeni/removeSlot";
-		
-		private static final String SELECTOR_DEVICES = "#main-content > div:nth-child(2) .container table tr td:last-child > button";
-		
-		private static String deviceId; // For caching purposes
-		
-		private static final List<Device> listDevices() throws Exception {
-			List<Device> devices = new ArrayList<>();
-			Document document = HTML.from(Net.uri(URL_LIST_DEVICES));
-			
-			for(Element elButton : document.select(SELECTOR_DEVICES)) {
-				devices.add(Device.fromRemoveButton(elButton));
-			}
-			
-			return devices;
+		// Forbid anyone to create an instance of this class
+		private Devices() {
 		}
 		
-		// Taken from: https://authstatic.primacdn.cz/sso/device_id.js (function: generateDid)
-		private static final String generateDeviceId() {
-			Property<Long> d = new Property<>(System.nanoTime());
-			return Regex.of("[xy]").replaceAll("d-xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx", (match) -> {
-				int r = (int) ((d.getValue() + (int) (Math.random() * 16.0)) % 16L);
-				d.setValue((long) Math.floor(d.getValue() / 16.0));
-				return Integer.toHexString(match.group(0).equals("x") ? r : (r & 0x3 | 0x8));
-			});
+		private static final String accessToken() throws Exception {
+			return sessionTokens().accessToken();
 		}
 		
-		public static final Device createDevice(String id, String type, String name) throws Exception {
-			String body = Net.queryString("slotType", type, "title", name, "deviceUID", id);
-			HttpHeaders headers = Web.Headers.ofSingle(
-				"Referer", "https://prima.iprima.cz/",
-				"X-Requested-With", "XMLHttpRequest"
+		private static final Device parseDevice(JSONCollection data) {
+			return new Device(
+				data.getString("slotId"),
+				data.getString("slotType"),
+				data.getString("title")
 			);
-			Request request = Request.of(Net.uri(URL_ADD_DEVICE)).headers(headers).POST(body);
+		}
+		
+		private static final Stream<Device> listStream() throws Exception {
+			final String method = "user.device.slot.list";
 			
-			// It is actually enough to just to call the endpoint even if it returns errors,
-			// so ignore them, if there are any.
-			try(Response.OfStream response = Web.requestStream(request)) {
-				return new Device(id, type, name);
-			}
-		}
-		
-		public static final boolean removeDevice(String id) throws Exception {
-			SSDCollection json = SSDCollection.empty();
-			json.setDirect("slotType", "WEB");
-			json.setDirect("slotId", id);
-			String body = json.toJSON(true);
-			HttpHeaders headers = Web.Headers.ofSingle("Referer", "https://prima.iprima.cz/");
-			Request request = Request.of(Net.uri(URL_REMOVE_DEVICE)).headers(headers).POST(body);
-			try(Response.OfStream response = Web.requestStream(request)) {
-				return response.statusCode() == 200;
-			}
-		}
-		
-		private static final Device createDevice() throws Exception {
-			return createDevice(generateDeviceId(), DEVICE_TYPE, DEVICE_NAME);
-		}
-		
-		public static final String deviceId() throws Exception {
-			if(deviceId == null) {
-				Device device = listDevices().stream()
-					.filter((d) -> d.type().equals(DEVICE_TYPE))
-					.findFirst().orElse(null);
-				
-				if(device == null) {
-					device = createDevice();
-				}
-				
-				deviceId = device.id();
-			}
+			JSONCollection response = RPC.request(
+				method,
+				"_accessToken", accessToken()
+			);
 			
-			return deviceId;
+			return Utils.stream(response.getCollection("data").collectionsIterable())
+						.map(Devices::parseDevice);
+		}
+		
+		public static final List<Device> list() throws Exception {
+			return listStream().collect(Collectors.toList());
+		}
+		
+		public static final Device create(String name) throws Exception {
+			final String method = "user.device.slot.add";
+			
+			JSONCollection response = RPC.request(
+				method,
+				"_accessToken", accessToken(),
+				"deviceSlotName", name,
+				"deviceSlotType", DEFAULT_DEVICE_TYPE,
+				"deviceUid", null
+			);
+			
+			return parseDevice(response.getCollection("data"));
+		}
+		
+		public static final Device createDefault() throws Exception {
+			return create(DEFAULT_DEVICE_NAME);
+		}
+		
+		public static final boolean isValid(Device device) throws Exception {
+			final String method = "user.device.slot.check";
+			
+			JSONCollection response = RPC.request(
+				method,
+				"_accessToken", accessToken(),
+				"slotId", device.id()
+			);
+			
+			return response.getBoolean("data.valid");
+		}
+		
+		public static final Device get(String name) throws Exception {
+			return listStream().filter((d) -> d.name().equals(name)).findFirst().orElse(null);
+		}
+		
+		public static final Device getDefault() throws Exception {
+			return get(DEFAULT_DEVICE_NAME);
 		}
 		
 		public static final class Device {
@@ -314,31 +366,15 @@ public final class IPrimaAuthenticator {
 			private final String slotType;
 			private final String slotName;
 			
-			private Device(String slotId, String slotType, String slotName) {
-				this.slotId = slotId;
-				this.slotType = slotType;
-				this.slotName = slotName;
+			protected Device(String slotId, String slotType, String slotName) {
+				this.slotId = Objects.requireNonNull(slotId);
+				this.slotType = Objects.requireNonNull(slotType);
+				this.slotName = Objects.requireNonNull(slotName);
 			}
 			
-			public static final Device fromRemoveButton(Element button) {
-				String slotId = button.attr("data-item-id");
-				String slotType = button.attr("data-item-type");
-				String slotName = button.attr("data-item-label");
-				return new Device(slotId, slotType, slotName);
-			}
-			
-			public String id() {
-				return slotId;
-			}
-			
-			public String type() {
-				return slotType;
-			}
-			
-			@SuppressWarnings("unused")
-			public String name() {
-				return slotName;
-			}
+			public String id() { return slotId; }
+			public String type() { return slotType; }
+			public String name() { return slotName; }
 		}
 	}
 	
@@ -348,15 +384,18 @@ public final class IPrimaAuthenticator {
 		private final String accessToken;
 		private final String refreshToken;
 		
-		private SessionTokens(String rawString, String accessToken, String refreshToken) {
+		protected SessionTokens(String rawString, String accessToken, String refreshToken) {
 			this.rawString = rawString;
 			this.accessToken = accessToken;
 			this.refreshToken = refreshToken;
 		}
 		
 		public static final SessionTokens parse(JSONCollection json) {
-			return new SessionTokens(json.toString(true), json.getString("access_token"),
-				json.getString("refresh_token"));
+			return new SessionTokens(
+				json.toString(true),
+				json.getString("access_token"),
+				json.getString("refresh_token")
+			);
 		}
 		
 		public final String tokenDataString() {
@@ -366,28 +405,23 @@ public final class IPrimaAuthenticator {
 			return Utils.base64URLEncode(data.toJSON(true));
 		}
 		
-		public String rawString() {
-			return rawString;
-		}
-		
-		public final String accessToken() {
-			return accessToken;
-		}
+		public String rawString() { return rawString; }
+		public String accessToken() { return accessToken; }
 	}
 	
 	public static final class SessionData {
 		
 		private final String rawString;
 		private final String accessToken;
-		private final String deviceId;
 		private final String profileId;
+		private final String deviceId;
 		private Map<String, String> requestHeaders;
 		
-		public SessionData(String rawString, String accessToken, String deviceId, String profileId) {
+		protected SessionData(String rawString, String accessToken, String profileId, String deviceId) {
 			this.rawString = rawString;
 			this.accessToken = accessToken;
-			this.deviceId = deviceId;
 			this.profileId = profileId;
+			this.deviceId = deviceId;
 		}
 		
 		public final Map<String, String> requestHeaders() {
@@ -395,27 +429,18 @@ public final class IPrimaAuthenticator {
 				requestHeaders = Utils.toMap(
 					"X-OTT-Access-Token", accessToken,
 					"X-OTT-CDN-Url-Type", "WEB",
-					"X-OTT-Device", deviceId
+					"X-OTT-Device", deviceId,
+					"X-OTT-User-SubProfile", profileId
 				);
 			}
+			
 			return requestHeaders;
 		}
 		
-		public String rawString() {
-			return rawString;
-		}
-		
-		public String accessToken() {
-			return accessToken;
-		}
-		
-		public String deviceId() {
-			return deviceId;
-		}
-		
-		public String profileId() {
-			return profileId;
-		}
+		public String rawString() { return rawString; }
+		public String accessToken() { return accessToken; }
+		public String profileId() { return profileId; }
+		public String deviceId() { return deviceId; }
 	}
 	
 	public static final class AuthenticationData {
@@ -443,6 +468,10 @@ public final class IPrimaAuthenticator {
 		
 		public static final String password() {
 			return valueOrElse(IPrimaCredentials::password, Obf::b);
+		}
+		
+		public static final String profile() {
+			return valueOrElse(IPrimaCredentials::profile, null);
 		}
 	}
 	

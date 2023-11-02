@@ -24,8 +24,7 @@ import sune.app.mediadown.gui.GUI.CredentialsRegistry;
 import sune.app.mediadown.gui.GUI.CredentialsRegistry.CredentialsEntry;
 import sune.app.mediadown.gui.GUI.CredentialsRegistry.CredentialsType;
 import sune.app.mediadown.language.Translation;
-import sune.app.mediadown.media_engine.iprima.IPrimaAuthenticator.ProfileManager;
-import sune.app.mediadown.media_engine.iprima.IPrimaAuthenticator.ProfileManager.Profile;
+import sune.app.mediadown.media_engine.iprima.PrimaAuthenticator.Profiles.Profile;
 import sune.app.mediadown.plugin.Plugin;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginConfiguration;
@@ -248,7 +247,7 @@ public final class IPrimaEnginePlugin extends PluginBase {
 			}
 			
 			private final List<Profile> profiles() throws Exception {
-				return ProfileManager.profiles();
+				return PrimaAuthenticator.profiles();
 			}
 			
 			private final Profile automaticProfile() {
@@ -275,7 +274,7 @@ public final class IPrimaEnginePlugin extends PluginBase {
 					progressText(translation.getSingle("progress.log_in"));
 					
 					try {
-						IPrimaAuthenticator.SessionData session = IPrimaAuthenticator.getSessionData();
+						PrimaAuthenticator.SessionData session = PrimaAuthenticator.sessionData();
 						
 						if(session != null) {
 							progressText(translation.getSingle("progress.profiles"));
