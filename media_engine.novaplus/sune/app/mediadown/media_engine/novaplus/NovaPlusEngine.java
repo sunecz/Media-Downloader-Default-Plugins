@@ -281,7 +281,7 @@ public final class NovaPlusEngine implements MediaEngine {
 			return; // Do not continue
 		}
 		
-		String iframeURL = iframe.absUrl("data-src");
+		String iframeURL = iframe.absUrl("src");
 		String content = Web.request(Request.of(Net.uri(iframeURL)).GET()).body();
 		
 		if(content == null || content.isEmpty()) {
