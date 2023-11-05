@@ -113,7 +113,10 @@ public final class IPrimaEnginePlugin extends PluginBase {
 		if(credentialsMigrated) {
 			// Save the configuration so that the migrated fields are removed
 			PluginConfiguration configuration = getContext().getConfiguration();
-			NIO.save(configuration.path(), configuration.data().toString());
+			
+			if(configuration != null) {
+				NIO.save(configuration.path(), configuration.data().toString());
+			}
 		}
 	}
 	
