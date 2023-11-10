@@ -201,7 +201,7 @@ final class IPrimaHelper {
 					Utils.merge(mutRequestHeaders, sessionData.requestHeaders());
 				} catch(Exception ex) {
 					// Notify the user that the HD sources may not be available due to inability to log in.
-					MediaDownloader.error(new IllegalStateException("Unable to log in to the iPrima website.", ex));
+					PrimaCommon.error(ex);
 				}
 				
 				HttpHeaders requestHeaders = Web.Headers.ofSingleMap(mutRequestHeaders);
@@ -832,7 +832,7 @@ final class IPrimaHelper {
 					Utils.merge(mutRequestHeaders, sessionData.requestHeaders());
 				} catch(Exception ex) {
 					// Notify the user that the HD sources may not be available due to inability to log in.
-					MediaDownloader.error(new IllegalStateException("Unable to log in to the iPrima website.", ex));
+					PrimaCommon.error(ex);
 				}
 				
 				HttpHeaders requestHeaders = Web.Headers.ofSingleMap(mutRequestHeaders);

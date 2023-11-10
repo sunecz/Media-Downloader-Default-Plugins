@@ -22,6 +22,10 @@
 						title: "Chyba",
 						text:  "Média nelze získat z následujícího důvodů:"
 					},
+					incorrect_auth_data: {
+						title: "Chyba",
+						text:  "Nelze se přihlásit na web iPrima. Zkontrolujte prosím své přihlašovací údaje."
+					},
 					value: {
 						USER_SLOT_LIMIT_COUNT:     "Dosažen limit počtu zařízení.",
 						USER_SLOT_LIMIT_CHANGE:    "Dosažen limit maximálního počtu změn.",

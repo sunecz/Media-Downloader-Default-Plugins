@@ -8,6 +8,10 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.zip.GZIPInputStream;
 
+import sune.app.mediadown.MediaDownloader;
+import sune.app.mediadown.gui.Dialog;
+import sune.app.mediadown.language.Translation;
+import sune.app.mediadown.media_engine.iprima.PrimaAuthenticator.IncorrectAuthDataException;
 import sune.app.mediadown.net.Net;
 import sune.app.mediadown.net.Web;
 import sune.app.mediadown.net.Web.Response;
@@ -21,6 +25,22 @@ public final class PrimaCommon {
 	
 	// Forbid anyone to create an instance of this class
 	private PrimaCommon() {
+	}
+	
+	public static final void error(Throwable throwable) {
+		if(throwable == null) {
+			return;
+		}
+		
+		// Special error message for failed login
+		if(throwable instanceof IncorrectAuthDataException
+				|| throwable.getCause() instanceof IncorrectAuthDataException) {
+			Translation tr = IPrimaHelper.translation().getTranslation("error.incorrect_auth_data");
+			Dialog.showError(tr.getSingle("title"), tr.getSingle("text"));
+			return; // Do not continue
+		}
+		
+		MediaDownloader.error(throwable);
 	}
 	
 	public static interface JSONSerializable {

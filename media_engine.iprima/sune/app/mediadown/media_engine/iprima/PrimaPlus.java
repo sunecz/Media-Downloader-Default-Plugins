@@ -17,7 +17,6 @@ import java.util.function.BiFunction;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import sune.app.mediadown.MediaDownloader;
 import sune.app.mediadown.concurrent.VarLoader;
 import sune.app.mediadown.entity.Episode;
 import sune.app.mediadown.entity.Program;
@@ -255,7 +254,7 @@ final class PrimaPlus implements IPrima {
 				return PrimaAuthenticator.sessionData();
 			} catch(Exception ex) {
 				// Notify the user that the HD sources may not be available due to inability to log in.
-				MediaDownloader.error(new IllegalStateException("Unable to log in to the iPrima website.", ex));
+				PrimaCommon.error(ex);
 			}
 			
 			return null;
@@ -266,7 +265,7 @@ final class PrimaPlus implements IPrima {
 				return sessionHeaders.valueChecked();
 			} catch(Exception ex) {
 				// Notify the user that the HD sources may not be available due to inability to log in.
-				MediaDownloader.error(new IllegalStateException("Unable to obtain authentication headers.", ex));
+				PrimaCommon.error(ex);
 			}
 			
 			return Web.Headers.empty();

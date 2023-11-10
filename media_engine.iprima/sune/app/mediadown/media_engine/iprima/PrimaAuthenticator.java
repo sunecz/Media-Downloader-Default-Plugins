@@ -41,6 +41,7 @@ public final class PrimaAuthenticator {
 	private static final String URL_OAUTH_AUTHORIZE;
 	private static final String URL_USER_AUTH;
 	private static final String URL_PROFILE_SELECT;
+	private static final String URL_SUCCESSFUL_LOGIN;
 	
 	private static final VarLoader<SessionTokens> sessionTokens;
 	private static final VarLoader<SessionData> sessionData;
@@ -51,6 +52,7 @@ public final class PrimaAuthenticator {
 		URL_OAUTH_AUTHORIZE = "https://auth.iprima.cz/oauth2/authorize";
 		URL_USER_AUTH = "https://www.iprima.cz/sso/login?auth_token_code=%{code}s";
 		URL_PROFILE_SELECT = "https://auth.iprima.cz/user/profile-select-perform/%{profile_id}s?continueUrl=/user/login";
+		URL_SUCCESSFUL_LOGIN = "https://auth.iprima.cz/sso/auth-check";
 		sessionTokens = VarLoader.ofChecked(PrimaAuthenticator::initSessionTokens);
 		sessionData = VarLoader.ofChecked(PrimaAuthenticator::initSessionData);
 	}
@@ -64,7 +66,16 @@ public final class PrimaAuthenticator {
 		String csrfToken = HTML.parse(response.body()).selectFirst("input[name='_csrf_token']").val();
 		String body = Net.queryString("_email", email, "_password", password, "_csrf_token", csrfToken);
 		response = Web.request(Request.of(Net.uri(URL_OAUTH_LOGIN)).POST(body));
+		
+		if(!isSuccessfulLoginURI(response.uri())) {
+			throw new IncorrectAuthDataException();
+		}
+		
 		return selectConfiguredProfile(response);
+	}
+	
+	private static final boolean isSuccessfulLoginURI(URI uri) {
+		return Utils.beforeFirst(uri.toString(), "?").equals(URL_SUCCESSFUL_LOGIN);
 	}
 	
 	private static final String selectProfile(String profileId) throws Exception {
@@ -77,8 +88,7 @@ public final class PrimaAuthenticator {
 	}
 	
 	private static final List<Profile> profiles(Response.OfString response) throws Exception {
-		String url = response.uri().toString();
-		return Profiles.isProfileSelectPage(url)
+		return Profiles.isProfileSelectPage(response.uri())
 					? Profiles.extractProfiles(response.body())
 					: Profiles.list();
 	}
@@ -194,6 +204,14 @@ public final class PrimaAuthenticator {
 		return Cached.device();
 	}
 	
+	public static final class IncorrectAuthDataException extends Exception {
+		
+		private static final long serialVersionUID = -2161157785248283759L;
+		
+		public IncorrectAuthDataException() { super(); }
+		public IncorrectAuthDataException(Throwable cause) { super(cause); }
+	}
+	
 	private static final class Cached {
 		
 		private static final VarLoader<List<Profile>> profiles = VarLoader.ofChecked(Profiles::list);
@@ -249,8 +267,8 @@ public final class PrimaAuthenticator {
 		private Profiles() {
 		}
 		
-		public static final boolean isProfileSelectPage(String url) {
-			return url.startsWith(URL_PROFILE_PAGE);
+		public static final boolean isProfileSelectPage(URI uri) {
+			return uri.toString().startsWith(URL_PROFILE_PAGE);
 		}
 		
 		public static final List<Profile> extractProfiles(String content) throws Exception {

@@ -297,7 +297,7 @@ public final class IPrimaEnginePlugin extends PluginBase {
 							enableSelect(true);
 						}
 					} catch(Exception ex) {
-						MediaDownloader.error(ex);
+						PrimaCommon.error(ex);
 					} finally {
 						progressText(null);
 						itemsLoaded = true;
