@@ -7,7 +7,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Matcher;
-import java.util.stream.Collectors;
 
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -56,7 +55,7 @@ public final class MarkizaPlusEngine implements MediaEngine {
 	// Episodes
 	private static final String URL_EPISODES;
 	private static final String SEL_EPISODES = ".c-article-wrapper [class^='col-']";
-	private static final String SEL_EPISODES_LOAD_MORE = ".js-load-more-trigger .c-button";
+	private static final String SEL_EPISODES_LOAD_MORE = ".js-article-load-more .c-button";
 	
 	// Media
 	private static final String SEL_PLAYER_IFRAME = ".c-content iframe";
@@ -70,8 +69,7 @@ public final class MarkizaPlusEngine implements MediaEngine {
 		URL_EPISODES = "https://www.markiza.sk/api/v1/mixed/more"
 			+ "?page=%{page}d"
 			+ "&offset=%{offset}d"
-			+ "&content=%{content}s"
-			+ "%{excluded}s";
+			+ "&content=%{content}s";
 	}
 	
 	// Allow to create an instance when registering the engine
@@ -89,23 +87,27 @@ public final class MarkizaPlusEngine implements MediaEngine {
 		
 		for(Element elItem : elItems) {
 			if(elItem.selectFirst(".-voyo") != null) {
-				++counter; continue;
+				++counter;
+				continue; // Ignore Voyo-only episodes
 			}
 			
 			if(onlyFullEpisodes
 					&& elItem.selectFirst(".c-article[data-tracking-tile-asset=\"episode\"]") == null) {
-				continue;
+				continue; // Ignore non-full episodes
 			}
 			
 			Element elLink = elItem.selectFirst(".title > a");
-			if(elLink != null) {
-				String episodeURL = elLink.absUrl("href");
-				String episodeName = elLink.text();
-				Episode episode = new Episode(program, Net.uri(episodeURL), Utils.validateFileName(episodeName));
-				
-				if(!task.add(episode)) {
-					return 2; // Do not continue
-				}
+			
+			if(elLink == null) {
+				continue; // Ignore episodes with no link
+			}
+			
+			String episodeURL = elLink.absUrl("href");
+			String episodeName = elLink.text();
+			Episode episode = new Episode(program, Net.uri(episodeURL), episodeName);
+			
+			if(!task.add(episode)) {
+				return 2; // Do not continue
 			}
 		}
 		
@@ -115,29 +117,24 @@ public final class MarkizaPlusEngine implements MediaEngine {
 	
 	private final int parseEpisodesPage(ListTask<Episode> task, Program program, Document document,
 			boolean onlyFullEpisodes) throws Exception {
-		// Always obtain the first page from the document's content
-		Elements elItems = document.select(SEL_EPISODES);
-		if(elItems != null
-				&& parseEpisodeList(task, program, elItems, onlyFullEpisodes) == 2) {
-			return 1; // Do not continue
-		}
-		
 		// Check whether the load more button exists
 		Element elLoadMore = document.selectFirst(SEL_EPISODES_LOAD_MORE);
+		
 		if(elLoadMore == null) {
+			// Try to obtain the first page from the document's content
+			Elements elItems = document.select(SEL_EPISODES);
+			
+			if(elItems != null
+					&& parseEpisodeList(task, program, elItems, onlyFullEpisodes) == 2) {
+				return 1; // Do not continue
+			}
+			
 			return 0; // No more episodes present, nothing else to do
 		}
 		
 		// If the button exists, load the episodes the dynamic way
 		String href = elLoadMore.absUrl("data-href");
 		QueryArgument params = Net.queryDestruct(href);
-		List<QueryArgument> excludedList = params.arguments().stream()
-			.filter((a) -> a.name().startsWith("excluded"))
-			.collect(Collectors.toList());
-		// The random variable is here due to caching issue, this should circumvent it
-		String random = "&rand=" + String.valueOf(Math.random() * 1000000.0);
-		String excluded = random + '&' + Net.queryConstruct(excludedList);
-		int offset = Integer.valueOf(params.valueOf("offset"));
 		String content = params.valueOf("content");
 		
 		HttpHeaders headers = Web.Headers.ofSingle(
@@ -149,17 +146,17 @@ public final class MarkizaPlusEngine implements MediaEngine {
 		
 		// The offset can be negative, therefore we can use it to obtain the first page
 		// with non-filtered/altered content.
-		final int itemsPerPage = elItems != null ? elItems.size() : 0;
+		final int itemsPerPage = 6;
 		final int constPage = 2; // Must be > 1
+		int offset = -itemsPerPage;
 		
 		// Load episodes from other pages
-		elItems = null;
+		Elements elItems = null;
 		do {
 			String pageURL = Utils.format(URL_EPISODES,
-				"page",     constPage,
-				"offset",   offset,
-				"content",  content,
-				"excluded", excluded
+				"page",    constPage,
+				"offset",  offset,
+				"content", content
 			);
 			String pageContent = null;
 			Exception timeoutException = null;
@@ -274,11 +271,14 @@ public final class MarkizaPlusEngine implements MediaEngine {
 		return ListTask.of((task) -> {
 			for(String urlPath : List.of("videa/cele-epizody")) {
 				URI uri = Net.uri(Net.uriConcat(program.uri().toString(), urlPath));
-				
 				Response.OfString response = Web.request(Request.of(uri).GET());
-				if(response.statusCode() != 200) continue; // Probably does not exist, ignore
+				
+				if(response.statusCode() != 200) {
+					continue; // Probably does not exist, ignore
+				}
 				
 				Document document = HTML.parse(response.body(), uri);
+				
 				if(parseEpisodesPage(task, program, document, false) != 0) {
 					return;
 				}
