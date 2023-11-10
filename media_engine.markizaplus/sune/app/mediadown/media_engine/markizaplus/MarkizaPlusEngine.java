@@ -59,7 +59,7 @@ public final class MarkizaPlusEngine implements MediaEngine {
 	private static final String SEL_EPISODES_LOAD_MORE = ".js-load-more-trigger .c-button";
 	
 	// Media
-	private static final String SEL_PLAYER_IFRAME = ".iframe-wrap iframe";
+	private static final String SEL_PLAYER_IFRAME = ".c-content iframe";
 	private static final String TXT_PLAYER_CONFIG_BEGIN = "Player.init(";
 	
 	// Other
@@ -310,7 +310,7 @@ public final class MarkizaPlusEngine implements MediaEngine {
 				return; // Do not continue
 			}
 			
-			String iframeUrl = iframe.absUrl("data-src");
+			String iframeUrl = iframe.absUrl("src");
 			String content = Web.request(Request.of(Net.uri(iframeUrl)).GET()).body();
 			
 			if(content == null || content.isEmpty()) {
