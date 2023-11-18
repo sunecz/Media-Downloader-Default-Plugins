@@ -27,15 +27,18 @@ public final class WMSDownloader implements Downloader {
 	public DownloadResult download(Media media, Path destination, MediaDownloadConfiguration configuration)
 			throws Exception {
 		PluginConfiguration pluginConfiguration = PLUGIN.getContext().getConfiguration();
-		return new SegmentsDownloader(media, destination, configuration,
+		
+		return new SegmentsDownloader(
+			media, destination, configuration,
 			pluginConfiguration.intValue("maxRetryAttempts"),
 			pluginConfiguration.booleanValue("asyncTotalSize"),
-			pluginConfiguration.intValue("waitOnRetryMs"));
+			pluginConfiguration.intValue("waitOnRetryMs")
+		);
 	}
 	
 	@Override
 	public boolean isDownloadable(Media media) {
-		return !media.metadata().isProtected() && MediaUtils.isSegmentedMedia(media);
+		return MediaUtils.isSegmentedMedia(media);
 	}
 	
 	@Override
