@@ -30,7 +30,7 @@ public final class SMFDownloader implements Downloader {
 	
 	@Override
 	public boolean isDownloadable(Media media) {
-		return !media.metadata().isProtected() && !MediaUtils.isSegmentedMedia(media);
+		return !MediaUtils.isSegmentedMedia(media);
 	}
 	
 	@Override

@@ -158,10 +158,10 @@ public final class SimpleDownloader implements Download, DownloadResult {
 	
 	protected final List<Path> temporaryFiles(int count) {
 		List<Path> tempFiles = new ArrayList<>(count);
-		String fileNameNoType = Utils.fileNameNoType(dest.getFileName().toString());
+		String fileName = Utils.OfPath.fileName(dest);
 		
 		for(int i = 0; i < count; ++i) {
-			Path tempFile = dest.getParent().resolve(fileNameNoType + "." + i + ".part");
+			Path tempFile = dest.getParent().resolve(fileName + "." + i + ".part");
 			Ignore.callVoid(() -> NIO.deleteFile(tempFile));
 			tempFiles.add(tempFile);
 		}
@@ -218,7 +218,7 @@ public final class SimpleDownloader implements Download, DownloadResult {
 			// Download subtitles, if any
 			if(!subtitles.isEmpty()) {
 				Path subtitlesDir = dest.getParent();
-				String subtitlesFileName = Utils.fileNameNoType(dest.getFileName().toString());
+				String subtitlesFileName = Utils.OfPath.fileName(dest);
 				for(MediaHolder subtitle : subtitles) {
 					if(!checkIfCanContinue()) break;
 					SubtitlesMedia sm = (SubtitlesMedia) subtitle.media();
