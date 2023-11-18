@@ -91,7 +91,7 @@ public final class SimpleDownloader implements Download, DownloadResult {
 		return new AcceleratedFileDownloader(manager);
 	}
 	
-	private final boolean checkIfCanContinue() {
+	private final boolean checkState() {
 		// Check if paused
 		if(isPaused()) lockPause.await();
 		// Check if running
@@ -113,7 +113,7 @@ public final class SimpleDownloader implements Download, DownloadResult {
 		AtomicLong theSize = new AtomicLong();
 		try {
 			for(MediaHolder mh : Utils.iterable(Stream.concat(mediaHolders.stream(), subtitles.stream()).iterator())) {
-				if(!checkIfCanContinue()) {
+				if(!checkState()) {
 					// Important to interrupt before break
 					worker.stop();
 					// Exit the loop
@@ -156,7 +156,7 @@ public final class SimpleDownloader implements Download, DownloadResult {
 		pipelineResult = DownloadPipelineResult.doConversion(output, inputs, Metadata.of("duration", duration));
 	}
 	
-	protected final List<Path> temporaryFiles(int count) {
+	private final List<Path> temporaryFiles(int count) {
 		List<Path> tempFiles = new ArrayList<>(count);
 		String fileName = Utils.OfPath.fileName(dest);
 		
@@ -169,8 +169,64 @@ public final class SimpleDownloader implements Download, DownloadResult {
 		return tempFiles;
 	}
 	
+	private final boolean doDownload(MediaHolder mediaHolder, Path output) throws Exception {
+		downloader.start(
+			Request.of(mediaHolder.media().uri()).headers(HEADERS).GET(),
+			output,
+			DownloadConfiguration.ofTotalBytes(mediaHolder.size())
+		);
+		return true;
+	}
+	
+	private final Path subtitlesPath(SubtitlesMedia media, String fileName, Path directory) {
+		String extension = Opt.of(media.format().fileExtensions())
+			.ifFalse(List::isEmpty).map((l) -> l.get(0))
+			.orElseGet(() -> Utils.OfPath.info(media.uri().toString()).extension());
+		String language = media.language().codes().stream()
+			.sorted(SimpleDownloader::compareFirstLongestString)
+			.findFirst().orElse(null);
+		
+		return directory.resolve(Utils.OfString.concat(
+			".", Utils.OfString::nonEmpty, fileName, language, extension
+		));
+	}
+	
+	private final boolean download(List<MediaHolder> mediaHolders, List<Path> outputs) throws Exception {
+		Iterator<Path> output = outputs.iterator();
+		
+		for(MediaHolder mediaHolder : mediaHolders) {
+			if(!checkState() || !doDownload(mediaHolder, output.next())) {
+				return false;
+			}
+		}
+		
+		return true;
+	}
+	
+	private final boolean downloadSubtitles(List<MediaHolder> subtitles, Path destination) throws Exception {
+		if(subtitles.isEmpty()) {
+			return true;
+		}
+		
+		Path directory = destination.getParent();
+		String baseName = Utils.OfPath.baseName(destination);
+		
+		for(MediaHolder subtitle : subtitles) {
+			if(!checkState()) return false;
+			
+			SubtitlesMedia media = (SubtitlesMedia) subtitle.media();
+			Path path = subtitlesPath(media, baseName, directory);
+			
+			if(!doDownload(subtitle, path)) {
+				return false;
+			}
+		}
+		
+		return true;
+	}
+	
 	@Override
-	public final void start() throws Exception {
+	public void start() throws Exception {
 		if(state.is(TaskStates.STARTED) && state.is(TaskStates.RUNNING)) {
 			return; // Nothing to do
 		}
@@ -185,16 +241,19 @@ public final class SimpleDownloader implements Download, DownloadResult {
 		Ignore.callVoid(() -> NIO.createFile(dest));
 		
 		List<MediaHolder> mediaHolders = MediaUtils.solids(media).stream()
-				.filter((m) -> m.type().is(MediaType.VIDEO) || m.type().is(MediaType.AUDIO))
-				.collect(Collectors.toMap(Media::uri, Function.identity(), (a, b) -> a)).values().stream()
-				.map(MediaHolder::new)
-				.collect(Collectors.toList());
+			.filter((m) -> m.type().is(MediaType.VIDEO) || m.type().is(MediaType.AUDIO))
+			.collect(Collectors.toMap(Media::uri, Function.identity(), (a, b) -> a))
+			.values().stream()
+			.map(MediaHolder::new)
+			.collect(Collectors.toList());
+		
+		// Prepare the subtitles that should be downloaded, may be none
 		List<MediaHolder> subtitles = configuration.selectedMedia(MediaType.SUBTITLES).stream()
-				.map(MediaHolder::new)
-				.collect(Collectors.toList());
+			.map(MediaHolder::new)
+			.collect(Collectors.toList());
 		
 		computeTotalSize(mediaHolders, subtitles);
-		if(!checkIfCanContinue()) return;
+		if(!checkState()) return;
 		
 		downloadTracker = new DownloadTracker(size);
 		trackerManager.tracker(downloadTracker);
@@ -206,38 +265,10 @@ public final class SimpleDownloader implements Download, DownloadResult {
 			downloader.addEventListener(DownloadEvent.UPDATE, handler::onUpdate);
 			downloader.addEventListener(DownloadEvent.ERROR, handler::onError);
 			
-			Iterator<Path> tempFileIt = tempFiles.iterator();
-			for(MediaHolder mh : mediaHolders) {
-				if(!checkIfCanContinue()) break;
-				Path tempFile = tempFileIt.next();
-				Request request = Request.of(mh.media().uri()).headers(HEADERS).GET();
-				downloader.start(request, tempFile, DownloadConfiguration.ofTotalBytes(mh.size()));
-			}
-			
-			if(!checkIfCanContinue()) return;
-			// Download subtitles, if any
-			if(!subtitles.isEmpty()) {
-				Path subtitlesDir = dest.getParent();
-				String subtitlesFileName = Utils.OfPath.fileName(dest);
-				for(MediaHolder subtitle : subtitles) {
-					if(!checkIfCanContinue()) break;
-					SubtitlesMedia sm = (SubtitlesMedia) subtitle.media();
-					String subtitleType = Opt.of(sm.format().fileExtensions())
-							.ifFalse(List::isEmpty).map((l) -> l.get(0))
-							.orElseGet(() -> Utils.OfPath.info(sm.uri().toString()).extension());
-					String subtitleLanguage = sm.language().codes().stream()
-							.sorted(SimpleDownloader::compareFirstLongestString)
-							.findFirst().orElse(null);
-					String subtitleFileName = subtitlesFileName
-							+ (subtitleLanguage != null ? '.' + subtitleLanguage : "")
-							+ (!subtitleType.isEmpty() ? '.' + subtitleType : "");
-					Path subDest = subtitlesDir.resolve(subtitleFileName);
-					Request request = Request.of(sm.uri()).headers(HEADERS).GET();
-					downloader.start(request, subDest, DownloadConfiguration.ofTotalBytes(subtitle.size()));
-				}
-			}
-			
-			if(!checkIfCanContinue()) return;
+			download(mediaHolders, tempFiles);
+			downloadSubtitles(subtitles, dest);
+
+			if(!checkState()) return;
 			ResolvedMedia output = new ResolvedMedia(media, dest, configuration);
 			List<ConversionMedia> inputs = Utils.zip(mediaHolders.stream(), tempFiles.stream(), Pair::new)
 				.map((p) -> new ConversionMedia(p.a.media(), p.b, Double.NaN))
@@ -268,7 +299,7 @@ public final class SimpleDownloader implements Download, DownloadResult {
 	}
 	
 	@Override
-	public final void stop() throws Exception {
+	public void stop() throws Exception {
 		if(state.is(TaskStates.STOPPED))
 			return; // Nothing to do
 		
@@ -292,7 +323,7 @@ public final class SimpleDownloader implements Download, DownloadResult {
 	}
 	
 	@Override
-	public final void pause() throws Exception {
+	public void pause() throws Exception {
 		if(state.is(TaskStates.PAUSED))
 			return; // Nothing to do
 		
@@ -311,7 +342,7 @@ public final class SimpleDownloader implements Download, DownloadResult {
 	}
 	
 	@Override
-	public final void resume() throws Exception {
+	public void resume() throws Exception {
 		if(!state.is(TaskStates.PAUSED))
 			return; // Nothing to do
 		
@@ -340,27 +371,27 @@ public final class SimpleDownloader implements Download, DownloadResult {
 	}
 	
 	@Override
-	public final boolean isRunning() {
+	public boolean isRunning() {
 		return state.is(TaskStates.RUNNING);
 	}
 	
 	@Override
-	public final boolean isStarted() {
+	public boolean isStarted() {
 		return state.is(TaskStates.STARTED);
 	}
 	
 	@Override
-	public final boolean isDone() {
+	public boolean isDone() {
 		return state.is(TaskStates.DONE);
 	}
 	
 	@Override
-	public final boolean isPaused() {
+	public boolean isPaused() {
 		return state.is(TaskStates.PAUSED);
 	}
 	
 	@Override
-	public final boolean isStopped() {
+	public boolean isStopped() {
 		return state.is(TaskStates.STOPPED);
 	}
 	
