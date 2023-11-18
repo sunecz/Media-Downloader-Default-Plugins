@@ -23,6 +23,7 @@ import sune.app.mediadown.entity.Program;
 import sune.app.mediadown.gui.Dialog;
 import sune.app.mediadown.language.Translation;
 import sune.app.mediadown.media.Media;
+import sune.app.mediadown.media.MediaContainer;
 import sune.app.mediadown.media.MediaFormat;
 import sune.app.mediadown.media.MediaLanguage;
 import sune.app.mediadown.media.MediaMetadata;
@@ -539,7 +540,7 @@ final class PrimaPlus implements IPrima {
 								break;
 							}
 							default: {
-								media.forEach((m) -> MediaUtils.appendMedia(Utils.cast(m), subtitles));
+								media.forEach((m) -> ((MediaContainer.Builder<?, ?>) m).addMedia(subtitles));
 								break;
 							}
 						}
