@@ -159,6 +159,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 	private static final OptCondition<Media> conditionIsSegmentedAndNotSubtitles() {
 		return OptCondition.ofAll(
 			Media::isSegmented,
+			Media::isPhysical,
 			(m) -> !m.type().is(MediaType.SUBTITLES)
 		);
 	}
@@ -167,8 +168,8 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		return MediaUtils.filterRecursive(media, conditionIsSegmentedAndNotSubtitles());
 	}
 	
-	private static final FileSegmentsHolder<?> mediaToSegmentsHolder(Media media) {
-		return ((SegmentedMedia) media).segments().get(0);
+	private static final FileSegmentsHolder mediaToSegmentsHolder(Media media) {
+		return ((SegmentedMedia) media).segments();
 	}
 	
 	private static final <T> Stream<T> stream(List<? extends T> a, List<? extends T> b) {
@@ -292,7 +293,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		return downloader;
 	}
 	
-	private final boolean doDownload(FileSegmentsHolder<?> segmentsHolder, Path output) throws Exception {
+	private final boolean doDownload(FileSegmentsHolder segmentsHolder, Path output) throws Exception {
 		long bytes = 0L;
 		
 		for(FileSegment segment : segmentsHolder.segments()) {
@@ -406,7 +407,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 	
 	private final boolean doDownload(Media media, Path output) throws Exception {
 		return media.isSegmented()
-			? doDownload(((SegmentedMedia) media).segments().get(0), output)
+			? doDownload(((SegmentedMedia) media).segments(), output)
 			: doDownload(Request.of(media.uri()).headers(HEADERS).GET(), output);
 	}
 	
@@ -423,10 +424,10 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		));
 	}
 	
-	private final boolean download(List<FileSegmentsHolder<?>> segmentsHolders, List<Path> outputs) throws Exception {
+	private final boolean download(List<FileSegmentsHolder> segmentsHolders, List<Path> outputs) throws Exception {
 		Iterator<Path> output = outputs.iterator();
 		
-		for(FileSegmentsHolder<?> segmentsHolder : segmentsHolders) {
+		for(FileSegmentsHolder segmentsHolder : segmentsHolders) {
 			if(!doDownload(segmentsHolder, output.next())) {
 				return false;
 			}
@@ -473,7 +474,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		
 		// Prepare the segments that should be downloaded
 		List<Media> mediaSingles = segmentedMedia(media);
-		List<FileSegmentsHolder<?>> segmentsHolders = mediaSingles.stream()
+		List<FileSegmentsHolder> segmentsHolders = mediaSingles.stream()
 			.map(SegmentsDownloader::mediaToSegmentsHolder)
 			.collect(Collectors.toList());
 		
