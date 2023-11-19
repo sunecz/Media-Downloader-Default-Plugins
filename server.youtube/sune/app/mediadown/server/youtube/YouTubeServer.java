@@ -17,7 +17,6 @@ import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 
 import javafx.scene.image.Image;
-import sune.app.mediadown.download.segment.FileSegment;
 import sune.app.mediadown.download.segment.FileSegmentsHolder;
 import sune.app.mediadown.download.segment.RemoteFileSegment;
 import sune.app.mediadown.download.segment.RemoteFileSegmentsHolder;
@@ -172,8 +171,8 @@ public class YouTubeServer implements Server {
 						// When YouTube provides data for playback it first sends a burst of data
 						// and then slowly sends all the other data, i.e. the sending is throttled.
 						// We can bypass it using preemptive segmentation of the whole file.
-						FileSegmentsHolder<? extends FileSegment> segmentsVideo = Segmenter.buildSegments(urlVideo);
-						FileSegmentsHolder<? extends FileSegment> segmentsAudio = Segmenter.buildSegments(urlAudio);
+						FileSegmentsHolder segmentsVideo = Segmenter.buildSegments(urlVideo);
+						FileSegmentsHolder segmentsAudio = Segmenter.buildSegments(urlAudio);
 						
 						Media media = VideoMediaContainer.separated().media(
 							VideoMedia.segmented().source(source)
@@ -307,7 +306,7 @@ public class YouTubeServer implements Server {
 			return (duration * repeat) * MS_TO_SECONDS;
 		}
 		
-		public static final FileSegmentsHolder<? extends FileSegment> buildSegments(String url) throws Exception {
+		public static final FileSegmentsHolder buildSegments(String url) throws Exception {
 			QueryArgument args = Net.queryDestruct(url);
 			
 			if(args.valueOf("source").equals("yt_otf")) {
