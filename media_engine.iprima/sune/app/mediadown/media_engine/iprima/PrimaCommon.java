@@ -6,12 +6,12 @@ import java.net.http.HttpHeaders;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Objects;
 import java.util.zip.GZIPInputStream;
 
 import sune.app.mediadown.MediaDownloader;
 import sune.app.mediadown.gui.Dialog;
 import sune.app.mediadown.language.Translation;
-import sune.app.mediadown.media_engine.iprima.PrimaAuthenticator.IncorrectAuthDataException;
 import sune.app.mediadown.net.Net;
 import sune.app.mediadown.net.Web;
 import sune.app.mediadown.net.Web.Response;
@@ -32,15 +32,38 @@ public final class PrimaCommon {
 			return;
 		}
 		
-		// Special error message for failed login
-		if(throwable instanceof IncorrectAuthDataException
-				|| throwable.getCause() instanceof IncorrectAuthDataException) {
-			Translation tr = IPrimaHelper.translation().getTranslation("error.incorrect_auth_data");
+		// Special handling of translatable exceptions
+		Throwable th = null;
+		if((th = throwable) instanceof TranslatableException
+				|| (th = throwable.getCause()) instanceof TranslatableException) {
+			TranslatableException tex = (TranslatableException) th;
+			Translation tr = IPrimaHelper.translation().getTranslation(tex.translationPath());
 			Dialog.showError(tr.getSingle("title"), tr.getSingle("text"));
 			return; // Do not continue
 		}
 		
 		MediaDownloader.error(throwable);
+	}
+	
+	public static abstract class TranslatableException extends Exception {
+		
+		private static final long serialVersionUID = 2966737246033320221L;
+		
+		protected final String translationPath;
+		
+		protected TranslatableException(String translationPath) {
+			super();
+			this.translationPath = Objects.requireNonNull(translationPath);
+		}
+		
+		protected TranslatableException(String translationPath, Throwable cause) {
+			super(cause);
+			this.translationPath = Objects.requireNonNull(translationPath);
+		}
+		
+		public String translationPath() {
+			return translationPath;
+		}
 	}
 	
 	public static interface JSONSerializable {

@@ -26,6 +26,10 @@
 						title: "Error",
 						text:  "Unable to log in to the iPrima website. Please check your login credentials."
 					},
+					no_profile_found: {
+						title: "Error",
+						text:  "No profile found for the account. Make sure at least one profile exists."
+					},
 					value: {
 						USER_SLOT_LIMIT_COUNT:     "Device limit reached.",
 						USER_SLOT_LIMIT_CHANGE:    "Maximum number of changes limit reached.",
