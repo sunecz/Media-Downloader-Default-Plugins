@@ -22,6 +22,7 @@ import sune.app.mediadown.media_engine.iprima.IPrimaEnginePlugin.IPrimaCredentia
 import sune.app.mediadown.media_engine.iprima.PrimaAuthenticator.Devices.Device;
 import sune.app.mediadown.media_engine.iprima.PrimaAuthenticator.Profiles.Profile;
 import sune.app.mediadown.media_engine.iprima.PrimaCommon.RPC;
+import sune.app.mediadown.media_engine.iprima.PrimaCommon.TranslatableException;
 import sune.app.mediadown.net.HTML;
 import sune.app.mediadown.net.Net;
 import sune.app.mediadown.net.Web;
@@ -204,12 +205,22 @@ public final class PrimaAuthenticator {
 		return Cached.device();
 	}
 	
-	public static final class IncorrectAuthDataException extends Exception {
+	public static final class IncorrectAuthDataException extends TranslatableException {
 		
 		private static final long serialVersionUID = -2161157785248283759L;
+		private static final String TRANSLATION_PATH = "error.incorrect_auth_data";
 		
-		public IncorrectAuthDataException() { super(); }
-		public IncorrectAuthDataException(Throwable cause) { super(cause); }
+		public IncorrectAuthDataException() { super(TRANSLATION_PATH); }
+		public IncorrectAuthDataException(Throwable cause) { super(TRANSLATION_PATH, cause); }
+	}
+	
+	public static final class NoProfileFoundException extends TranslatableException {
+		
+		private static final long serialVersionUID = 4299510148961236319L;
+		private static final String TRANSLATION_PATH = "error.no_profile_found";
+		
+		public NoProfileFoundException() { super(TRANSLATION_PATH); }
+		public NoProfileFoundException(Throwable cause) { super(TRANSLATION_PATH, cause); }
 	}
 	
 	private static final class Cached {
@@ -224,6 +235,11 @@ public final class PrimaAuthenticator {
 		
 		private static final Profile getProfile() throws Exception {
 			List<Profile> profiles = profiles();
+			
+			if(profiles.isEmpty()) {
+				throw new NoProfileFoundException();
+			}
+			
 			String profileId = AuthenticationData.profile();
 			
 			if(profileId.equalsIgnoreCase("auto")) {
@@ -231,8 +247,9 @@ public final class PrimaAuthenticator {
 			}
 			
 			return profiles.stream()
-						.filter((p) -> p.id().equalsIgnoreCase(profileId))
-						.findFirst().orElse(null);
+				.filter((p) -> p.id().equalsIgnoreCase(profileId))
+				.findFirst()
+				.orElseGet(() -> profiles.get(0));
 		}
 		
 		private static final Device getDevice() throws Exception {

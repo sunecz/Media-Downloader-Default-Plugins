@@ -26,6 +26,10 @@
 						title: "Chyba",
 						text:  "Nelze se přihlásit na web iPrima. Zkontrolujte prosím své přihlašovací údaje."
 					},
+					no_profile_found: {
+						title: "Chyba",
+						text:  "Pro účet nebyl nalezen žádný profil. Ujistěte se, že existuje alespoň jeden profil."
+					},
 					value: {
 						USER_SLOT_LIMIT_COUNT:     "Dosažen limit počtu zařízení.",
 						USER_SLOT_LIMIT_CHANGE:    "Dosažen limit maximálního počtu změn.",

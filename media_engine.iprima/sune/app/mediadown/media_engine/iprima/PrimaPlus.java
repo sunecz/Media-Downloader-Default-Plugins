@@ -242,11 +242,10 @@ final class PrimaPlus implements IPrima {
 			Map<String, String> mutRequestHeaders = Utils.toMap("Referer", "https://www.iprima.cz/");
 			PrimaAuthenticator.SessionData sessionData = logIn();
 			
-			if(sessionData == null) {
-				throw new IllegalStateException("Session data are null");
+			if(sessionData != null) {
+				Utils.merge(mutRequestHeaders, sessionData.requestHeaders());
 			}
 			
-			Utils.merge(mutRequestHeaders, sessionData.requestHeaders());
 			return Web.Headers.ofSingleMap(mutRequestHeaders);
 		}
 		
