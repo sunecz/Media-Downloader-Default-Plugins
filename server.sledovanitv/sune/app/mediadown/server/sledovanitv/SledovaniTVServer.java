@@ -4,6 +4,11 @@ import java.io.IOException;
 import java.net.HttpCookie;
 import java.net.URI;
 import java.net.http.HttpClient.Redirect;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeFormatterBuilder;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -19,10 +24,15 @@ import sune.app.mediadown.entity.Server;
 import sune.app.mediadown.gui.Dialog;
 import sune.app.mediadown.language.Translation;
 import sune.app.mediadown.media.Media;
+import sune.app.mediadown.media.MediaContainer;
+import sune.app.mediadown.media.MediaFormat;
 import sune.app.mediadown.media.MediaLanguage;
 import sune.app.mediadown.media.MediaMetadata;
 import sune.app.mediadown.media.MediaSource;
+import sune.app.mediadown.media.MediaType;
 import sune.app.mediadown.media.MediaUtils;
+import sune.app.mediadown.media.SegmentedMedia;
+import sune.app.mediadown.media.format.M3U.M3USegment;
 import sune.app.mediadown.net.HTML;
 import sune.app.mediadown.net.Net;
 import sune.app.mediadown.net.Web;
@@ -92,16 +102,42 @@ public class SledovaniTVServer implements Server {
 			JSONCollection info = recordingInfo(uri);
 			URI streamUri = Net.uri(info.getString("url"));
 			String title = info.getString("title");
-			
 			MediaSource source = MediaSource.of(this);
-			MediaMetadata metadata = MediaMetadata.empty();
 			
-			List<Media> media = MediaUtils.createMedia(
-				source, streamUri, uri, title, MediaLanguage.UNKNOWN, metadata
+			List<Media.Builder<?, ?>> builders = MediaUtils.createMediaBuilders(
+				source, streamUri, uri, title, MediaLanguage.UNKNOWN, MediaMetadata.empty()
 			);
 			
-			for(Media s : media) {
-				if(!task.add(s)) {
+			for(Media.Builder<?, ?> builder : builders) {
+				if(!builder.format().is(MediaFormat.M3U8)) {
+					continue; // Currently only M3U8 segments are supported
+				}
+				
+				for(Media.Builder<?, ?> mb : ((MediaContainer.Builder<?, ?>) builder).media()) {
+					if(!(mb instanceof SegmentedMedia.Builder)
+							|| !mb.type().is(MediaType.SUBTITLES)
+							|| !mb.format().is(MediaFormat.VTT)) {
+						continue; // Currently only segmened VTT subtitles are supported
+					}
+					
+					SegmentedMedia.Builder<?, ?> smb = (SegmentedMedia.Builder<?, ?>) mb;
+					M3USegment firstSegment = (M3USegment) smb.segments().segments().get(0);
+					String startTime = SegmentsHelper.timestamp(firstSegment);
+					
+					MediaMetadata metadata = MediaMetadata.of(
+						"subtitles.retime.strategy", "startAtZero",
+						"subtitles.retime.startTime", startTime,
+						"subtitles.retime.ignoreHours", true
+					);
+					
+					mb.metadata(MediaMetadata.of(mb.metadata(), metadata));
+				}
+			}
+			
+			for(Media.Builder<?, ?> builder : builders) {
+				Media m = builder.build();
+				
+				if(!task.add(m)) {
 					return; // Do not continue
 				}
 			}
@@ -232,6 +268,30 @@ public class SledovaniTVServer implements Server {
 			public static final String password() {
 				return valueOrElse(EmailCredentials::password, "");
 			}
+		}
+	}
+	
+	private static final class SegmentsHelper {
+		
+		private static DateTimeFormatter dateTimeParser;
+		
+		private SegmentsHelper() {
+		}
+		
+		private static final DateTimeFormatter dateTimeParser() {
+			if(dateTimeParser == null) {
+				dateTimeParser = new DateTimeFormatterBuilder()
+					.append(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+					.optionalStart().appendOffset("+HHMM", "+0000").optionalEnd()
+					.toFormatter();
+			}
+			
+			return dateTimeParser;
+		}
+		
+		public static final String timestamp(M3USegment segment) {
+			ZonedDateTime instant = Instant.from(dateTimeParser().parse(segment.dateTime())).atZone(ZoneOffset.UTC);
+			return DateTimeFormatter.ISO_LOCAL_TIME.format(instant);
 		}
 	}
 }
