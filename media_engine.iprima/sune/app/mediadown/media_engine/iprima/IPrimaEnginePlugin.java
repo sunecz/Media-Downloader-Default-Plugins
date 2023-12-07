@@ -7,7 +7,6 @@ import java.util.Objects;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
-import javafx.scene.control.PasswordField;
 import javafx.scene.control.TextField;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.Pane;
@@ -23,6 +22,7 @@ import sune.app.mediadown.entity.MediaEngines;
 import sune.app.mediadown.gui.GUI.CredentialsRegistry;
 import sune.app.mediadown.gui.GUI.CredentialsRegistry.CredentialsEntry;
 import sune.app.mediadown.gui.GUI.CredentialsRegistry.CredentialsType;
+import sune.app.mediadown.gui.control.PasswordFieldPane;
 import sune.app.mediadown.language.Translation;
 import sune.app.mediadown.media_engine.iprima.PrimaAuthenticator.Profiles.Profile;
 import sune.app.mediadown.plugin.Plugin;
@@ -180,7 +180,7 @@ public final class IPrimaEnginePlugin extends PluginBase {
 			TextField txtEmail = new TextField();
 			txtEmail.getStyleClass().add("field-email");
 			Label lblPassword = new Label(tr.getSingle("password"));
-			PasswordField txtPassword = new PasswordField();
+			PasswordFieldPane txtPassword = new PasswordFieldPane();
 			txtPassword.getStyleClass().add("field-password");
 			Label lblProfile = new Label(tr.getSingle("profile"));
 			ProfileSelect cmbProfile = new ProfileSelect(translation.getTranslation("profile"));
@@ -206,7 +206,7 @@ public final class IPrimaEnginePlugin extends PluginBase {
 		public void load(Pane pane, IPrimaCredentials credentials) {
 			GridPane grid = (GridPane) pane;
 			TextField txtEmail = (TextField) grid.lookup(".field-email");
-			PasswordField txtPassword = (PasswordField) grid.lookup(".field-password");
+			PasswordFieldPane txtPassword = (PasswordFieldPane) grid.lookup(".field-password");
 			ProfileSelect cmbProfile = (ProfileSelect) grid.lookup(".field-profile");
 			txtEmail.setText(credentials.email());
 			txtPassword.setText(credentials.password());
@@ -217,7 +217,7 @@ public final class IPrimaEnginePlugin extends PluginBase {
 		public IPrimaCredentials save(Pane pane) {
 			GridPane grid = (GridPane) pane;
 			TextField txtEmail = (TextField) grid.lookup(".field-email");
-			PasswordField txtPassword = (PasswordField) grid.lookup(".field-password");
+			PasswordFieldPane txtPassword = (PasswordFieldPane) grid.lookup(".field-password");
 			ProfileSelect cmbProfile = (ProfileSelect) grid.lookup(".field-profile");
 			String email = txtEmail.getText();
 			String password = txtPassword.getText();
