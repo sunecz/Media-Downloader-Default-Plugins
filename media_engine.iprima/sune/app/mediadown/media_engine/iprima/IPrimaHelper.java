@@ -983,7 +983,7 @@ final class IPrimaHelper {
 		public final void await() throws Exception {
 			counter.await();
 			
-			executor.shutdownNow();
+			executor.shutdown();
 			executor.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS);
 			
 			Exception ex;
@@ -1063,7 +1063,7 @@ final class IPrimaHelper {
 		public final void await() throws Exception {
 			counter.await();
 			
-			executor.shutdownNow();
+			executor.shutdown();
 			executor.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS);
 			
 			Exception ex;
@@ -1129,7 +1129,7 @@ final class IPrimaHelper {
 		protected final void await() throws Exception {
 			counter.await();
 			
-			executor.shutdownNow();
+			executor.shutdown();
 			executor.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS);
 			
 			Exception ex;
