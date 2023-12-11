@@ -1,10 +1,7 @@
 package sune.app.mediadown.media_engine.iprima;
 
 import java.net.URI;
-import java.util.Collections;
 import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
 
 import javafx.scene.image.Image;
@@ -13,19 +10,17 @@ import sune.app.mediadown.entity.MediaEngine;
 import sune.app.mediadown.entity.Program;
 import sune.app.mediadown.media.Media;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper.ConcurrentLoop;
-import sune.app.mediadown.media_engine.iprima.IPrimaHelper.DefaultEpisodeObtainer;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper.DefaultMediaObtainer;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper.DefaultMediaObtainerNewURL;
-import sune.app.mediadown.media_engine.iprima.IPrimaHelper.PlayIDsMediaObtainer;
+import sune.app.mediadown.media_engine.iprima.IPrimaHelper.PlayIdMediaObtainer;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper.PrimaAPIProgramObtainer;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper.SnippetEpisodeObtainer;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper.StaticProgramObtainer;
+import sune.app.mediadown.media_engine.iprima.IPrimaHelper.ThemedContentEpisodeObtainer;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper._Singleton;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.task.ListTask;
-import sune.app.mediadown.task.ListTask.ListTaskEvent;
-import sune.app.mediadown.util.Utils.Ignore;
 
 public final class IPrimaEngine implements MediaEngine {
 	
@@ -85,21 +80,13 @@ public final class IPrimaEngine implements MediaEngine {
 	@Override
 	public ListTask<Program> getPrograms() throws Exception {
 		return ListTask.of((task) -> {
-			Set<Program> existing = Collections.newSetFromMap(new ConcurrentHashMap<>());
-			
 			(new ConcurrentLoop<IPrima>() {
 				
 				@Override
 				protected void iteration(IPrima web) throws Exception {
-					ListTask<Program> t = web.getPrograms(IPrimaEngine.this);
-					t.addEventListener(ListTaskEvent.ADD, (pair) -> {
-						Program p = (Program) pair.b;
-						
-						if(existing.add(p)) {
-							Ignore.callVoid(() -> task.add(p));
-						}
-					});
-					t.startAndWait();
+					ListTask<Program> webTask = web.getPrograms(IPrimaEngine.this);
+					webTask.forwardAdd(task);
+					webTask.startAndWait();
 				}
 			}).iterate(SUPPORTED_WEBS);
 		});
@@ -191,7 +178,7 @@ public final class IPrimaEngine implements MediaEngine {
 		
 		@Override
 		public ListTask<Episode> getEpisodes(IPrimaEngine engine, Program program) throws Exception {
-			return DefaultEpisodeObtainer.getInstance().getEpisodes(program);
+			return SnippetEpisodeObtainer.getInstance().getEpisodes(program);
 		}
 		
 		@Override
@@ -225,7 +212,7 @@ public final class IPrimaEngine implements MediaEngine {
 		
 		@Override
 		public ListTask<Media> getMedia(IPrimaEngine engine, URI uri) throws Exception {
-			return PlayIDsMediaObtainer.getInstance().getMedia(uri, engine);
+			return PlayIdMediaObtainer.getInstance().getMedia(uri, engine);
 		}
 		
 		@Override
@@ -248,7 +235,7 @@ public final class IPrimaEngine implements MediaEngine {
 		
 		@Override
 		public ListTask<Episode> getEpisodes(IPrimaEngine engine, Program program) throws Exception {
-			return DefaultEpisodeObtainer.getInstance().getEpisodes(program);
+			return ThemedContentEpisodeObtainer.getInstance().getEpisodes(program, SUBDOMAIN);
 		}
 		
 		@Override

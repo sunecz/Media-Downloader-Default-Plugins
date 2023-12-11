@@ -218,19 +218,13 @@ final class PrimaPlus implements IPrima {
 				
 				String title = episodeData.getString("title");
 				String uri = episodeData.getString("additionals.webUrl");
-				
 				int numEpisode = episodeData.getInt("additionals.episodeNumber");
 				
-				StringBuilder fullTitle = new StringBuilder();
-				fullTitle.append(programTitle);
-				fullTitle.append(" (").append(numSeason).append(". sezóna)");
-				fullTitle.append(" - ").append(numEpisode).append(". epizoda");
-				
-				if(!regexEpisodeName.matcher(title).matches()) {
-					fullTitle.append(" - ").append(title);
+				if(regexEpisodeName.matcher(title).matches()) {
+					title = null;
 				}
 				
-				Episode episode = new Episode(program, Net.uri(uri), fullTitle.toString());
+				Episode episode = new Episode(program, Net.uri(uri), title, numEpisode, numSeason);
 				episodes.add(episode);
 			}
 			

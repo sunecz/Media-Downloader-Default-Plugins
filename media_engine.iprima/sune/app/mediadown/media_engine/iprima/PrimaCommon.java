@@ -92,7 +92,7 @@ public final class PrimaCommon {
 				InputStream stream = response.stream();
 				boolean isGzip = response.headers()
 					.firstValue("Content-Encoding")
-					.filter((v) -> v.equalsIgnoreCase("gzip"))
+					.filter("gzip"::equalsIgnoreCase)
 					.isPresent();
 				
 				if(isGzip) {
