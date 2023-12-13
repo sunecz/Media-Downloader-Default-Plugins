@@ -2,9 +2,7 @@ package sune.app.mediadown.media_engine.ceskatelevize;
 
 import java.lang.StackWalker.Option;
 import java.lang.StackWalker.StackFrame;
-import java.lang.ref.SoftReference;
 import java.lang.reflect.Constructor;
-import java.math.BigInteger;
 import java.net.URI;
 import java.net.http.HttpHeaders;
 import java.util.ArrayList;
@@ -18,7 +16,6 @@ import java.util.Map.Entry;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
@@ -119,23 +116,15 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 	@Override
 	public ListTask<Program> getPrograms() throws Exception {
 		return ListTask.of((task) -> {
-			Set<API.ProgramWrapper> accumulator = new ConcurrentSkipListSet<>();
-			
 			(new IntConcurrentLoop() {
 				
 				@Override
 				protected void iteration(Integer category) throws Exception {
-					ListTask<API.ProgramWrapper> t = API.getPrograms(category);
-					t.forwardAdd(accumulator);
+					ListTask<Program> t = API.getPrograms(category);
+					t.forwardAdd(task);
 					t.startAndWait();
 				}
 			}).iterate(API.categories());
-			
-			for(API.ProgramWrapper wrapper : accumulator) {
-				if(!task.add(wrapper.program())) {
-					return; // Do not continue
-				}
-			}
 		});
 	}
 	
@@ -144,8 +133,8 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		return ListTask.of((task) -> {
 			// We need to get the IDEC of the given program first
 			Document document = HTML.from(program.uri());
-			WebMediaMetadata metadata = WebMediaMetadataExtractor.extract(document);
-			API.getEpisodes(task, program, metadata.idec());
+			WebMediaMetadata metadata = WebMediaMetadataExtractor.extract(document, true);
+			API.getEpisodes(task, program, metadata);
 		});
 	}
 	
@@ -427,12 +416,17 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			return new Program(Net.uri(url), title, "id", id);
 		}
 		
-		private static final Episode parseEpisode(Program program, JSONCollection data) {
+		private static final Episode parseEpisode(Program program, JSONCollection data, int episodeIndex,
+				int seasonIndex) {
 			String id = data.getString("id");
-			String url = episodeSlugToURL(program, id);
+			URI url = Net.uri(episodeSlugToURL(program, id));
 			String title = data.getString("title");
+			int numEpisode = episodeIndex + 1;
+			int numSeason = seasonIndex + 1;
 			boolean playable = data.getBoolean("playable");
-			return new Episode(program, Net.uri(url), title, "id", id, "playable", playable);
+			return new Episode(
+				program, url, title, numEpisode, numSeason, new Object[] { "id", id, "playable", playable }
+			);
 		}
 		
 		private static final String createRequestBody(String operationName, String query, Object... args) {
@@ -453,11 +447,14 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			return json.toString(true).replaceAll("\\n", "\\\\n");
 		}
 		
-		private static final JSONCollection doOperation(String operationName, String query, Object... variables) throws Exception {
+		private static final JSONCollection doOperation(String operationName, String query, Object... variables)
+				throws Exception {
 			String body = createRequestBody(operationName, query, variables);
 			String contentType = "application/json";
 			HttpHeaders headers = Web.Headers.ofSingle("Referer", REFERER);
-			try(Response.OfStream response = Web.requestStream(Request.of(Net.uri(URL)).headers(headers).POST(body, contentType))) {
+			try(Response.OfStream response = Web.requestStream(
+					Request.of(Net.uri(URL)).headers(headers).POST(body, contentType)
+			)) {
 				if(response.statusCode() != 200) {
 					throw new IllegalStateException(
 						"API returned non-OK code: " + response.statusCode() + ".\n" +
@@ -469,7 +466,8 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			}
 		}
 		
-		public static final CollectionAPIResult getProgramsWithCategory(int categoryId, int offset, int length) throws Exception {
+		public static final CollectionAPIResult getProgramsWithCategory(int categoryId, int offset, int length)
+				throws Exception {
 			JSONCollection json = doOperation("GetCategoryById", QUERY_GET_PROGRAMS_BY_CATEGORY,
 				"categoryId", String.valueOf(categoryId),
 				"limit", length,
@@ -481,23 +479,20 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			return new CollectionAPIResult(items, total);
 		}
 		
-		public static final CollectionAPIResult getEpisodes(String idec, int offset, int length) throws Exception {
-			return getEpisodes(idec, offset, length, null);
-		}
-		
-		public static final CollectionAPIResult getEpisodes(String idec, int offset, int length, String seasonId) throws Exception {
+		public static final CollectionAPIResult getEpisodes(String idec, int offset, int length, String seasonId)
+				throws Exception {
 			JSONCollection json = doOperation("GetEpisodes", QUERY_GET_EPISODES,
 				"idec", idec,
 				"limit", length,
 				"offset", offset,
-				"orderBy", "newest",
+				"orderBy", "oldest",
 				"seasonId", seasonId);
 			JSONCollection items = json.getCollection("data.episodesPreviewFind.items");
 			int total = json.getInt("data.episodesPreviewFind.totalCount");
 			return new CollectionAPIResult(items, total);
 		}
 		
-		public static final ListTask<ProgramWrapper> getPrograms(int categoryId) throws Exception {
+		public static final ListTask<Program> getPrograms(int categoryId) throws Exception {
 			return ListTask.of((task) -> {
 				int offset = 0, total = -1;
 				CollectionAPIResult result;
@@ -509,7 +504,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 					for(JSONCollection item : result.items().collectionsIterable()) {
 						Program program = parseProgram(item);
 						
-						if(!task.add(new ProgramWrapper(program))) {
+						if(!task.add(program)) {
 							break loop;
 						}
 					}
@@ -523,28 +518,43 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			});
 		}
 		
-		public static final void getEpisodes(ListTask<Episode> task, Program program, String idec) throws Exception {
-			int offset = 0, total = -1;
+		public static final void getEpisodes(ListTask<Episode> task, Program program, WebMediaMetadata metadata)
+				throws Exception {
+			String idec = metadata.idec();
+			List<String> seasons = metadata.seasons();
+			int seasonIndex = 0;
 			CollectionAPIResult result;
 			
-			loop:
-			do {
-				result = getEpisodes(idec, offset, MAX_ITEMS_PER_PAGE);
+			if(seasons.isEmpty()) {
+				// At least one "season" must be always available
+				seasons.add(null);
+			}
+			
+			for(String seasonId : seasons) {
+				int offset = 0, total = -1;
+				int episodeIndex = 0;
 				
-				for(JSONCollection item : result.items().collectionsIterable()) {
-					Episode episode = parseEpisode(program, item);
+				loop:
+				do {
+					result = getEpisodes(idec, offset, MAX_ITEMS_PER_PAGE, seasonId);
 					
-					if(!task.add(episode)) {
-						break loop;
+					for(JSONCollection item : result.items().collectionsIterable()) {
+						Episode episode = parseEpisode(program, item, episodeIndex++, seasonIndex);
+						
+						if(!task.add(episode)) {
+							break loop;
+						}
 					}
-				}
+					
+					if(total < 0) {
+						total = result.total();
+					}
+					
+					offset += MAX_ITEMS_PER_PAGE;
+				} while(offset < total);
 				
-				if(total < 0) {
-					total = result.total();
-				}
-				
-				offset += MAX_ITEMS_PER_PAGE;
-			} while(offset < total);
+				++seasonIndex;
+			}
 		}
 		
 		public static final CollectionAPIResult searchShows(String text, int offset, int limit) throws Exception {
@@ -590,47 +600,6 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			
 			public int total() {
 				return total;
-			}
-		}
-		
-		static final class ProgramWrapper implements Comparable<ProgramWrapper> {
-			
-			private final Program program;
-			private SoftReference<BigInteger> id;
-			
-			public ProgramWrapper(Program program) {
-				this.program = Objects.requireNonNull(program);
-			}
-			
-			private final BigInteger id() {
-				return (id == null ? id = new SoftReference<>(new BigInteger(program.<String>get("id"))) : id).get();
-			}
-			
-			@Override
-			public boolean equals(Object obj) {
-				if(obj == this) return true;
-				if(!(obj instanceof ProgramWrapper)) return false;
-				ProgramWrapper w = (ProgramWrapper) obj;
-				return id().equals(w.id());
-			}
-			
-			@Override
-			public int hashCode() {
-				return id().hashCode();
-			}
-			
-			@Override
-			public int compareTo(ProgramWrapper w) {
-				if(Objects.requireNonNull(w) == this) return 0;
-				int cmpId = id().compareTo(w.id());
-				if(cmpId == 0) return 0;
-				int cmpTitle = program.title().compareTo(w.program.title());
-				if(cmpTitle == 0) return cmpId;
-				return cmpTitle;
-			}
-			
-			public Program program() {
-				return program;
 			}
 		}
 	}
@@ -695,13 +664,19 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 	private static final class WebMediaMetadata {
 		
 		private final String idec;
+		private final List<String> seasons;
 		
-		public WebMediaMetadata(String idec) {
+		public WebMediaMetadata(String idec, List<String> seasons) {
 			this.idec = idec;
+			this.seasons = seasons;
 		}
 		
 		public String idec() {
 			return idec;
+		}
+		
+		public List<String> seasons() {
+			return seasons;
 		}
 	}
 	
@@ -710,20 +685,32 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		private static final String SELECTOR_SCRIPT = "script#__NEXT_DATA__";
 		private static final Regex PATTERN_IDEC = Regex.of("\"idec\":\"(?<idec>[^\"]+)\"");
 		
-		public static final WebMediaMetadata extract(Document document) {
+		public static final WebMediaMetadata extract(Document document, boolean extractSeasons) {
 			Element elScript = document.selectFirst(SELECTOR_SCRIPT);
 			
 			if(elScript == null) {
 				return null; // No metadata script content available
 			}
 			
-			Matcher matcher = PATTERN_IDEC.matcher(elScript.html());
+			String content = elScript.html();
+			Matcher matcher = PATTERN_IDEC.matcher(content);
 			
 			if(!matcher.find()) {
 				return null; // Content does not contain the needed metadata
 			}
 			
-			return new WebMediaMetadata(matcher.group("idec"));
+			List<String> seasons = null;
+			
+			if(extractSeasons) {
+				JSONCollection jsonSeasons = JSON.read(content).getCollection("props.pageProps.data.show.seasons");
+				seasons = new ArrayList<>();
+				
+				for(JSONCollection item : jsonSeasons.collectionsIterable()) {
+					seasons.add(item.getString("id"));
+				}
+			}
+			
+			return new WebMediaMetadata(matcher.group("idec"), seasons);
 		}
 		
 		// Forbid anyone to create an instance of this class
@@ -1179,13 +1166,13 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 				result = API.getEpisodes(programIDEC, offset, API.MAX_ITEMS_PER_PAGE, seasonId);
 				
 				JSONCollection items = result.items();
-				ctr = items.length() - 1; // Index in reverse
+				ctr = 0;
 				
 				for(JSONCollection item : items.collectionsIterable()) {
 					String id = item.getString("id", "");
 					episodes.add(id); // Put to the cache
 					if(id.equals(episodeId)) index = ctr; // Do not break from the loop due to caching
-					--ctr; // Index in reverse
+					++ctr;
 				}
 				
 				if(total < 0) {
@@ -1260,7 +1247,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		
 		@Override
 		public final void extractJobs(URI sourceUri, Document document, List<ExtractJob> jobs) throws Exception {
-			WebMediaMetadata metadata = WebMediaMetadataExtractor.extract(document);
+			WebMediaMetadata metadata = WebMediaMetadataExtractor.extract(document, false);
 			
 			if(metadata == null) {
 				return; // Unable to obtain the ID
@@ -1295,7 +1282,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		
 		@Override
 		public final void extractJobs(URI sourceUri, Document document, List<ExtractJob> jobs) throws Exception {
-			WebMediaMetadata metadata = WebMediaMetadataExtractor.extract(document);
+			WebMediaMetadata metadata = WebMediaMetadataExtractor.extract(document, false);
 			
 			if(metadata == null) {
 				return; // Unable to obtain the ID
@@ -1362,7 +1349,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			
 			// Obtain all the episodes to extract media sources from
 			ListTask<Episode> task = ListTask.of((t) -> {
-				API.getEpisodes(t, program, WebMediaMetadataExtractor.extract(HTML.from(program.uri())).idec());
+				API.getEpisodes(t, program, WebMediaMetadataExtractor.extract(HTML.from(program.uri()), true));
 			});
 			
 			task.startAndWait();
