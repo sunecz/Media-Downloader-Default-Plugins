@@ -91,12 +91,12 @@ public final class TVBarrandovEngine implements MediaEngine {
 	TVBarrandovEngine() {
 	}
 	
-	private static final String maybeImproveEpisodeTitle(Program program, String url, String title) {
+	private static final String maybeImproveEpisodeTitle(Program program, URI url, String title) {
 		if(REGEX_EPISODE_URL == null) {
 			REGEX_EPISODE_URL = Regex.of("/video/\\d+((?:-[^-]+)+)-(\\d{1,2})-(\\d{1,2})-(\\d{4})$");
 		}
 		
-		Matcher matcher = REGEX_EPISODE_URL.matcher(url);
+		Matcher matcher = REGEX_EPISODE_URL.matcher(url.getRawPath());
 		if(matcher.find()) {
 			// Try to convert the program's title to URL-like text
 			String normalizedName = Utils.normalize(program.title()).replaceAll("\\s+", "-").toLowerCase();
@@ -120,9 +120,9 @@ public final class TVBarrandovEngine implements MediaEngine {
 	private static final boolean parseEpisodesPage(ListTask<Episode> task, Program program, Document document)
 			throws Exception {
 		for(Element elEpisode : document.select(SELECTOR_EPISODES)) {
-			String url = elEpisode.selectFirst("a.show-box__container").absUrl("href");
+			URI url = Net.uri(elEpisode.selectFirst("a.show-box__container").absUrl("href"));
 			String title = maybeImproveEpisodeTitle(program, url, elEpisode.selectFirst(".show-box__timestamp").text());
-			Episode episode = new Episode(program, Net.uri(url), title);
+			Episode episode = new Episode(program, url, title);
 			
 			if(!task.add(episode)) {
 				return false; // Do not continue
@@ -138,12 +138,16 @@ public final class TVBarrandovEngine implements MediaEngine {
 			Document document = HTML.from(Net.uri(URL_PROGRAMS));
 			
 			for(Element elProgram : document.select(SELECTOR_PROGRAMS)) {
-				if(elProgram.selectFirst(".show-box") == null) continue;
-				String url = elProgram.selectFirst("a.show-box__container").absUrl("href");
-				String title = elProgram.selectFirst(".show-box__title").text();
-				Program program = new Program(Net.uri(url), title);
+				// Ignore the divider between highligted shows and the other ones
+				if(elProgram.selectFirst(".show-box") == null) {
+					continue;
+				}
 				
-				if(!task.add( program)) {
+				URI url = Net.uri(elProgram.selectFirst("a.show-box__container").absUrl("href"));
+				String title = elProgram.selectFirst(".show-box__title").text();
+				Program program = new Program(url, title);
+				
+				if(!task.add(program)) {
 					return; // Do not continue
 				}
 			}
