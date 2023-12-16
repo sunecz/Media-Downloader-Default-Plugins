@@ -60,6 +60,9 @@ public final class TVAutosalonEngine implements MediaEngine {
 	private static final String SELECTOR_EPISODES   = "#main .cards-container-episodes .card-episode-wrapper";
 	private static final String SELECTOR_PAGE_ITEMS = "#main .pagination > .page-item";
 	
+	// Regex
+	private static final Regex REGEX_SEASON = Regex.of("(?iu)^Sezóna\\s+(\\d+)$");
+	
 	// Allow to create an instance when registering the engine
 	TVAutosalonEngine() {
 	}
@@ -95,13 +98,13 @@ public final class TVAutosalonEngine implements MediaEngine {
 			} else {
 				if(programName.isEmpty()) {
 					programName = text;
-				} else if(numSeason.isEmpty() && text.matches("^Sezóna\\s+\\d+$")) {
+				} else if(numSeason.isEmpty() && REGEX_SEASON.matcher(text).matches()) {
 					numSeason = text.replaceFirst("^Sezóna\\s+", "");
 				}
 			}
 		}
 		
-		Regex regexNumEpisode = Regex.of("^(\\d+)\\. epizoda$");
+		Regex regexNumEpisode = Regex.of("(?iu)^(\\d+)\\. epizoda$");
 		for(Element elBadge : document.select("#main .article-title .badge")) {
 			String text = elBadge.text();
 			Matcher matcher;
@@ -123,14 +126,14 @@ public final class TVAutosalonEngine implements MediaEngine {
 		Matcher matcher;
 		
 		// Extract the episode number and clean episode name, if the episode name contains the program name
-		regexEpisodeName = Regex.of("(?i)^" + Regex.quote(programName) + " (\\d+): (.*)$");
+		regexEpisodeName = Regex.of("(?iu)^" + Regex.quote(programName) + " (\\d+): (.*)$");
 		if((matcher = regexEpisodeName.matcher(episodeName)).matches()) {
 			numEpisode = matcher.group(1);
 			episodeName = matcher.group(2);
 		}
 		
 		// Extract more informatio and clean episode name, if the episode name is in a specific format
-		regexEpisodeName = Regex.of("(?i)^" + Regex.quote(programName) + " (\\d+) - (?:[^,]+, )?(\\d+)\\. díl(?:, (.*))?$");
+		regexEpisodeName = Regex.of("(?iu)^" + Regex.quote(programName) + " (\\d+) - (?:[^,]+, )?(\\d+)\\. díl(?:, (.*))?$");
 		if((matcher = regexEpisodeName.matcher(episodeName)).matches()) {
 			numSeason = matcher.group(1);
 			numEpisode = matcher.group(2);
@@ -138,7 +141,7 @@ public final class TVAutosalonEngine implements MediaEngine {
 		}
 		
 		// Extract more informatio and clean episode name, if the episode name is in a specific format
-		regexEpisodeName = Regex.of("(?i)^(" + Regex.quote(programName) + " - [^,]+), (\\d+)\\. díl(?:, (.*))?$");
+		regexEpisodeName = Regex.of("(?iu)^(" + Regex.quote(programName) + " - [^,]+), (\\d+)\\. díl(?:, (.*))?$");
 		if((matcher = regexEpisodeName.matcher(episodeName)).matches()) {
 			programName = matcher.group(1);
 			numEpisode = matcher.group(2);
@@ -175,8 +178,8 @@ public final class TVAutosalonEngine implements MediaEngine {
 						continue;
 					}
 					
-					String url = elItemLink.absUrl("href");
-					Program program = new Program(Net.uri(url), title);
+					URI url = Net.uri(elItemLink.absUrl("href"));
+					Program program = new Program(url, title);
 					
 					if(!task.add(program)) {
 						return; // Do not continue
@@ -194,52 +197,94 @@ public final class TVAutosalonEngine implements MediaEngine {
 			
 			// Find all seasons, if any exist
 			for(Element elSeason : document.select(SELECTOR_SEASONS)) {
-				String url = elSeason.absUrl("href");
+				URI url = Net.uri(elSeason.absUrl("href"));
 				String title = elSeason.selectFirst(".title").text();
-				seasons.add(new Pair<>(Net.uri(url), title));
+				seasons.add(new Pair<>(url, title));
 			}
 			
 			// If there are no seasons, add the current (only) page of episodes
 			if(seasons.isEmpty()) {
-				seasons.add(new Pair<>(null, null));
+				seasons.add(new Pair<>(program.uri(), ""));
 			}
 			
+			String programTitle = Regex.quote(program.title());
+			Regex regexSeasonInTitle = Regex.of(
+				"(?iu)^" + programTitle + "\\s+(\\d+)\\s+-\\s+"
+			);
+			Regex regexEpisode = Regex.of(
+				"(?iu)^" + programTitle + "\\s+(\\d+)$|(?:,\\s+)?(\\d+)\\.\\s+díl(?:\\s+-|,)?"
+			);
+			Regex regexTitle = Regex.of(
+				"(?iu)^" + programTitle + "(?:\\s+\\d+\\s+-\\s+|\\s+-\\s+|,\\s+)"
+			);
+			
 			for(Pair<URI, String> season : seasons) {
-				URI baseURI = season.a != null ? season.a : program.uri();
-				String seasonTitle = season.b != null ? season.b + " - " : "";
-				Document doc = season.a != null ? HTML.from(season.a) : document;
-				boolean hasMorePages;
+				URI baseUri = season.a;
+				String seasonTitle = season.b;
 				int page = 1;
+				boolean hasMorePages;
+				Matcher matcher;
+				
+				if(!baseUri.equals(program.uri())) {
+					document = HTML.from(baseUri);
+				}
 				
 				do {
 					hasMorePages = false;
 					
 					if(page > 1) {
-						doc = HTML.from(Net.resolve(baseURI, baseURI.getPath() + '/' + page));
+						document = HTML.from(Net.resolve(baseUri, baseUri.getPath() + '/' + page));
 					}
 					
-					for(Element elEpisode : doc.select(SELECTOR_EPISODES)) {
-						String url = elEpisode.absUrl("href");
-						
+					for(Element elEpisode : document.select(SELECTOR_EPISODES)) {
+						URI url = Net.uri(elEpisode.absUrl("href"));
 						String date = "";
 						Element elEpisodeDate = elEpisode.selectFirst(".title > .float-right");
+						
 						if(elEpisodeDate != null) {
-							date = " (" + elEpisodeDate.text() + ")";
+							date = elEpisodeDate.text();
 							// Remove the element, so that the date does not contribute to the title
 							elEpisodeDate.remove();
 						}
 						
 						String title = elEpisode.selectFirst(".title").text();
-						title = String.format("%s%s%s", seasonTitle, title, date);
-						Episode episode = new Episode(program, Net.uri(url), title);
+						
+						int numEpisode = 0;
+						int numSeason = 0;
+						
+						if((matcher = REGEX_SEASON.matcher(seasonTitle)).find()) {
+							numSeason = Utils.OfString.asInt(matcher.group(1));
+						}
+						
+						if((matcher = regexSeasonInTitle.matcher(title)).find()) {
+							numSeason = Utils.OfString.asInt(matcher.group(1));
+							title = Utils.OfString.delete(title, matcher.start(), matcher.end());
+						}
+						
+						if((matcher = regexTitle.matcher(title)).find()) {
+							title = Utils.OfString.delete(title, matcher.start(), matcher.end());
+						}
+						
+						if((matcher = regexEpisode.matcher(title)).find()) {
+							int index = matcher.group(1) == null ? 2 : 1;
+							numEpisode = Utils.OfString.asInt(matcher.group(index));
+							title = Utils.OfString.delete(title, matcher.start(), matcher.end()).trim();
+						}
+						
+						if(!date.isEmpty()) {
+							title = title.isEmpty() ? date : title + " (" + date + ")";
+						}
+						
+						Episode episode = new Episode(program, url, title, numEpisode, numSeason);
 						
 						if(!task.add(episode)) {
 							return; // Do not continue
 						}
 					}
 					
+					Elements elPageItems = document.select(SELECTOR_PAGE_ITEMS);
+					
 					// Check if there is some pagination
-					Elements elPageItems = doc.select(SELECTOR_PAGE_ITEMS);
 					if(!elPageItems.isEmpty()) {
 						// If the last item is disabled, there are no more pages
 						hasMorePages = !elPageItems.get(elPageItems.size() - 1).hasClass("disabled");
