@@ -62,12 +62,9 @@ public final class StreamCZEngine implements MediaEngine {
 	public static final String URL     = PLUGIN.getURL();
 	public static final Image  ICON    = PLUGIN.getIcon();
 	
-	// RegExp
-	private static final Regex REGEX_SEASON;
-	
-	static {
-		REGEX_SEASON = Regex.of("(?i)^(\\d+). série$");
-	}
+	// Regex
+	private static final Regex REGEX_SEASON = Regex.of("(?iu)^(\\d+). série$");
+	private static final Regex REGEX_EPISODE = Regex.of("(?i)^S(\\d+):E(\\d+)$");
 	
 	// Allow to create an instance when registering the engine
 	StreamCZEngine() {
@@ -100,6 +97,7 @@ public final class StreamCZEngine implements MediaEngine {
 	public ListTask<Episode> getEpisodes(Program program) throws Exception {
 		return ListTask.of((task) -> {
 			String programId = program.get("id");
+			Matcher matcher;
 			
 			if(programId == null) {
 				Document document = HTML.from(program.uri());
@@ -113,7 +111,18 @@ public final class StreamCZEngine implements MediaEngine {
 			
 			for(API.Node item : API.episodes(programId)) {
 				URI uri = Net.uri(Net.uriConcat(program.uri().toString(), item.urlName()));
-				Episode episode = new Episode(program, uri, item.name(), "id", item.id());
+				int numEpisode = 0;
+				int numSeason = 0;
+				
+				if(item.namePrefix() != null
+						&& (matcher = REGEX_EPISODE.matcher(item.namePrefix())).find()) {
+					numSeason = Utils.OfString.asInt(matcher.group(1));
+					numEpisode = Utils.OfString.asInt(matcher.group(2));
+				}
+				
+				Episode episode = new Episode(
+					program, uri, item.name(), numEpisode, numSeason, new Object[] { "id", item.id() }
+				);
 				
 				if(!task.add(episode)) {
 					return; // Do not continue
@@ -537,6 +546,7 @@ public final class StreamCZEngine implements MediaEngine {
 				+ "	fragment SeasonEpisodeCardFragmentOnEpisode on Episode {\n"
 				+ "		id\n"
 				+ "		name\n"
+				+ "		namePrefix\n"
 				+ "		urlName\n"
 				+ "	}\n"
 				+ "\",\"variables\":{\"id\":\"%s\",\"episodes_connection_first\":10,"
@@ -605,11 +615,13 @@ public final class StreamCZEngine implements MediaEngine {
 			
 			private final String id;
 			private final String name;
+			private final String namePrefix;
 			private final String urlName;
 			
-			private Node(String id, String name, String urlName) {
+			private Node(String id, String name, String namePrefix, String urlName) {
 				this.id = Objects.requireNonNull(id);
 				this.name = Objects.requireNonNull(name);
+				this.namePrefix = namePrefix; // May be null
 				this.urlName = Objects.requireNonNull(urlName);
 			}
 			
@@ -618,7 +630,12 @@ public final class StreamCZEngine implements MediaEngine {
 			}
 			
 			public static final Node fromDirect(JSONCollection json) {
-				return new Node(json.getString("id"), json.getString("name"), json.getString("urlName"));
+				return new Node(
+					json.getString("id"),
+					json.getString("name"),
+					json.getString("namePrefix", null), // Nullable
+					json.getString("urlName")
+				);
 			}
 			
 			public String id() {
@@ -627,6 +644,10 @@ public final class StreamCZEngine implements MediaEngine {
 			
 			public String name() {
 				return name;
+			}
+			
+			public String namePrefix() {
+				return namePrefix;
 			}
 			
 			public String urlName() {
