@@ -50,25 +50,21 @@ public final class NovaPlusEngine implements MediaEngine {
 	public static final Image  ICON    = PLUGIN.getIcon();
 	
 	// URLs
+	private static final String URL_PROGRAMS = "https://tv.nova.cz/porady";
 	private static final String URL_EPISODE_LIST = "https://tv.nova.cz/api/v1/mixed/more"
 		+ "?page=0"
 		+ "&offset=%{offset}d"
 		+ "&content=%{content}s";
 	
-	// Programs
-	private static final String URL_PROGRAMS = "https://tv.nova.cz/porady";
+	// Selectors
 	private static final String SEL_PROGRAMS = ":not(.tab-content) > .c-show-wrapper > .c-show";
-	
-	// Episodes
 	private static final String SEL_EPISODES = ".c-article-wrapper [class^='col-'] .c-article";
 	private static final String SEL_EPISODES_LOAD_MORE = ".js-article-load-more .c-button";
-	
-	// Videos
 	private static final String SEL_PLAYER_IFRAME = "iframe[data-video-id]";
-	private static final String TXT_PLAYER_CONFIG_BEGIN = "player:";
+	private static final String SEL_LABEL_VOYO = ".c-badge";
 	
 	// Others
-	private static final String SEL_LABEL_VOYO = ".c-badge";
+	private static final String TXT_PLAYER_CONFIG_BEGIN = "player:";
 	private static final int RESULT_EXIT = -1;
 	
 	// Regex
