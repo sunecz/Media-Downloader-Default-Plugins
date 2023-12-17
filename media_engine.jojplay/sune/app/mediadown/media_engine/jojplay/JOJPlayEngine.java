@@ -156,6 +156,7 @@ public final class JOJPlayEngine implements MediaEngine {
 		private static final String TYPE_VIDEO = "video";
 		
 		private static final Regex REGEX_URI_PLAYER = Regex.of("^/?player/([^/]+)$");
+		private static final Regex REGEX_EPISODE_TITLE = Regex.of("(?iu)^(\\d+)\\.?\\s*(?:epizóda)?\\s*");
 		
 		private static final URI URI_SOURCES = Net.uri("https://europe-west3-tivio-production.cloudfunctions.net/getSourceUrl");
 		
@@ -289,8 +290,18 @@ public final class JOJPlayEngine implements MediaEngine {
 							String slug = Utils.afterLast(item.getString("name"), "/");
 							String title = resolveFieldValue(item.getCollection("fields.name"));
 							URI uri = Net.uri("https://play.joj.sk/player/" + slug);
-							title = seasonNumber + ". Sezóna - " + title;
-							Episode episode = new Episode(program, uri, title, "ref", item.getString("name"));
+							int numEpisode = Integer.parseInt(item.getString("fields.episodeNumber.integerValue", "0"));
+							int numSeason = seasonNumber;
+							Matcher matcher;
+							
+							if((matcher = REGEX_EPISODE_TITLE.matcher(title)).find()
+									&& Integer.parseInt(matcher.group(1)) == numEpisode) {
+								title = Utils.OfString.delete(title, matcher.start(), matcher.end());
+							}
+							
+							Episode episode = new Episode(
+								program, uri, title, numEpisode, numSeason, new Object[] { "ref", item.getString("name") }
+							);
 							
 							if(!task.add(episode)) {
 								return; // Do not continue
@@ -955,8 +966,13 @@ public final class JOJPlayEngine implements MediaEngine {
 						continue;
 					}
 					
-					for(JSONCollection season
-							: item.getCollection("mapValue.fields.value.arrayValue.values").collectionsIterable()) {
+					JSONCollection array = item.getCollection("mapValue.fields.value.arrayValue.values");
+					
+					if(array == null) {
+						continue;
+					}
+					
+					for(JSONCollection season : array.collectionsIterable()) {
 						int number = Integer.valueOf(season.getString("mapValue.fields.seasonNumber.integerValue"));
 						seasons.add(number);
 					}
