@@ -268,6 +268,11 @@ public final class NovaVoyoEngine implements MediaEngine {
 				String title = elLink.text().trim();
 				int numEpisode = counter++;
 				int numSeason = season.number();
+				
+				if(title.equalsIgnoreCase(numEpisode + ". díl")) {
+					title = "";
+				}
+				
 				Episode episode = new Episode(program, url, title, numEpisode, numSeason);
 				
 				if(!task.add(episode)) {
