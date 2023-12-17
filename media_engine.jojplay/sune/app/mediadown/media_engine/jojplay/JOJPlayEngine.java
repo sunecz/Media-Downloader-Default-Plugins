@@ -624,10 +624,10 @@ public final class JOJPlayEngine implements MediaEngine {
 			
 			private final Session authRequest(String idToken) throws Exception {
 				String argHttpHeaders = ""
-						+ "X-Goog-Api-Client:gl-js/ fire/8.10.1"
-						+ "Content-Type:text/plain"
-						+ "X-Firebase-GMPID:" + GMPID
-						+ "Authorization:Bearer " + idToken; 
+					+ "X-Goog-Api-Client:gl-js/ fire/8.10.1"
+					+ "Content-Type:text/plain"
+					+ "X-Firebase-GMPID:" + GMPID
+					+ "Authorization:Bearer " + idToken;
 				
 				URI uri = uriWithArgs(
 					"database", DATABASE,
@@ -924,7 +924,8 @@ public final class JOJPlayEngine implements MediaEngine {
 			}
 			
 			public final JSONCollection document(String ref) throws Exception {
-				return documents(List.of(ref)).get(0);
+				List<JSONCollection> docs;
+				return (docs = documents(List.of(ref))).isEmpty() ? null : docs.get(0);
 			}
 			
 			public final List<JSONCollection> documents(List<String> refs) throws Exception {
@@ -957,6 +958,10 @@ public final class JOJPlayEngine implements MediaEngine {
 			public final List<Integer> seasons(String programRef) throws Exception {
 				List<Integer> seasons = new ArrayList<>();
 				JSONCollection document = document(programRef);
+				
+				if(document == null) {
+					return seasons;
+				}
 				
 				for(JSONCollection item
 						: document.getCollection("fields.metadata.arrayValue.values").collectionsIterable()) {
@@ -1291,7 +1296,6 @@ public final class JOJPlayEngine implements MediaEngine {
 						synchronized(responses) {
 							response = responses.get(id);
 						}
-						
 						
 						if(response != null) {
 							if(response.targetId() != targetId) {
