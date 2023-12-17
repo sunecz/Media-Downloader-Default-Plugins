@@ -1,8 +1,6 @@
 package sune.app.mediadown.media_engine.markizaplus;
 
-import java.net.SocketTimeoutException;
 import java.net.URI;
-import java.net.http.HttpHeaders;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -35,6 +33,7 @@ import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.task.ListTask;
 import sune.app.mediadown.util.JSON.JSONCollection;
 import sune.app.mediadown.util.JavaScript;
+import sune.app.mediadown.util.Ref;
 import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
 
@@ -48,29 +47,33 @@ public final class MarkizaPlusEngine implements MediaEngine {
 	public static final String URL     = PLUGIN.getURL();
 	public static final Image  ICON    = PLUGIN.getIcon();
 	
-	// Programs
+	// URLs
 	private static final String URL_PROGRAMS = "https://www.markiza.sk/relacie";
-	private static final String SEL_PROGRAMS = ":not(.tab-content) > .c-show-wrapper > .c-show";
+	private static final String URL_EPISODE_LIST = "https://www.markiza.sk/api/v1/mixed/more"
+		+ "?page=0"
+		+ "&limit=64"
+		+ "&offset=%{offset}d"
+		+ "&content=%{content}s";
 	
-	// Episodes
-	private static final String URL_EPISODES;
+	// Selectors
+	private static final String SEL_PROGRAMS = ":not(.tab-content) > .c-show-wrapper > .c-show";
 	private static final String SEL_EPISODES = ".c-article-wrapper [class^='col-']";
 	private static final String SEL_EPISODES_LOAD_MORE = ".js-article-load-more .c-button";
-	
-	// Media
 	private static final String SEL_PLAYER_IFRAME = ".c-content iframe";
+	private static final String SEL_LABEL_VOYO = ".c-badge";
+	
+	// Others
 	private static final String TXT_PLAYER_CONFIG_BEGIN = "Player.init(";
+	private static final int RESULT_EXIT = -1;
 	
-	// Other
+	// Regex
 	private static final Regex REGEX_CONTENT_TITLE = Regex.of("(?i)Séria (\\d+), epizóda (\\d+)");
-	private static final Regex REGEX_EPISODE_TITLE = Regex.of("^(?:.*?(?: - |: ))?(\\d+)\\. díl(?:(?: - |: )(.*))?$");
-	
-	static {
-		URL_EPISODES = "https://www.markiza.sk/api/v1/mixed/more"
-			+ "?page=%{page}d"
-			+ "&offset=%{offset}d"
-			+ "&content=%{content}s";
-	}
+	private static final Regex REGEX_EPISODE_TEXT_TITLE = Regex.of(
+		"^(?:.*?(?: - |: ))?(\\d+)\\. díl(?:(?: - |: )(.*))?$"
+	);
+	private static final Regex REGEX_EPISODE_TITLE = Regex.of(
+		"(?iu)(?:(?:\\s+[\\-\\u2013\\u2014]|\\s*:)\\s+)?(\\d+)\\.\\s+epizóda(?:\\s+[\\-\\u2013\\u2014]\\s+)?"
+	);
 	
 	// Allow to create an instance when registering the engine
 	MarkizaPlusEngine() {
@@ -81,113 +84,6 @@ public final class MarkizaPlusEngine implements MediaEngine {
 		return MediaDownloader.translation().getTranslation(path);
 	}
 	
-	private final int parseEpisodeList(ListTask<Episode> task, Program program, Elements elItems,
-			boolean onlyFullEpisodes) throws Exception {
-		int counter = 0;
-		
-		for(Element elItem : elItems) {
-			if(elItem.selectFirst(".-voyo") != null) {
-				++counter;
-				continue; // Ignore Voyo-only episodes
-			}
-			
-			if(onlyFullEpisodes
-					&& elItem.selectFirst(".c-article[data-tracking-tile-asset=\"episode\"]") == null) {
-				continue; // Ignore non-full episodes
-			}
-			
-			Element elLink = elItem.selectFirst(".title > a");
-			
-			if(elLink == null) {
-				continue; // Ignore episodes with no link
-			}
-			
-			String episodeURL = elLink.absUrl("href");
-			String episodeName = elLink.text();
-			Episode episode = new Episode(program, Net.uri(episodeURL), episodeName);
-			
-			if(!task.add(episode)) {
-				return 2; // Do not continue
-			}
-		}
-		
-		// If all episodes are from VOYO, no more free episodes are available
-		return counter == elItems.size() ? 1 : 0;
-	}
-	
-	private final int parseEpisodesPage(ListTask<Episode> task, Program program, Document document,
-			boolean onlyFullEpisodes) throws Exception {
-		// Check whether the load more button exists
-		Element elLoadMore = document.selectFirst(SEL_EPISODES_LOAD_MORE);
-		
-		if(elLoadMore == null) {
-			// Try to obtain the first page from the document's content
-			Elements elItems = document.select(SEL_EPISODES);
-			
-			if(elItems != null
-					&& parseEpisodeList(task, program, elItems, onlyFullEpisodes) == 2) {
-				return 1; // Do not continue
-			}
-			
-			return 0; // No more episodes present, nothing else to do
-		}
-		
-		// If the button exists, load the episodes the dynamic way
-		String href = elLoadMore.absUrl("data-href");
-		QueryArgument params = Net.queryDestruct(href);
-		String content = params.valueOf("content");
-		
-		HttpHeaders headers = Web.Headers.ofSingle(
-			"Cache-Control", "no-cache, no-store, must-revalidate",
-			"Pragma", "no-cache",
-			"Expires", "0",
-			"X-Requested-With", "XMLHttpRequest"
-		);
-		
-		// The offset can be negative, therefore we can use it to obtain the first page
-		// with non-filtered/altered content.
-		final int itemsPerPage = 6;
-		final int constPage = 2; // Must be > 1
-		int offset = -itemsPerPage;
-		
-		// Load episodes from other pages
-		Elements elItems = null;
-		do {
-			String pageURL = Utils.format(URL_EPISODES,
-				"page",    constPage,
-				"offset",  offset,
-				"content", content
-			);
-			String pageContent = null;
-			Exception timeoutException = null;
-			int ctr = 0;
-			int numOfRetries = 5;
-			
-			// Sometimes a timeout can occur, retry to obtain the content again if it is null
-			do {
-				timeoutException = null;
-				
-				try {
-					pageContent = Web.request(Request.of(Net.uri(pageURL)).headers(headers).GET()).body();
-				} catch(SocketTimeoutException ex) {
-					timeoutException = ex;
-				}
-			} while(pageContent == null && ++ctr <= numOfRetries);
-			
-			// If even retried request timed out, just throw the exception
-			if(timeoutException != null) throw timeoutException;
-			
-			if(pageContent == null) continue;
-			Document doc = HTML.parse(pageContent, Net.baseURI(Net.uri(pageURL)));
-			elItems = doc.select(SEL_EPISODES);
-			
-			offset += itemsPerPage;
-		} while(elItems != null
-					&& parseEpisodeList(task, program, elItems, onlyFullEpisodes) == 0);
-		
-		return 0;
-	}
-	
 	private static final String mediaTitle(JSONCollection streamInfo, Document document) {
 		// Markiza Plus has weird naming, so this is actually correct
 		String programName = streamInfo.getString("episode", "");
@@ -196,7 +92,7 @@ public final class MarkizaPlusEngine implements MediaEngine {
 		int numEpisode = -1;
 		String episodeName = ""; // Use empty string rather than null
 		
-		Matcher matcher = REGEX_EPISODE_TITLE.matcher(episodeText);
+		Matcher matcher = REGEX_EPISODE_TEXT_TITLE.matcher(episodeText);
 		if(matcher.matches()) {
 			numEpisode = Integer.valueOf(matcher.group(1));
 			episodeName = Optional.ofNullable(matcher.group(2)).orElse("");
@@ -249,115 +145,257 @@ public final class MarkizaPlusEngine implements MediaEngine {
 		return MediaUtils.mediaTitle(programName, numSeason, numEpisode, episodeName);
 	}
 	
-	@Override
-	public ListTask<Program> getPrograms() throws Exception {
-		return ListTask.of((task) -> {
-			Document document = HTML.from(Net.uri(URL_PROGRAMS));
+	private final int parseEpisodeList(Program program, ListTask<Episode> task, Elements elItems,
+			boolean onlyFullEpisodes, int index) throws Exception {
+		int counter = elItems.size();
+		Regex regexProgramTitle = Regex.of(
+			"(?iu)^" + Regex.quote(program.title()) + "(?:\\s+[\\-\\u2013\\u2014]|\\s*:)?\\s*"
+		);
+		
+		// Loop through the episodes in reverse since this method is also used when no
+		// episode number is present in an episode title, so the index is actually used.
+		for(Element elItem : Utils.asReversed(elItems)) {
+			// Check whether it is a VOYO-only episode
+			if(elItem.selectFirst(SEL_LABEL_VOYO) != null) {
+				--counter;
+				continue; // Skip the episode
+			}
 			
-			for(Element elProgram : document.select(SEL_PROGRAMS)) {
-				String programURL = elProgram.absUrl("href");
-				String programTitle = elProgram.selectFirst("h3").text();
-				Program program = new Program(Net.uri(programURL), programTitle);
+			// When searching videos, episodes are specially marked, if required,
+			// select only those.
+			if(onlyFullEpisodes
+					&& elItem.selectFirst(".c-article[data-tracking-tile-asset='episode']") == null) {
+				continue; // Skip the episode
+			}
+			
+			Element elLink = elItem.selectFirst(".title > a");
+			Matcher matcher;
+			
+			URI uri = Net.uri(elLink.absUrl("href"));
+			String title = elLink.text();
+			int numSeason = 0; // There is no season number available
+			int numEpisode = 0;
+			
+			// Try to obtain the episode number from the episode title
+			if((matcher = REGEX_EPISODE_TITLE.matcher(title)).find()) {
+				numEpisode = Utils.OfString.asInt(matcher.group(1));
+				title = Utils.OfString.delete(title, matcher.start(), matcher.end());
+			} else {
+				numEpisode = index++;
+			}
+			
+			// Remove the program title from the title when it is present as a prefix
+			if((matcher = regexProgramTitle.matcher(title)).find()) {
+				title = title.substring(matcher.end());
+			}
+			
+			Element elSubheading = elItem.selectFirst(".content > .category");
+			
+			if(elSubheading != null) {
+				String prefix = elSubheading.text();
 				
-				if(!task.add(program)) {
-					return; // Do not continue
+				if(!prefix.equalsIgnoreCase(program.title())) {
+					title = prefix + (title.isEmpty() ? "" : " - " + title);
 				}
 			}
-		});
+			
+			Episode episode = new Episode(program, uri, title, numEpisode, numSeason);
+			
+			if(!task.add(episode)) {
+				return RESULT_EXIT; // Do not continue
+			}
+		}
+		
+		return counter;
 	}
 	
-	@Override
-	public ListTask<Episode> getEpisodes(Program program) throws Exception {
-		return ListTask.of((task) -> {
-			for(String urlPath : List.of("videa/cele-epizody")) {
-				URI uri = Net.uri(Net.uriConcat(program.uri().toString(), urlPath));
-				Response.OfString response = Web.request(Request.of(uri).GET());
-				
-				if(response.statusCode() != 200) {
-					continue; // Probably does not exist, ignore
-				}
-				
-				Document document = HTML.parse(response.body(), uri);
-				
-				if(parseEpisodesPage(task, program, document, false) != 0) {
-					return;
-				}
-			}
-			
-			// If no episodes were found, try to obtain them from the All videos page.
-			if(task.isEmpty()) {
-				URI uri = Net.uri(Net.uriConcat(program.uri().toString(), "videa"));
-				Response.OfString response = Web.request(Request.of(uri).GET());
-				
-				if(response.statusCode() == 200) {
-					Document document = HTML.parse(response.body(), uri);
-					
-					if(parseEpisodesPage(task, program, document, true) != 0) {
-						return;
-					}
-				}
-			}
-		});
+	private final boolean hasEpisodeNumberInTitle(Element elItem) {
+		Element elLink = elItem.selectFirst(".title > a");
+		String title = elLink.text();
+		return REGEX_EPISODE_TITLE.matcher(title).find();
 	}
 	
-	@Override
-	public ListTask<Media> getMedia(URI uri, Map<String, Object> data) throws Exception {
-		return ListTask.of((task) -> {
-			Document document = HTML.from(uri);
-			Element iframe = document.selectFirst(SEL_PLAYER_IFRAME);
+	private final String callUriTemplate(Element btnLoadMore) {
+		QueryArgument urlArgs = Net.queryDestruct(btnLoadMore.absUrl("data-href"));
+		String contentId = urlArgs.valueOf("content");
+		return Utils.format(URL_EPISODE_LIST, "content", contentId);
+	}
+	
+	private final URI callUri(String template, int offset) {
+		return Net.uri(Utils.format(template, "offset",  offset));
+	}
+	
+	private final boolean parseEpisodesPage(Program program, ListTask<Episode> task, Document document,
+			boolean onlyFullEpisodes, Ref.Mutable<Integer> refIndex) throws Exception {
+		Elements elItems = document.select(SEL_EPISODES);
+		Element btnLoadMore = document.selectFirst(SEL_EPISODES_LOAD_MORE);
+		
+		// First, check whether the episodes have the episode number in their title
+		if(!elItems.isEmpty()
+				&& btnLoadMore != null // There have to be more episodes to search for
+				&& !hasEpisodeNumberInTitle(elItems.get(0))) {
+			// Since there is no episode number in the title, we must set the episode number
+			// as the position in the list. The list is sorted in the descending order, so we
+			// must first find the end of the list.
+			// For this we can use doubling followed by binary search, so that it scales
+			// logarithmically rather than linearly. 
+			int count = 64, lo = 0, hi = count;
 			
-			if(iframe == null) {
-				return; // Do not continue
+			String callUriTemplate = callUriTemplate(btnLoadMore);
+			int index = refIndex.get();
+			
+			// First, find the actual end offset.
+			for(; !Web.request(Request.of(callUri(callUriTemplate, hi)).GET()).body().trim().isEmpty(); hi *= 2);
+			
+			// Then, find the last offset that have any non-Voyo episodes
+			while(hi - lo > count) {
+				int mid = lo + (hi - lo) / 2;
+				document = HTML.parse(Web.request(Request.of(callUri(callUriTemplate, mid)).GET()).body());
+				boolean allVoyo = document.select(SEL_EPISODES).size() == document.select(SEL_LABEL_VOYO).size();
+				if(allVoyo) hi = mid; else lo = mid;
 			}
 			
-			String iframeUrl = iframe.absUrl("src");
-			String content = Web.request(Request.of(Net.uri(iframeUrl)).GET()).body();
-			
-			if(content == null || content.isEmpty()) {
-				return; // Do not continue
+			// Loop through the episodes in the reverse order
+			for(int offset = lo, min = -count, result; offset >= min; offset -= count, index += result) {
+				URI callUri = Net.uri(Utils.format(callUriTemplate, "offset",  offset));
+				document = HTML.parse(Web.request(Request.of(callUri).retry(5).GET()).body());
+				result = parseEpisodeList(program, task, document.select(SEL_EPISODES), onlyFullEpisodes, index);
+				if(result == RESULT_EXIT) return false;
 			}
 			
-			int begin = content.indexOf(TXT_PLAYER_CONFIG_BEGIN);
+			refIndex.set(index);
+			return true;
+		}
+		
+		// Always obtain the first episodes from the static content
+		if(parseEpisodeList(program, task, elItems, onlyFullEpisodes, 0) == RESULT_EXIT) {
+			return false; // Do not continue
+		}
+		
+		if(btnLoadMore == null) {
+			return true; // No more episodes present
+		}
+		
+		String callUriTemplate = callUriTemplate(btnLoadMore);
+		
+		for(int offset = 0, result;; offset += elItems.size()) {
+			URI callUri = Net.uri(Utils.format(callUriTemplate, "offset",  offset));
+			document = HTML.parse(Web.request(Request.of(callUri).retry(5).GET()).body());
+			result = parseEpisodeList(program, task, document.select(SEL_EPISODES), onlyFullEpisodes, 0);
+			if(result == 0) break; // No more non-Voyo episodes
+			if(result == RESULT_EXIT) return false;
+		}
+		
+		return true;
+	}
+	
+	private final boolean extractEpisodes(ListTask<Episode> task, Program program, String uriPath,
+			boolean onlyFullEpisodes, Ref.Mutable<Integer> index) throws Exception {
+		URI uri = Net.uri(Net.uriConcat(program.uri().toString(), uriPath));
+		Response.OfString response = Web.request(Request.of(uri).GET());
+		
+		if(response.statusCode() != 200) {
+			return true; // Probably does not exist, ignore
+		}
+		
+		Document document = HTML.parse(response.body(), uri);
+		return parseEpisodesPage(program, task, document, onlyFullEpisodes, index);
+	}
+	
+	private final void getPrograms(ListTask<Program> task) throws Exception {
+		Document document = HTML.from(Net.uri(URL_PROGRAMS));
+		
+		for(Element elProgram : document.select(SEL_PROGRAMS)) {
+			URI uri = Net.uri(elProgram.absUrl("href"));
+			String title = elProgram.selectFirst("h3").text();
+			Program program = new Program(uri, title);
 			
-			// Video is not available, probably due to licensing issues
-			if(begin < 0) {
-				Translation tr = translation().getTranslation("error.media_unavailable");
-				String message = HTML.parse(content).selectFirst(".b-player .e-title").text();
-				Dialog.showContentInfo(tr.getSingle("title"), tr.getSingle("text"), message);
+			if(!task.add(program)) {
 				return; // Do not continue
 			}
+		}
+	}
+	
+	private final void getEpisodes(ListTask<Episode> task, Program program) throws Exception {
+		Ref.Mutable<Integer> index = new Ref.Mutable<>(1);
+		
+		for(String uriPath : List.of("videa/cele-epizody")) {
+			if(!extractEpisodes(task, program, uriPath, false, index)) {
+				return; // Do not continue
+			}
+		}
+	}
+	
+	private final void getMedia(ListTask<Media> task, URI uri, Map<String, Object> data) throws Exception {
+		Document document = HTML.from(uri);
+		Element iframe = document.selectFirst(SEL_PLAYER_IFRAME);
+		
+		if(iframe == null) {
+			return; // Do not continue
+		}
+		
+		String iframeUrl = iframe.absUrl("src");
+		String content = Web.request(Request.of(Net.uri(iframeUrl)).GET()).body();
+		
+		if(content == null || content.isEmpty()) {
+			return; // Do not continue
+		}
+		
+		int begin = content.indexOf(TXT_PLAYER_CONFIG_BEGIN);
+		
+		// Video is not available, probably due to licensing issues
+		if(begin < 0) {
+			Translation tr = translation().getTranslation("error.media_unavailable");
+			String message = HTML.parse(content).selectFirst(".b-player .e-title").text();
+			Dialog.showContentInfo(tr.getSingle("title"), tr.getSingle("text"), message);
+			return; // Do not continue
+		}
+		
+		begin += TXT_PLAYER_CONFIG_BEGIN.length() - 1;
+		String conScript = Utils.bracketSubstring(content, '{', '}', false, begin, content.length());
+		
+		if(!conScript.isEmpty()) {
+			JSONCollection scriptData = JavaScript.readObject(conScript);
 			
-			begin += TXT_PLAYER_CONFIG_BEGIN.length() - 1;
-			String conScript = Utils.bracketSubstring(content, '{', '}', false, begin, content.length());
-			
-			if(!conScript.isEmpty()) {
-				JSONCollection scriptData = JavaScript.readObject(conScript);
+			if(scriptData != null) {
+				JSONCollection tracks = scriptData.getCollection("tracks");
+				URI sourceUri = uri;
+				MediaSource source = MediaSource.of(this);
+				String title = mediaTitle(scriptData.getCollection("plugins.measuring.streamInfo"), document);
 				
-				if(scriptData != null) {
-					JSONCollection tracks = scriptData.getCollection("tracks");
-					URI sourceUri = uri;
-					MediaSource source = MediaSource.of(this);
-					String title = mediaTitle(scriptData.getCollection("plugins.measuring.streamInfo"), document);
-					
-					for(JSONCollection node : tracks.collectionsIterable()) {
-						for(JSONCollection coll : ((JSONCollection) node).collectionsIterable()) {
-							String videoUrl = coll.getString("src");
-							MediaLanguage language = MediaLanguage.ofCode(coll.getString("lang"));
-							
-							List<Media> media = MediaUtils.createMedia(
-								source, Net.uri(videoUrl), sourceUri, title, language, MediaMetadata.empty()
-							);
-							
-							for(Media m : media) {
-								if(!task.add(m)) {
-									return; // Do not continue
-								}
+				for(JSONCollection node : tracks.collectionsIterable()) {
+					for(JSONCollection coll : ((JSONCollection) node).collectionsIterable()) {
+						URI videoUrl = Net.uri(coll.getString("src"));
+						MediaLanguage language = MediaLanguage.ofCode(coll.getString("lang"));
+						
+						List<Media> media = MediaUtils.createMedia(
+							source, videoUrl, sourceUri, title, language, MediaMetadata.empty()
+						);
+						
+						for(Media m : media) {
+							if(!task.add(m)) {
+								return; // Do not continue
 							}
 						}
 					}
 				}
 			}
-		});
+		}
+	}
+	
+	@Override
+	public ListTask<Program> getPrograms() throws Exception {
+		return ListTask.of((task) -> getPrograms(task));
+	}
+	
+	@Override
+	public ListTask<Episode> getEpisodes(Program program) throws Exception {
+		return ListTask.of((task) -> getEpisodes(task, program));
+	}
+	
+	@Override
+	public ListTask<Media> getMedia(URI uri, Map<String, Object> data) throws Exception {
+		return ListTask.of((task) -> getMedia(task, uri, data));
 	}
 	
 	@Override
