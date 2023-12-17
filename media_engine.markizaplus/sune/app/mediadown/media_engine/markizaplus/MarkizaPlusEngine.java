@@ -51,7 +51,6 @@ public final class MarkizaPlusEngine implements MediaEngine {
 	private static final String URL_PROGRAMS = "https://www.markiza.sk/relacie";
 	private static final String URL_EPISODE_LIST = "https://www.markiza.sk/api/v1/mixed/more"
 		+ "?page=0"
-		+ "&limit=64"
 		+ "&offset=%{offset}d"
 		+ "&content=%{content}s";
 	
@@ -239,7 +238,7 @@ public final class MarkizaPlusEngine implements MediaEngine {
 			// must first find the end of the list.
 			// For this we can use doubling followed by binary search, so that it scales
 			// logarithmically rather than linearly. 
-			int count = 64, lo = 0, hi = count;
+			int count = 6, lo = 0, hi = count;
 			
 			String callUriTemplate = callUriTemplate(btnLoadMore);
 			int index = refIndex.get();
@@ -257,7 +256,7 @@ public final class MarkizaPlusEngine implements MediaEngine {
 			
 			// Loop through the episodes in the reverse order
 			for(int offset = lo, min = -count, result; offset >= min; offset -= count, index += result) {
-				URI callUri = Net.uri(Utils.format(callUriTemplate, "offset",  offset));
+				URI callUri = callUri(callUriTemplate, offset);
 				document = HTML.parse(Web.request(Request.of(callUri).retry(5).GET()).body());
 				result = parseEpisodeList(program, task, document.select(SEL_EPISODES), onlyFullEpisodes, index);
 				if(result == RESULT_EXIT) return false;
@@ -279,7 +278,7 @@ public final class MarkizaPlusEngine implements MediaEngine {
 		String callUriTemplate = callUriTemplate(btnLoadMore);
 		
 		for(int offset = 0, result;; offset += elItems.size()) {
-			URI callUri = Net.uri(Utils.format(callUriTemplate, "offset",  offset));
+			URI callUri = callUri(callUriTemplate, offset);
 			document = HTML.parse(Web.request(Request.of(callUri).retry(5).GET()).body());
 			result = parseEpisodeList(program, task, document.select(SEL_EPISODES), onlyFullEpisodes, 0);
 			if(result == 0) break; // No more non-Voyo episodes
