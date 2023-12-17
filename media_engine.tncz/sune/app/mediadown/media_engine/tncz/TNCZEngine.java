@@ -1,7 +1,12 @@
 package sune.app.mediadown.media_engine.tncz;
 
 import java.net.URI;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
+import java.time.temporal.ChronoField;
+import java.time.temporal.TemporalAccessor;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Matcher;
@@ -46,31 +51,31 @@ public final class TNCZEngine implements MediaEngine {
 	public static final String URL     = PLUGIN.getURL();
 	public static final Image  ICON    = PLUGIN.getIcon();
 	
-	// Programs
+	// URLs
 	private static final String URL_PROGRAMS = "https://tn.nova.cz/videa";
-	private static final String SEL_PROGRAMS = ".c-article-carousel .swiper-slide > a";
+	private static final String URL_EPISODE_LIST = "https://tn.nova.cz/api/v1/episodes/more"
+		+ "?channel=%{channel}d"
+		+ "&limit=%{limit}d"
+		+ "&page=%{page}d"
+		+ "&filter=%%7B%%22show%%22%%3A%%22%{show}d%%22%%7D"
+		+ "&content=%{content}d";
 	
-	// Episodes
+	// Selectors
+	private static final String SEL_PROGRAMS = ".c-article-carousel .swiper-slide > a";
 	private static final String SEL_EPISODES = ".c-article-wrapper .c-article .title > a";
 	private static final String SEL_EPISODES_LOAD_MORE = ".load-more > button";
-	private static final String URL_EPISODE_LIST;
-	
-	// Videos
 	private static final String SEL_PLAYER_IFRAME = "iframe[data-video-id]";
-	private static final String TXT_PLAYER_CONFIG_BEGIN = "player:";
 	
 	// Others
+	private static final String TXT_PLAYER_CONFIG_BEGIN = "player:";
+	private static final DateTimeFormatter DATE_FORMATTER_CZECH
+		= DateTimeFormatter.ofPattern("eeee d. MMMM", Locale.forLanguageTag("cs"));
+	
+	// Regex
 	private static final Regex REGEX_SHOW_ID = Regex.of("\"show\":\"(\\d+)\"");
 	private static final Regex REGEX_EPISODE = Regex.of("^(?:.*?(?: - |: ))?(\\d+)\\. díl(?:(?: - |: )(.*))?$");
-	
-	static {
-		URL_EPISODE_LIST = "https://tn.nova.cz/api/v1/episodes/more"
-			+ "?channel=%{channel}d"
-			+ "&limit=%{limit}d"
-			+ "&page=%{page}d"
-			+ "&filter=%%7B%%22show%%22%%3A%%22%{show}d%%22%%7D"
-			+ "&content=%{content}d";
-	}
+	private static final Regex REGEX_MAYBE_DATE = Regex.of("(?iu)\\p{L}+\\s+\\d+\\.\\s+\\p{L}+");
+	private static final Regex REGEX_DATE = Regex.of("(\\d+)\\.\\s+(\\d+)\\.\\s+\\d+");
 	
 	// Allow to create an instance when registering the engine
 	TNCZEngine() {
@@ -117,9 +122,31 @@ public final class TNCZEngine implements MediaEngine {
 			throws Exception {
 		Elements elItems = document.select(SEL_EPISODES);
 		
+		Regex regexProgramTitle = Regex.of(
+			"(?iu)" + Regex.quote(program.title()) + "(?:\\s+[\\-\\u2013\\u2014]\\s*|:\\s*|\\s+)"
+		);
+		Regex regexEpisodeTitle = Regex.of(
+			"(?iu)"
+			+ "(?:\\s+[\\-\\u2013\\u2014]\\s*)?"
+			+ Regex.quote(program.title())
+			+ "\\s+\\((\\d+)\\)\\s+[\\-\\u2013\\u2014]\\s*"
+		);
+		
 		for(Element elItem : elItems) {
-			String episodeURL = elItem.absUrl("href");
-			String episodeName = elItem.text();
+			URI uri = Net.uri(elItem.absUrl("href"));
+			String title = elItem.text();
+			int numEpisode = 0;
+			int numSeason = 0;
+			Matcher matcher;
+			
+			if((matcher = regexEpisodeTitle.matcher(title)).find()) {
+				numEpisode = Utils.OfString.asInt(matcher.group(1));
+				title = Utils.OfString.delete(title, matcher.start(), matcher.end());
+			}
+			
+			if((matcher = regexProgramTitle.matcher(title)).find()) {
+				title = Utils.OfString.delete(title, matcher.start(), matcher.end());
+			}
 			
 			Element elItemContent = elItem.parent().parent();
 			Element elDateTime = elItemContent.selectFirst(".article-info > time");
@@ -129,12 +156,34 @@ public final class TNCZEngine implements MediaEngine {
 				String textContent = elDateTime.text();
 				
 				if(!textContent.isEmpty()) {
-					// Include only the formatted date without time
-					episodeName += " (" + textContent.replaceFirst(",.*$", "") + ")";
+					textContent = textContent.replaceFirst(",.*$", "");
+					
+					// Try to find a localized date in the title
+					if((matcher = REGEX_MAYBE_DATE.matcher(title)).find()) {
+						String maybeDate = matcher.group();
+						int start = matcher.start();
+						int end = matcher.end();
+						
+						try {
+							// Try to parse the localized date in the title
+							TemporalAccessor date = DATE_FORMATTER_CZECH.parse(maybeDate);
+							
+							// If the dates (except for the year) match, remove the date from the title
+							if((matcher = REGEX_DATE.matcher(textContent)).matches()
+									&& date.get(ChronoField.DAY_OF_MONTH) == Integer.parseInt(matcher.group(1))
+									&& date.get(ChronoField.MONTH_OF_YEAR) == Integer.parseInt(matcher.group(2))) {
+								title = Utils.OfString.delete(title, start, end);
+							}
+						} catch(DateTimeParseException ex) {
+							// Ignore
+						}
+					}
+					
+					title = textContent + (title.isEmpty() ? "" : " - " + title.trim());
 				}
 			}
 			
-			Episode episode = new Episode(program, Net.uri(episodeURL), Utils.validateFileName(episodeName));
+			Episode episode = new Episode(program, uri, title, numEpisode, numSeason);
 			
 			if(!task.add(episode)) {
 				return false; // Do not continue
@@ -150,9 +199,9 @@ public final class TNCZEngine implements MediaEngine {
 			Document document = HTML.from(Net.uri(URL_PROGRAMS));
 			
 			for(Element elProgram : document.select(SEL_PROGRAMS)) {
-				String programURL = elProgram.absUrl("href");
-				String programTitle = elProgram.selectFirst(".title").text();
-				Program program = new Program(Net.uri(programURL), programTitle);
+				URI uri = Net.uri(elProgram.absUrl("href"));
+				String title = elProgram.selectFirst(".title").text();
+				Program program = new Program(uri, title);
 				
 				if(!task.add(program)) {
 					return; // Do not continue
