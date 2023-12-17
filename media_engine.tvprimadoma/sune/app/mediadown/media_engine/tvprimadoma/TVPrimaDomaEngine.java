@@ -5,6 +5,7 @@ import java.net.http.HttpHeaders;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
 
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -34,6 +35,7 @@ import sune.app.mediadown.task.ListTask;
 import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.JSON.JSONCollection;
 import sune.app.mediadown.util.JavaScript;
+import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Utils.JS;
 
@@ -57,18 +59,45 @@ public final class TVPrimaDomaEngine implements MediaEngine {
 	private static final String SELECTOR_EPISODES = ".col > article > a";
 	private static final String SELECTOR_EPISODES_PAGINATION = ".pagination-desktop";
 	
+	// Regex
+	private static final Regex REGEX_EPISODE = Regex.of("(?iu)(?:\\s*-\\s*)?(?:(\\d+)\\.?\\s*díl|díl\\s+(\\d+)\\.?)\\s*(?:,\\s*|:\\s*)?");
+	private static final Regex REGEX_SEASON = Regex.of("(?iu)s[ée]rie\\s+(\\d+)\\.?\\s*-\\s*");
+	
 	// Allow to create an instance when registering the engine
 	TVPrimaDomaEngine() {
 	}
 	
 	private final boolean parseEpisodesList(ListTask<Episode> task, Element elContainer, Program program)
 			throws Exception {
+		Regex regexProgramTitle = Regex.of(
+			"^(?iu)" + Regex.quote(program.title()) + "\\s+-\\s*"
+		);
+		
 		// All episodes are shown, just obtain them
 		for(Element elEpisode : elContainer.select(SELECTOR_EPISODES)) {
 			Element elTitle = elEpisode.selectFirst("h3");
-			String url = elEpisode.absUrl("href");
+			URI url = Net.uri(elEpisode.absUrl("href"));
 			String title = elTitle.text();
-			Episode episode = new Episode(program, Net.uri(url), title);
+			int numEpisode = 0;
+			int numSeason = 0;
+			Matcher matcher;
+			
+			if((matcher = REGEX_SEASON.matcher(title)).find()) {
+				numSeason = Utils.OfString.asInt(matcher.group(1));
+				title = Utils.OfString.delete(title, matcher.start(), matcher.end());
+			}
+			
+			if((matcher = REGEX_EPISODE.matcher(title)).find()) {
+				int index = matcher.group(1) == null ? 2 : 1;
+				numEpisode = Utils.OfString.asInt(matcher.group(index));
+				title = Utils.OfString.delete(title, matcher.start(), matcher.end());
+			}
+			
+			if((matcher = regexProgramTitle.matcher(title)).find()) {
+				title = Utils.OfString.delete(title, matcher.start(), matcher.end()).trim();
+			}
+			
+			Episode episode = new Episode(program, url, title, numEpisode, numSeason);
 			
 			if(!task.add(episode)) {
 				return false; // Do not continue
@@ -86,9 +115,9 @@ public final class TVPrimaDomaEngine implements MediaEngine {
 			
 			for(Element elProgram : document.select(SELECTOR_PROGRAMS)) {
 				Element elTitle = elProgram.selectFirst("h3");
-				String url = elProgram.absUrl("href");
+				URI url = Net.uri(elProgram.absUrl("href"));
 				String title = elTitle.text();
-				Program program = new Program(Net.uri(url), title);
+				Program program = new Program(url, title);
 				
 				if(!task.add(program)) {
 					return; // Do not continue
