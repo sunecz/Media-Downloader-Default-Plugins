@@ -11,7 +11,6 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.ListIterator;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -183,9 +182,9 @@ public final class MarkizaVoyoEngine implements MediaEngine {
 			for(Element elWrapper : document.select(".row > .i")) {
 				Element elLink = elWrapper.selectFirst(".title > a");
 				String programId = elWrapper.selectFirst(".c-video-box").attr("data-resource").replace("show.", "");
-				String url = elLink.absUrl("href");
+				URI url = Net.uri(elLink.absUrl("href"));
 				String title = elLink.text().trim();
-				Program program = new Program(Net.uri(url), title, "programId", programId);
+				Program program = new Program(url, title, "programId", programId);
 				
 				if(!task.add(program)) {
 					return RESULT_CANCEL; // Do not continue
@@ -244,7 +243,7 @@ public final class MarkizaVoyoEngine implements MediaEngine {
 		}
 		
 		private static final int parseEpisodes(ListTask<Episode> task, Program program, Season season,
-				Response.OfStream response) throws Exception {
+				Response.OfStream response, int offset) throws Exception {
 			String content = new String(response.stream().readAllBytes(), Shared.CHARSET);
 			
 			if(content.isEmpty()) {
@@ -254,15 +253,15 @@ public final class MarkizaVoyoEngine implements MediaEngine {
 			
 			Document document = HTML.parse(content, response.uri());
 			Elements items = document.select("article");
+			int counter = offset + 1;
 			
-			// Since order is always ascending but we want descending by default,
-			// use the ListIterator to reverse the order.
-			for(ListIterator<Element> it = items.listIterator(items.size()); it.hasPrevious();) {
-				Element elWrapper = it.previous();
+			for(Element elWrapper : items) {
 				Element elLink = elWrapper.selectFirst(".title > a");
-				String url = elLink.absUrl("href");
-				String title = String.format("%d. séria - %s", season.number(), elLink.text().trim());
-				Episode episode = new Episode(program, Net.uri(url), title);
+				URI url = Net.uri(elLink.absUrl("href"));
+				String title = elLink.text().trim();
+				int numEpisode = counter++;
+				int numSeason = season.number();
+				Episode episode = new Episode(program, url, title, numEpisode, numSeason);
 				
 				if(!task.add(episode)) {
 					return RESULT_CANCEL; // Do not continue
@@ -294,7 +293,7 @@ public final class MarkizaVoyoEngine implements MediaEngine {
 			);
 			
 			try(Response.OfStream response = request(action, args)) {
-				return parseEpisodes(task, program, season, response);
+				return parseEpisodes(task, program, season, response, offset);
 			}
 		}
 		
