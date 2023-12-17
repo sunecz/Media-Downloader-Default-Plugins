@@ -235,7 +235,7 @@ public final class NovaPlusEngine implements MediaEngine {
 			
 			// Loop through the episodes in the reverse order
 			for(int offset = lo, min = -count, result; offset >= min; offset -= count, index += result) {
-				URI callUri = Net.uri(Utils.format(callUriTemplate, "offset",  offset));
+				URI callUri = callUri(callUriTemplate, offset);
 				document = HTML.parse(Web.request(Request.of(callUri).retry(5).GET()).body());
 				result = parseEpisodeList(program, task, document.select(SEL_EPISODES), onlyFullEpisodes, index);
 				if(result == RESULT_EXIT) return false;
@@ -257,7 +257,7 @@ public final class NovaPlusEngine implements MediaEngine {
 		String callUriTemplate = callUriTemplate(btnLoadMore);
 		
 		for(int offset = 0, result;; offset += elItems.size()) {
-			URI callUri = Net.uri(Utils.format(callUriTemplate, "offset",  offset));
+			URI callUri = callUri(callUriTemplate, offset);
 			document = HTML.parse(Web.request(Request.of(callUri).retry(5).GET()).body());
 			result = parseEpisodeList(program, task, document.select(SEL_EPISODES), onlyFullEpisodes, 0);
 			if(result == 0) break; // No more non-Voyo episodes
@@ -301,11 +301,6 @@ public final class NovaPlusEngine implements MediaEngine {
 			if(!extractEpisodes(task, program, uriPath, false, index)) {
 				return; // Do not continue
 			}
-		}
-		
-		// If no episodes were found, try to obtain them from the All videos page.
-		if(task.isEmpty()) {
-			extractEpisodes(task, program, "videa", true, index);
 		}
 	}
 	
