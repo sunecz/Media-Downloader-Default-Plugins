@@ -72,7 +72,7 @@ public final class NovaPlusEngine implements MediaEngine {
 	private static final int RESULT_EXIT = -1;
 	
 	// Regex
-	private static final Regex REGEX_EPISODE = Regex.of("^(?:.*?(?: - |: ))?(\\d+)\\. díl(?:(?: - |: )(.*))?$");
+	private static final Regex REGEX_EPISODE = Regex.of("(?iu)^(?:.*?(?: - |: ))?(\\d+)\\. díl(?:(?: - |: )(.*))?$");
 	private static final Regex REGEX_EPISODE_TITLE = Regex.of(
 		"(?iu)(?:(?:\\s+[\\-\\u2013\\u2014]|\\s*:)\\s+)?(\\d+)\\.\\s+díl(?:\\s+[\\-\\u2013\\u2014]\\s+)?"
 	);
