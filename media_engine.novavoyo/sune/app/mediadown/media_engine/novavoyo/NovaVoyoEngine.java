@@ -1,27 +1,22 @@
 package sune.app.mediadown.media_engine.novavoyo;
 
 import java.io.IOException;
-import java.net.CookieStore;
 import java.net.HttpCookie;
 import java.net.URI;
 import java.net.http.HttpHeaders;
 import java.nio.file.Path;
-import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
 import java.util.stream.Collectors;
 
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
-import org.jsoup.nodes.TextNode;
 import org.jsoup.select.Elements;
 
 import javafx.scene.image.Image;
@@ -29,6 +24,7 @@ import sune.app.mediadown.MediaDownloader;
 import sune.app.mediadown.Shared;
 import sune.app.mediadown.authentication.CredentialsManager;
 import sune.app.mediadown.authentication.EmailCredentials;
+import sune.app.mediadown.concurrent.VarLoader;
 import sune.app.mediadown.configuration.Configuration;
 import sune.app.mediadown.entity.Episode;
 import sune.app.mediadown.entity.MediaEngine;
@@ -56,10 +52,6 @@ import sune.app.mediadown.util.JavaScript;
 import sune.app.mediadown.util.NIO;
 import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
-import sune.app.mediadown.util.Utils.Ignore;
-import sune.util.ssdf2.SSDCollection;
-import sune.util.ssdf2.SSDF;
-import sune.util.ssdf2.SSDObject;
 
 public final class NovaVoyoEngine implements MediaEngine {
 	
@@ -78,6 +70,10 @@ public final class NovaVoyoEngine implements MediaEngine {
 	private static final Translation translation() {
 		String path = "plugin." + PLUGIN.getContext().getPlugin().instance().name();
 		return MediaDownloader.translation().getTranslation(path);
+	}
+	
+	private static final PluginConfiguration configuration() {
+		return PLUGIN.getContext().getConfiguration();
 	}
 	
 	private static final String credentialsName() {
@@ -458,37 +454,60 @@ public final class NovaVoyoEngine implements MediaEngine {
 		public static final ListTask<Media> getMedia(MediaEngine engine, URI uri, Map<String, Object> data)
 				throws Exception {
 			return ListTask.of((task) -> {
-				// Ensure the user is logged in
-				VoyoAccount.login();
-				
 				// Obtain the main iframe for the video
 				Document document = HTML.from(uri);
 				Element elIframe = document.selectFirst(".js-detail-player .iframe-wrap iframe");
-				if(elIframe == null)
+				
+				if(elIframe == null) {
 					return;
+				}
 				
-				// Obtain the embedded iframe document to extract the player settings
-				String embedURL = elIframe.absUrl("src");
-				Document embedDoc = HTML.from(Net.uri(embedURL));
+				URI embedUri = Net.uri(elIframe.absUrl("src"));
+				Request request;
+				Document embedDoc;
+				HttpCookie authCookie;
+				int attempt = 0;
 				
-				VoyoError error;
-				if(!(error = checkForError(embedDoc)).isSuccess()) {
+				loop:
+				do {
+					authCookie = VoyoAccount.authCookie();
+					request = Request.of(embedUri).addCookie(authCookie).GET();
+					embedDoc = HTML.from(request);
+					
+					VoyoError error;
+					if((error = checkForError(embedDoc)).isSuccess()) {
+						break;
+					}
+					
 					switch(error.type()) {
-						case "player_parental_profile_age_required":
+						case "player_not_logged_in": {
+							// Only try a new token when this is the first attempt
+							if(attempt++ == 0) {
+								VoyoAccount.resetAuthCookie();
+								break;
+							}
+							
+							displayError(error);
+							return; // Do not continue
+						}
+						case "player_parental_profile_age_required": {
 							if(VoyoAccount.bypassAgeRestriction()) {
-								embedDoc = HTML.from(Net.uri(embedURL)); // Retry
+								embedDoc = HTML.from(request); // Retry
 								
 								if(checkForError(embedDoc).isSuccess()) {
-									break;
+									break loop;
 								}
 							}
-							// FALL-THROUGH
+							
+							displayError(error);
+							return; // Do not continue
+						}
 						default: {
 							displayError(error);
 							return; // Do not continue
 						}
 					}
-				}
+				} while(attempt <= 1);
 				
 				JSONCollection settings = null;
 				for(Element elScript : embedDoc.select("script:not([src])")) {
@@ -631,13 +650,16 @@ public final class NovaVoyoEngine implements MediaEngine {
 	
 	private static final class VoyoAccount {
 		
-		private static final URI URI_MY_ACCOUNT;
+		private static final URI URI_DEVICES;
+		private static final URI URI_DEVICE_RENAME;
 		private static final URI URI_AGE_RESTRICTION;
-		private static final AtomicBoolean isLoginInProcess = new AtomicBoolean();
-		private static final AtomicBoolean isLoggedIn = new AtomicBoolean();
+		
+		private static VarLoader<HttpCookie> deviceCookie = VarLoader.ofChecked(VoyoAccount::loadDeviceCookie);
+		private static boolean deviceRenamed;
 		
 		static {
-			URI_MY_ACCOUNT = Net.uri("https://voyo.nova.cz/muj-profil");
+			URI_DEVICES = Net.uri("https://voyo.nova.cz/sprava-zarizeni");
+			URI_DEVICE_RENAME = Net.uri("https://voyo.nova.cz/api/v1/device/rename");
 			URI_AGE_RESTRICTION = Net.uri("https://voyo.nova.cz/obrazovky-prehravace/rodicovska-kontrola-profil");
 		}
 		
@@ -645,169 +667,142 @@ public final class NovaVoyoEngine implements MediaEngine {
 		private VoyoAccount() {
 		}
 		
-		private static final List<HttpCookie> savedCookies(URI uri) throws Exception {
-			// Get the top-level domain so that all the cookies are included
-			String domain = uri.getHost();
-			String[] parts = domain.split("\\.", 3);
-			if(parts.length < 2)
-				throw new IllegalStateException("Invalid domain");
-			int i = parts.length < 3 ? 0 : 1;
-			domain = parts[i] + '.' + parts[i + 1];
-			
-			String tlDomain = domain;
-			CookieStore cookieStore = Web.cookieManager().getCookieStore();
-			return cookieStore.getCookies().stream()
-				.filter((c) -> c.getDomain().endsWith(tlDomain))
-				.collect(Collectors.toList());
-		}
-		
-		private static final PluginConfiguration configuration() {
-			return PLUGIN.getContext().getConfiguration();
-		}
-		
-		private static final void addDeviceToRemoveOnNextStart(Device device) {
-			SSDCollection value = devicesToRemoveOnNextStart();
-			if(value == null) value = SSDCollection.emptyArray();
-			value.add(device.removeURL());
-			configuration().writer().set("devicesToRemove", value);
-			saveConfiguration();
-		}
-		
-		private static final void clearDevicesToRemoveOnNextStart() {
-			PluginConfiguration configuration = configuration();
-			Configuration.Writer writer = configuration.writer();
-			writer.set("devicesToRemove", SSDCollection.emptyArray());
-			saveConfiguration();
-		}
-		
 		private static final Path configurationPath() {
 			return NIO.localPath("resources/config/" + PLUGIN.getContext().getPlugin().instance().name() + ".ssdf");
 		}
 		
-		private static final SSDCollection devicesToRemoveOnNextStart() {
-			// Due to behavior of the current ArrayConfigurationProperty we must acquire the list
-			// using indirect reading and parsing of the configuration file.
-			return SSDF.read(configurationPath().toFile()).getCollection("devicesToRemove", null);
+		private static final String deviceToken() {
+			String token = configuration().stringValue("token");
+			return token == null || token.isEmpty() ? null : token; // Normalize
 		}
 		
-		private static final void saveConfiguration() {
-			Ignore.callVoid(() -> configuration().writer().save(configurationPath()), MediaDownloader::error);
+		private static final void saveDeviceToken(String token) throws IOException {
+			Configuration.Writer writer = configuration().writer();
+			writer.set("token", token);
+			writer.save(configurationPath());
 		}
 		
-		private static final void deviceReset() throws Exception {
-			// These two lines forces to "reset" the current device on the Voyo website.
-			// I don't know how it works exactly, but I assume it has something to do with
-			// some logic such as: No token is present, regenerate it all again.
-			// Thus resetting all the tokens and values, virtually creating a new device.
-			// The procedure to do this is as follows:
-			// (1) Remove all cookies.
-			// (2) Visit any (logged-in-only?) page.
-			Web.cookieManager().getCookieStore().removeAll();
-			Web.request(Request.of(URI_MY_ACCOUNT).GET());
+		private static final void removeDeviceToken() throws IOException {
+			saveDeviceToken(""); // Must use empty, not null
 		}
 		
-		public static final boolean isLoggedIn() {
-			return isLoggedIn.get();
-		}
-		
-		public static final boolean login() throws Exception {
-			if(isLoggedIn()) return true; // Already logged in
+		private static final String loadDeviceToken() throws Exception {
+			String deviceToken = deviceToken();
 			
-			if(!Authenticator.areLoginDetailsPresent())
-				return false;
-			
-			// Guard accessing this method
-			if(!isLoginInProcess.compareAndSet(false, true))
-				return false;
-			
-			// This is more complicated than it should be, but since we cannot
-			// get the remove URL of the current device, we have to obtain it
-			// some other way. That is:
-			// (1) Login normally. A new device is created.
-			// (2) Obtain the list of devices, including the current device.
-			//     The current device however has removeURL=null. A little note
-			//     is that the list cannot be reordered, so that simplifies
-			//     some things. Also, remember all cookies related to this
-			//     login session.
-			// (3) Reset the device and log in. Another new device is created.
-			// (4) Again, obtain the list of devices, the previous device
-			//     (the one we want) finally has non-empty removeURL, so we
-			//     remember it.
-			// (5) Again, reset the device and reset the login session cookies.
-			// (6) Now, we are logged in as the previous (the one we want) device,
-			//     so obtain the removeURL of the previous device (the dummy one).
-			// (7) Finally, remove the dummy device and append the removeURL of
-			//     the current device to list of devices to remove later, since
-			//     a device cannot remove itself.
-			
-			// Log in to the account normally
-			if(!Authenticator.login())
-				throw new IllegalStateException("Unable to log in");
-			
-			// Remove any previously created devices that should be removed
-			SSDCollection devicesToRemove = devicesToRemoveOnNextStart();
-			if(devicesToRemove != null) {
-				// Remove all devices (using their removeURL) that are present
-				for(SSDObject object : devicesToRemove.objectsIterable()) {
-					DeviceManager.removeDevice(object.stringValue());
-				}
-				
-				// Clear all the devices regardless of whether any of them has been removed or not
-				clearDevicesToRemoveOnNextStart();
+			if(deviceToken != null) {
+				deviceRenamed = true;
+				return deviceToken; // Use the saved device token
 			}
 			
-			List<Device> devices;
+			if(!Authenticator.areLoginDetailsPresent()) {
+				throw new IllegalStateException("No login credentials");
+			}
 			
-			// Remember the login session cookies for later use
-			URI cookiesURI = URI_MY_ACCOUNT;
-			List<HttpCookie> cookies = savedCookies(cookiesURI);
-			// Remember the list of removeURLs of devices for later use
-			devices = DeviceManager.listDevices();
-			Set<String> devicesRemoveURLs = devices.stream().map(Device::removeURL).filter(Objects::nonNull)
-					.collect(Collectors.toCollection(LinkedHashSet::new)); // Use linked set to preserve order
+			if(!Authenticator.login()) {
+				throw new IllegalStateException("Unable to log in");
+			}
 			
-			// Reset the device and log in again to create a new device
-			deviceReset();
-			Authenticator.login();
+			for(HttpCookie hc : Web.cookieManager().getCookieStore().getCookies()) {
+				if(!hc.getName().equals("votoken")) {
+					continue;
+				}
+				
+				deviceToken = hc.getValue();
+				break; // No need to continue
+			}
 			
-			// Find the previous device
-			devices = DeviceManager.listDevices();
-			Device previousDevice = devices.stream()
-					.filter((d) -> d.removeURL() != null && !devicesRemoveURLs.contains(d.removeURL()))
-					.findFirst().orElse(null);
+			if(deviceToken != null) {
+				saveDeviceToken(deviceToken); // Remember the token
+				deviceRenamed = false;
+			}
 			
-			if(previousDevice == null)
-				throw new IllegalStateException("Unable to obtain the primary device");
+			return deviceToken;
+		}
+		
+		private static final HttpCookie loadDeviceCookie() throws Exception {
+			String token = loadDeviceToken();
 			
-			// Add the previous device to the list of known removeURLs
-			devicesRemoveURLs.add(previousDevice.removeURL());
+			if(token == null) {
+				throw new IllegalStateException("Invalid device token");
+			}
 			
-			// Reset the device and switch to the first device
-			deviceReset();
-			CookieStore cookieStore = Web.cookieManager().getCookieStore();
-			cookieStore.removeAll();
-			cookies.forEach((v) -> cookieStore.add(cookiesURI, v));
-			Authenticator.login();
+			HttpCookie cookie = new HttpCookie("votoken", token);
+			cookie.setDomain(".nova.cz");
+			cookie.setPath("/");
+			cookie.setSecure(true);
+			cookie.setHttpOnly(true);
+			cookie.setMaxAge(315360000L); // 10 years in seconds
 			
-			// Obtain the second (dummy) device
-			devices = DeviceManager.listDevices();
-			Device dummyDevice = devices.stream()
-					.filter((d) -> d.removeURL() != null && !devicesRemoveURLs.contains(d.removeURL()))
-					.findFirst().orElse(null);
+			return cookie;
+		}
+		
+		private static final HttpCookie deviceCookie() throws Exception {
+			return deviceCookie.valueChecked();
+		}
+		
+		private static final String currentDeviceId() throws Exception {
+			Request request = Request.of(URI_DEVICES).addCookie(deviceCookie()).GET();
+			Document document = HTML.from(request);
+			Element elLabel = document.selectFirst(".c-profile-page-device-settings-item > .activity-label");
 			
-			if(dummyDevice == null)
-				throw new IllegalStateException("Unable to obtain the dummy device");
+			if(elLabel == null) {
+				return null; // No active device
+			}
 			
-			// Remove the dummy device since we don't need it
-			DeviceManager.removeDevice(dummyDevice);
+			Element elInput = elLabel.parent().selectFirst("[data-device-id]");
+			String deviceId = elInput.attr("data-device-id");
 			
-			// The current device unfortunately cannot remove itself, it must be done on the next
-			// application use using another (new) device.
-			addDeviceToRemoveOnNextStart(previousDevice);
+			return deviceId;
+		}
+		
+		private static final boolean renameCurrentDevice(String newName) throws Exception {
+			String deviceId = currentDeviceId();
 			
-			isLoggedIn.set(true);
-			isLoginInProcess.set(false);
-			return true;
+			if(deviceId == null) {
+				return false;
+			}
+			
+			String boundary = Utils.randomString(30, "0123456789");
+			StringBuilder body = new StringBuilder();
+			
+			Map<String, String> args = Map.of(
+				"id", deviceId,
+				"name", newName
+			);
+			
+			for(Entry<String, String> entry : args.entrySet()) {
+				body.append(String.format(
+					"--%s\nContent-Disposition: form-data; name=\"%s\"\n\n%s\n",
+					boundary, entry.getKey(), entry.getValue()
+				));
+			}
+			
+			body.append("--" + boundary + "--\n");
+			
+			try(Response.OfStream response = Web.requestStream(
+				Request.of(URI_DEVICE_RENAME).POST(body.toString(), "multipart/form-data; boundary=" + boundary)
+			)) {
+				JSONCollection json = JSON.read(response.stream());
+				return json.getString("status", "").equals("ok");
+			}
+		}
+		
+		public static final HttpCookie authCookie() throws Exception {
+			HttpCookie cookie = deviceCookie();
+			
+			if(!deviceRenamed) {
+				renameCurrentDevice("Media Downloader");
+				deviceRenamed = true;
+			}
+			
+			return cookie;
+		}
+		
+		public static final void resetAuthCookie() throws Exception {
+			removeDeviceToken(); // Discard saved token
+			Web.cookieManager().getCookieStore().removeAll(); // Clear session
+			deviceCookie = VarLoader.ofChecked(VoyoAccount::loadDeviceCookie);
+			deviceRenamed = false;
 		}
 		
 		public static boolean bypassAgeRestriction() throws Exception {
@@ -873,115 +868,6 @@ public final class NovaVoyoEngine implements MediaEngine {
 			try(EmailCredentials credentials = credentials()) {
 				return Utils.OfString.nonEmpty(credentials.email()) && Utils.OfString.nonEmpty(credentials.password());
 			}
-		}
-	}
-	
-	private static final class DeviceManager {
-		
-		private static final String URL_DEVICES = "https://voyo.nova.cz/sprava-zarizeni";
-		
-		private static final String SELECTOR_DEVICES = "main .list > .content";
-		
-		// Forbid anyone to create an instance of this class
-		private DeviceManager() {
-		}
-		
-		public static final List<Device> listDevices() throws Exception {
-			List<Device> devices = new ArrayList<>();
-			
-			DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd.MM.yyyy");
-			Document document = HTML.from(Net.uri(URL_DEVICES));
-			for(Element elDevice : document.select(SELECTOR_DEVICES)) {
-				boolean isCurrent = elDevice.hasClass("-current");
-				boolean isActive = !elDevice.parent().parent().hasClass("-forbidden");
-				
-				String name = elDevice.selectFirst("> .type > .item").text();
-				String description = elDevice.selectFirst("> .type > .description").text();
-				
-				LocalDate dateActivation = LocalDate.parse(
-					elDevice.selectFirst("> div:nth-child(2) > .date").textNodes().stream()
-						.map(TextNode::text).reduce("", (a, b) -> a + b).trim(),
-					formatter
-				);
-				LocalDate dateLastUsed = LocalDate.parse(
-					elDevice.selectFirst("> div:nth-child(3) > .date").textNodes().stream()
-						.map(TextNode::text).reduce("", (a, b) -> a + b).trim(),
-					formatter
-				);
-				
-				String removeURL = Optional.ofNullable(elDevice.selectFirst("> .action-field > a"))
-						.map((a) -> a.absUrl("data-confirm-url")).orElse(null);
-				
-				devices.add(new Device(isCurrent, isActive, name, description, dateActivation,
-					dateLastUsed, removeURL));
-			}
-			
-			return devices;
-		}
-		
-		public static final void removeDevice(Device device) throws Exception {
-			removeDevice(device.removeURL());
-		}
-		
-		private static final void removeDevice(String removeURL) throws Exception {
-			if(removeURL == null) return; // Nothing to remove
-			Web.request(Request.of(Net.uri(removeURL)).GET());
-		}
-	}
-	
-	private static final class Device {
-		
-		private final boolean isCurrent;
-		private final boolean isActive;
-		private final String name;
-		private final String description;
-		private final LocalDate dateActivation;
-		private final LocalDate dateLastUsed;
-		private final String removeURL;
-		
-		public Device(boolean isCurrent, boolean isActive, String name, String description, LocalDate dateActivation,
-				LocalDate dateLastUsed, String removeURL) {
-			this.isCurrent = isCurrent;
-			this.isActive = isActive;
-			this.name = Objects.requireNonNull(name);
-			this.description = Objects.requireNonNull(description);
-			this.dateActivation = Objects.requireNonNull(dateActivation);
-			this.dateLastUsed = Objects.requireNonNull(dateLastUsed);
-			this.removeURL = removeURL; // Can be null
-		}
-		
-		@SuppressWarnings("unused")
-		public boolean isCurrent() {
-			return isCurrent;
-		}
-		
-		@SuppressWarnings("unused")
-		public boolean isActive() {
-			return isActive;
-		}
-		
-		@SuppressWarnings("unused")
-		public String name() {
-			return name;
-		}
-		
-		@SuppressWarnings("unused")
-		public String description() {
-			return description;
-		}
-		
-		@SuppressWarnings("unused")
-		public LocalDate dateActivation() {
-			return dateActivation;
-		}
-		
-		@SuppressWarnings("unused")
-		public LocalDate dateLastUsed() {
-			return dateLastUsed;
-		}
-		
-		public String removeURL() {
-			return removeURL;
 		}
 	}
 	
