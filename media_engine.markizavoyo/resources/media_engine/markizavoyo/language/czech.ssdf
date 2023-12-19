@@ -2,7 +2,19 @@
 	plugin: {
 		media_engine: {
 			markizavoyo: {
-				title: "Voyo (Markíza)"
+				title: "Voyo (Markíza)",
+				error: {
+					media_error: {
+						title: "Chyba: %{name}s",
+						text:  "Média nelze získat z následujícího důvodů:"
+					},
+					value: {
+						player_not_logged_in:       "Nejste přihlášeni. Prosím, nastavte Vaše přihlašovací údaje "
+							+ "k účtu v nastavení programu.",
+						player_logged_in_no_access: "K tomuto médiu nemáte přístup. Toto je pravděpodobně způsobeno "
+							+ "nedostatečně vysokým tarifem."
+					}
+				}
 			}
 		}
 	}

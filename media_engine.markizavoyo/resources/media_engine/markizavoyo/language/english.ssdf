@@ -2,7 +2,19 @@
 	plugin: {
 		media_engine: {
 			markizavoyo: {
-				title: "Voyo (Markíza)"
+				title: "Voyo (Markíza)",
+				error: {
+					media_error: {
+						title: "Error: %{name}s",
+						text:  "Media cannot be obtained due to the following reason:"
+					},
+					value: {
+						player_not_logged_in:       "You are not logged in. Please, set your account credentials "
+							+ "in the application's configuration.",
+						player_logged_in_no_access: "You don't have access to this media. This is probably due to "
+							+ "not having high enough tarif."
+					}
+				}
 			}
 		}
 	}
