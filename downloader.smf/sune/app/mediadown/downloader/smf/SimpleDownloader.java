@@ -470,6 +470,15 @@ public final class SimpleDownloader implements Download, DownloadResult {
 			tracker.update(delta);
 			lastSize.set(current);
 			
+			if(size <= 0L) {
+				long contextTotal = downloadTracker.total();
+				
+				if(contextTotal > 0L) {
+					size = contextTotal;
+					tracker.updateTotal(contextTotal);
+				}
+			}
+			
 			eventRegistry.call(DownloadEvent.UPDATE, SimpleDownloader.this);
 		}
 		
