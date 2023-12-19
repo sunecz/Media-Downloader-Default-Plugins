@@ -871,7 +871,7 @@ public final class MarkizaVoyoEngine implements MediaEngine {
 		
 		public static final boolean areLoginDetailsPresent() throws Exception {
 			try(EmailCredentials credentials = credentials()) {
-				return !credentials.email().isEmpty() && !credentials.password().isEmpty();
+				return Utils.OfString.nonEmpty(credentials.email()) && Utils.OfString.nonEmpty(credentials.password());
 			}
 		}
 	}
