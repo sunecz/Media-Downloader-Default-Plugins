@@ -45,7 +45,7 @@ public final class MarkizaVoyoEnginePlugin extends PluginBase {
 				.withDefaultValue(""));
 		}
 		
-		builder.addProperty(ConfigurationProperty.ofArray("devicesToRemove").asHidden(true));
+		builder.addProperty(ConfigurationProperty.ofString("token").asHidden(true));
 		configuration = builder;
 	}
 	
