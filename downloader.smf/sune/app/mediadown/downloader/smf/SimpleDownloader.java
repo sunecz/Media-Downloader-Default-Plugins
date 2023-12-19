@@ -128,6 +128,11 @@ public final class SimpleDownloader implements Download, DownloadResult {
 						Request request = Request.of(mh.media().uri()).headers(HEADERS).HEAD();
 						long size = Ignore.defaultValue(() -> Web.size(request), MediaConstants.UNKNOWN_SIZE);
 						
+						if(size <= 0L) {
+							// If the size is still unknown, try to estimate it
+							size = (long) MediaUtils.estimateTotalSize(mh.media());
+						}
+						
 						// Since we use AcceleratedFileDownloader, treat zero bytes as unknown
 						if(size > 0L) {
 							theSize.getAndAdd(size);
