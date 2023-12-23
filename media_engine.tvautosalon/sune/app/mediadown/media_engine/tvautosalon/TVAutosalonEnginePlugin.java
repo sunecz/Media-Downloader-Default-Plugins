@@ -7,7 +7,7 @@ import sune.app.mediadown.plugin.PluginBase;
 
 @Plugin(name          = "media_engine.tvautosalon",
 	    title         = "plugin.media_engine.tvautosalon.title",
-	    version       = "00.02.09-0001",
+	    version       = "00.02.09-0002",
 	    author        = "Sune",
 	    updateBaseURL = "https://app.sune.tech/mediadown/dat/plugin/0002/media_engine/tvautosalon/",
 	    updatable     = true,
