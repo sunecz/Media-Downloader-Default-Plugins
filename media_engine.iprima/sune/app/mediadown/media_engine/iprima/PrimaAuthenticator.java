@@ -21,6 +21,7 @@ import sune.app.mediadown.configuration.Configuration;
 import sune.app.mediadown.media_engine.iprima.IPrimaEnginePlugin.IPrimaCredentials;
 import sune.app.mediadown.media_engine.iprima.PrimaAuthenticator.Devices.Device;
 import sune.app.mediadown.media_engine.iprima.PrimaAuthenticator.Profiles.Profile;
+import sune.app.mediadown.media_engine.iprima.PrimaCommon.MessageException;
 import sune.app.mediadown.media_engine.iprima.PrimaCommon.RPC;
 import sune.app.mediadown.media_engine.iprima.PrimaCommon.TranslatableException;
 import sune.app.mediadown.net.HTML;
@@ -367,6 +368,11 @@ public final class PrimaAuthenticator {
 				"deviceSlotType", DEFAULT_DEVICE_TYPE,
 				"deviceUid", null
 			);
+			
+			// Handle possible errors, i.e. when the device limit has been exceeded.
+			if(RPC.isError(response)) {
+				throw new MessageException(response.getString("error.message"));
+			}
 			
 			return parseDevice(response.getCollection("data"));
 		}

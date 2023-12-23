@@ -15,6 +15,8 @@ import sune.app.mediadown.language.Translation;
 import sune.app.mediadown.net.Net;
 import sune.app.mediadown.net.Web;
 import sune.app.mediadown.net.Web.Response;
+import sune.app.mediadown.task.ListTask;
+import sune.app.mediadown.util.CheckedConsumer;
 import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.JSON.JSONCollection;
 import sune.app.mediadown.util.JSON.JSONNode;
@@ -40,12 +42,29 @@ public final class PrimaCommon {
 			Translation tr = IPrimaHelper.translation().getTranslation(tex.translationPath());
 			Dialog.showError(tr.getSingle("title"), tr.getSingle("text"));
 			return; // Do not continue
+		} else if((th = throwable) instanceof MessageException
+						|| (th = throwable.getCause()) instanceof MessageException) {
+			MessageException mex = (MessageException) th;
+			Translation tr = IPrimaHelper.translation().getTranslation("error.message_error");
+			Dialog.showError(tr.getSingle("title"), mex.message());
+			return; // Do not continue
 		}
 		
 		MediaDownloader.error(throwable);
 	}
 	
-	public static abstract class TranslatableException extends Exception {
+	public static final <T> CheckedConsumer<ListTask<T>> handleErrors(CheckedConsumer<ListTask<T>> action) {
+		return ((task) -> {
+			try {
+				action.accept(task);
+			} catch(Exception ex) {
+				// More user-friendly error messages
+				error(ex);
+			}
+		});
+	}
+	
+	public static class TranslatableException extends Exception {
 		
 		private static final long serialVersionUID = 2966737246033320221L;
 		
@@ -63,6 +82,27 @@ public final class PrimaCommon {
 		
 		public String translationPath() {
 			return translationPath;
+		}
+	}
+	
+	public static class MessageException extends Exception {
+		
+		private static final long serialVersionUID = -3290197439712588070L;
+		
+		protected final String message;
+		
+		protected MessageException(String message) {
+			super();
+			this.message = Objects.requireNonNull(message);
+		}
+		
+		protected MessageException(String message, Throwable cause) {
+			super(cause);
+			this.message = Objects.requireNonNull(message);
+		}
+		
+		public String message() {
+			return message;
 		}
 	}
 	
@@ -99,7 +139,12 @@ public final class PrimaCommon {
 					stream = new GZIPInputStream(stream);
 				}
 				
-				return JSON.read(stream).getCollection("result");
+				JSONCollection json = JSON.read(stream);
+				
+				// Return the result if it exists, otherwise return the whole JSON.
+				// That can happen when an error occurred, the information about it
+				// is in the error collection.
+				return json.getCollection("result", json);
 			}
 		}
 		
@@ -111,6 +156,10 @@ public final class PrimaCommon {
 			JSONCollection json = RPC.Request.bodyOf(method, params);
 			json.setNull("params.profileId");
 			return rawRequest(json.toString(true));
+		}
+		
+		public static final boolean isError(JSONCollection json) {
+			return json.hasCollection("error");
 		}
 		
 		private static final class Request {

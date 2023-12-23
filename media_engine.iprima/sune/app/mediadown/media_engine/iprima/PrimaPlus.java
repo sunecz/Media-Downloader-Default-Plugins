@@ -243,31 +243,16 @@ final class PrimaPlus implements IPrima {
 			return Web.Headers.ofSingleMap(mutRequestHeaders);
 		}
 		
-		private static final PrimaAuthenticator.SessionData logIn() {
-			try {
-				return PrimaAuthenticator.sessionData();
-			} catch(Exception ex) {
-				// Notify the user that the HD sources may not be available due to inability to log in.
-				PrimaCommon.error(ex);
-			}
-			
-			return null;
+		private static final PrimaAuthenticator.SessionData logIn() throws Exception {
+			return PrimaAuthenticator.sessionData();
 		}
 		
-		private static final HttpHeaders logInHeaders() {
-			try {
-				return sessionHeaders.valueChecked();
-			} catch(Exception ex) {
-				// Notify the user that the HD sources may not be available due to inability to log in.
-				PrimaCommon.error(ex);
-			}
-			
-			return Web.Headers.empty();
+		private static final HttpHeaders logInHeaders() throws Exception {
+			return sessionHeaders.valueChecked();
 		}
 		
-		private static final String accessToken() {
-			PrimaAuthenticator.SessionData sessionData = logIn();
-			return sessionData != null ? sessionData.accessToken() : null;
+		private static final String accessToken() throws Exception {
+			return logIn().accessToken();
 		}
 		
 		private static final void displayError(JSONCollection errorInfo) {
@@ -278,7 +263,7 @@ final class PrimaPlus implements IPrima {
 		}
 		
 		public static final ListTask<Program> getPrograms(IPrima iprima, IPrimaEngine engine) throws Exception {
-			return ListTask.of((task) -> {
+			return ListTask.of(PrimaCommon.handleErrors((task) -> {
 				// Note: Obtaining the list of programs is not stable using this method.
 				//       Since there is no currently known other method how to obtain
 				//       a stable list of programs, at least for me, we are stuck with
@@ -340,12 +325,12 @@ final class PrimaPlus implements IPrima {
 						});
 					}
 				}
-			});
+			}));
 		}
 		
 		public static final ListTask<Episode> getEpisodes(IPrima iprima, IPrimaEngine engine, Program program)
 				throws Exception {
-			return ListTask.of((task) -> {
+			return ListTask.of(PrimaCommon.handleErrors((task) -> {
 				// Handle movies separately since they do not have any episodes
 				String type;
 				if((type = program.get("type")) != null && type.equals("movie")) {
@@ -375,11 +360,11 @@ final class PrimaPlus implements IPrima {
 						}
 					}
 				}
-			});
+			}));
 		}
 		
 		public static final ListTask<Media> getMedia(IPrima iprima, IPrimaEngine engine, URI uri) throws Exception {
-			return ListTask.of((task) -> {
+			return ListTask.of(PrimaCommon.handleErrors((task) -> {
 				// Always log in first to ensure the data are correct
 				HttpHeaders requestHeaders = logInHeaders();
 				
@@ -545,7 +530,7 @@ final class PrimaPlus implements IPrima {
 						}
 					}
 				}
-			});
+			}));
 		}
 		
 		private static final class Filter implements JSONSerializable {

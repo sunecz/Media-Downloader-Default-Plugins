@@ -30,6 +30,9 @@
 						title: "Chyba",
 						text:  "Pro účet nebyl nalezen žádný profil. Ujistěte se, že existuje alespoň jeden profil."
 					},
+					message_error: {
+						title: "Chyba"
+					},
 					value: {
 						USER_SLOT_LIMIT_COUNT:     "Dosažen limit počtu zařízení.",
 						USER_SLOT_LIMIT_CHANGE:    "Dosažen limit maximálního počtu změn.",

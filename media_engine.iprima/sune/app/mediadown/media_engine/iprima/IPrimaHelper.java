@@ -147,7 +147,7 @@ final class IPrimaHelper {
 		protected abstract String playURL();
 		
 		public ListTask<Media> getMedia(URI uri, MediaEngine engine) throws Exception {
-			return ListTask.of((task) -> {
+			return ListTask.of(PrimaCommon.handleErrors((task) -> {
 				Document document = HTML.from(uri);
 				String productId = null;
 				
@@ -317,7 +317,7 @@ final class IPrimaHelper {
 						}
 					}
 				}
-			});
+			}));
 		}
 	}
 	
@@ -377,10 +377,10 @@ final class IPrimaHelper {
 		}
 		
 		public ListTask<Program> getPrograms(IPrima iprima, String subdomain) throws Exception {
-			return ListTask.of((task) -> {
+			return ListTask.of(PrimaCommon.handleErrors((task) -> {
 				getProgramsOfType(task, iprima, subdomain, TYPE_SHOW, GRAPHQL_TYPE_SHOW);
 				getProgramsOfType(task, iprima, subdomain, TYPE_MOVIE, GRAPHQL_TYPE_MOVIE);
-			});
+			}));
 		}
 	}
 	
@@ -400,7 +400,7 @@ final class IPrimaHelper {
 		}
 		
 		public ListTask<Program> getPrograms(IPrima iprima, String urlPrograms) throws Exception {
-			return ListTask.of((task) -> {
+			return ListTask.of(PrimaCommon.handleErrors((task) -> {
 				URI uriPrograms = Net.uri(urlPrograms);
 				String response = request(uriPrograms);
 				Document document = HTML.parse(response, uriPrograms);
@@ -414,7 +414,7 @@ final class IPrimaHelper {
 						break; // Do not continue
 					}
 				}
-			});
+			}));
 		}
 	}
 	
@@ -450,7 +450,7 @@ final class IPrimaHelper {
 		}
 		
 		public ListTask<Episode> getEpisodes(Program program, String subdomain) throws Exception {
-			return ListTask.of((task) -> {
+			return ListTask.of(PrimaCommon.handleErrors((task) -> {
 				String id = program.get("id");
 				
 				if(id == null || id.isEmpty()) {
@@ -495,7 +495,7 @@ final class IPrimaHelper {
 						offset = response.getInt("offset");
 					}
 				}
-			});
+			}));
 		}
 	}
 	
@@ -652,7 +652,7 @@ final class IPrimaHelper {
 		}
 		
 		public ListTask<Episode> getEpisodes(Program program) throws Exception {
-			return ListTask.of((task) -> {
+			return ListTask.of(PrimaCommon.handleErrors((task) -> {
 				URI programUri = program.uri();
 				String response = request(programUri);
 				
@@ -767,7 +767,7 @@ final class IPrimaHelper {
 						}
 					}
 				}
-			});
+			}));
 		}
 	}
 	
@@ -860,7 +860,7 @@ final class IPrimaHelper {
 		}
 		
 		public ListTask<Media> getMedia(URI uri, MediaEngine engine) throws Exception {
-			return ListTask.of((task) -> {
+			return ListTask.of(PrimaCommon.handleErrors((task) -> {
 				String response = request(uri);
 				
 				if(response == null) {
@@ -923,7 +923,7 @@ final class IPrimaHelper {
 						}
 					}
 				}
-			});
+			}));
 		}
 	}
 	

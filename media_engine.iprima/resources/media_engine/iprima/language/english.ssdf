@@ -30,6 +30,9 @@
 						title: "Error",
 						text:  "No profile found for the account. Make sure at least one profile exists."
 					},
+					message_error: {
+						title: "Error"
+					},
 					value: {
 						USER_SLOT_LIMIT_COUNT:     "Device limit reached.",
 						USER_SLOT_LIMIT_CHANGE:    "Maximum number of changes limit reached.",
