@@ -61,7 +61,7 @@ public class SledovaniTVServer implements Server {
 	
 	static {
 		URI_TEMPLATE_RECORDING = "https://sledovanitv.cz/playback/pvr-info"
-				+ "?recordId=%{recordId}d"
+				+ "?recordId=%{recordId}s"
 				+ "&format=m3u8/m3u8"
 				+ "&drm=widevine";
 	}
@@ -83,7 +83,7 @@ public class SledovaniTVServer implements Server {
 	}
 	
 	private static final JSONCollection recordingInfo(URI uri) throws Exception {
-		int recordId = Integer.valueOf(Utils.afterFirst(uri.getFragment(), ":"));
+		String recordId = Utils.afterFirst(uri.getFragment(), ":");
 		URI uriInfo = Net.uri(Utils.format(URI_TEMPLATE_RECORDING, "recordId", recordId));
 		
 		try(Response.OfStream response = Web.requestStream(Request.of(uriInfo).GET())) {
