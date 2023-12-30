@@ -24,6 +24,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
+import java.util.stream.Stream;
 import java.util.zip.GZIPInputStream;
 
 import org.jsoup.nodes.Document;
@@ -294,7 +295,11 @@ final class IPrimaHelper {
 				if(data.type() == JSONType.ARRAY) {
 					streamInfos = JSONCollection.emptyArray();
 					Utils.stream(data.collectionsIterator())
-						.flatMap((c) -> Utils.stream(c.getCollection("streamInfos").collectionsIterator()))
+						.flatMap(
+							(c) -> c.hasCollection("streamInfos")
+										? Utils.stream(c.getCollection("streamInfos").collectionsIterator())
+										: Stream.empty()
+						)
 						.forEach(streamInfos::add);
 				} else {
 					streamInfos = data.getCollection("streamInfos");
