@@ -238,12 +238,14 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 	
 	private final boolean computeTotalSize(List<? extends RemoteFile> segments, List<? extends RemoteFile> subtitles)
 			throws Exception {
+		Pair<Boolean, Long> sizeResult = sizeOrEstimatedSize(segments, subtitles);
+		sizeSet(sizeResult.b);
+		
+		// All files (segments and subtitles) have computed size (not estimated)
+		if(sizeResult.a) return true;
+		
 		if(!MediaDownloader.configuration().computeStreamSize()) {
-			// User requested no stream size computation, at least estimate the total size
-			Pair<Boolean, Long> sizeResult = sizeOrEstimatedSize(segments, subtitles);
-			sizeSet(sizeResult.b);
-			// Total size is not final
-			return false;
+			return false; // Total size is not final
 		}
 		
 		// Obtain the total size compute strategy and compute the size
@@ -811,12 +813,6 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 				List<? extends RemoteFile> segments,
 				List<? extends RemoteFile> subtitles
 		) throws Exception {
-			Pair<Boolean, Long> sizeResult = sizeOrEstimatedSize(segments, subtitles);
-			sizeSet(sizeResult.b);
-			
-			// All files (segments and subtitles) have computed size (not estimated)
-			if(sizeResult.a) return true;
-			
 			String text = translation.getSingle("progress.compute_total_size");
 			PlainTextTracker tracker = new PlainTextTracker();
 			trackerManager.tracker(tracker);
@@ -898,12 +894,6 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 				List<? extends RemoteFile> segments,
 				List<? extends RemoteFile> subtitles
 		) throws Exception {
-			Pair<Boolean, Long> sizeResult = sizeOrEstimatedSize(segments, subtitles);
-			sizeSet(sizeResult.b);
-			
-			// All files (segments and subtitles) have computed size (not estimated)
-			if(sizeResult.a) return true;
-			
 			workerOuter = Worker.createWorker();
 			workerOuter.submit(() -> {
 				workerInner = Worker.createWorker(numberOfAsyncTotalSizeComputeWorkers());
