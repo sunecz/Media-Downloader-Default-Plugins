@@ -30,4 +30,5 @@ module sune.app.mediadown.default_plugins {
 	exports sune.app.mediadown.drm_engine.iprima;
 	exports sune.app.mediadown.drm_engine.novaplus;
 	exports sune.app.mediadown.drm_engine.markizavoyo;
+	exports sune.app.mediadown.drm_engine.sledovanitv;
 }

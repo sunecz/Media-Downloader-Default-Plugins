@@ -68,6 +68,7 @@
 		<antcall target="build-drm-engine"><param name="var.name" value="iprima"        /></antcall>
 		<antcall target="build-drm-engine"><param name="var.name" value="novaplus"      /></antcall>
 		<antcall target="build-drm-engine"><param name="var.name" value="markizavoyo"   /></antcall>
+		<antcall target="build-drm-engine"><param name="var.name" value="sledovanitv"   /></antcall>
 	</target>
 	
 	<target name="build-plugin">
