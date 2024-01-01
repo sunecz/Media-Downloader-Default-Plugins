@@ -9,8 +9,10 @@ import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeFormatterBuilder;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.function.Function;
 
 import org.jsoup.nodes.Document;
@@ -32,6 +34,7 @@ import sune.app.mediadown.media.MediaSource;
 import sune.app.mediadown.media.MediaType;
 import sune.app.mediadown.media.MediaUtils;
 import sune.app.mediadown.media.SegmentedMedia;
+import sune.app.mediadown.media.fix.MediaFixer;
 import sune.app.mediadown.media.format.M3U.M3USegment;
 import sune.app.mediadown.net.HTML;
 import sune.app.mediadown.net.Net;
@@ -94,8 +97,10 @@ public class SledovaniTVServer implements Server {
 	@Override
 	public ListTask<Media> getMedia(URI uri, Map<String, Object> data) throws Exception {
 		return ListTask.of((task) -> {
+			Authenticator.Session session;
+			
 			// Must be logged in to download the recording
-			if(!Authenticator.login()) {
+			if((session = Authenticator.login()) == null) {
 				return; // Failed to log in, do not continue
 			}
 			
@@ -103,10 +108,46 @@ public class SledovaniTVServer implements Server {
 			URI streamUri = Net.uri(info.getString("url"));
 			String title = info.getString("title");
 			MediaSource source = MediaSource.of(this);
+			MediaMetadata metadata = MediaMetadata.of(
+				"profileId", session.profileId(),
+				"deviceId", session.deviceId()
+			);
 			
 			List<Media.Builder<?, ?>> builders = MediaUtils.createMediaBuilders(
-				source, streamUri, uri, title, MediaLanguage.UNKNOWN, MediaMetadata.empty()
+				source, streamUri, uri, title, MediaLanguage.UNKNOWN, metadata
 			);
+			
+			// Since timestamps in the decrypted files are not always correct,
+			// we must request both the video and audio to be fixed, if present.
+			for(Media.Builder<?, ?> builder : builders) {
+				if(!builder.format().isAnyOf(MediaFormat.M3U8, MediaFormat.DASH)) {
+					continue; // Currently only M3U8 or DASH segments are supported
+				}
+				
+				List<String> steps = new ArrayList<>();
+				
+				for(Media.Builder<?, ?> mb : ((MediaContainer.Builder<?, ?>) builder).media()) {
+					// Only protected media have video and audio separated
+					if(!mb.metadata().isProtected()) {
+						continue;
+					}
+					
+					steps.add(
+						mb.type().is(MediaType.AUDIO)
+							? MediaFixer.Steps.STEP_AUDIO_FIX_TIMESTAMPS
+							: MediaFixer.Steps.STEP_VIDEO_FIX_TIMESTAMPS
+					);
+				}
+				
+				if(!steps.isEmpty()) {
+					MediaMetadata fixMetadata = MediaMetadata.of(
+						"media.fix.required", true,
+						"media.fix.steps", steps
+					);
+					
+					builder.metadata(MediaMetadata.of(builder.metadata(), fixMetadata));
+				}
+			}
 			
 			for(Media.Builder<?, ?> builder : builders) {
 				if(!builder.format().is(MediaFormat.M3U8)) {
@@ -124,13 +165,13 @@ public class SledovaniTVServer implements Server {
 					M3USegment firstSegment = (M3USegment) smb.segments().segments().get(0);
 					String startTime = SegmentsHelper.timestamp(firstSegment);
 					
-					MediaMetadata metadata = MediaMetadata.of(
+					MediaMetadata subtitlesMetadata = MediaMetadata.of(
 						"subtitles.retime.strategy", "startAtZero",
 						"subtitles.retime.startTime", startTime,
 						"subtitles.retime.ignoreHours", true
 					);
 					
-					mb.metadata(MediaMetadata.of(mb.metadata(), metadata));
+					mb.metadata(MediaMetadata.of(mb.metadata(), subtitlesMetadata));
 				}
 			}
 			
@@ -199,10 +240,17 @@ public class SledovaniTVServer implements Server {
 		private Authenticator() {
 		}
 		
-		private static final boolean doLogin(String username, String password) throws Exception {
+		private static final String cookieOfName(List<HttpCookie> cookies, String name) {
+			return cookies.stream()
+						.filter((c) -> c.getName().equals(name))
+						.map(HttpCookie::getValue)
+						.findFirst().orElse(null);
+		}
+		
+		private static final Session doLogin(String username, String password) throws Exception {
 			if(username == null || username.isBlank() || password == null || password.isBlank()) {
 				displayError("not_logged_in");
-				return false; // Do not continue
+				return null; // Do not continue
 			}
 			
 			String body = Net.queryString(
@@ -232,11 +280,34 @@ public class SledovaniTVServer implements Server {
 			Element profile = document.selectFirst(".profiles__list--item > a");
 			Web.requestStream(Request.of(Net.uri(profile.absUrl("href"))).GET());
 			
-			return true;
+			List<HttpCookie> cookies = Web.cookieManager().getCookieStore().get(Net.uri("https://sledovanitv.cz"));
+			String profileId = Net.queryDestruct(profile.absUrl("href")).valueOf("profileId");
+			String deviceId = cookieOfName(cookies, "device_id");
+			
+			return new Session(profileId, deviceId);
 		}
 		
-		public static final boolean login() throws Exception {
+		public static final Session login() throws Exception {
 			return doLogin(AuthenticationData.email(), AuthenticationData.password());
+		}
+		
+		private static final class Session {
+			
+			private final String profileId;
+			private final String deviceId;
+			
+			public Session(String profileId, String deviceId) {
+				this.profileId = Objects.requireNonNull(profileId);
+				this.deviceId = Objects.requireNonNull(deviceId);
+			}
+			
+			public String profileId() {
+				return profileId;
+			}
+			
+			public String deviceId() {
+				return deviceId;
+			}
 		}
 		
 		private static final class AuthenticationData {
