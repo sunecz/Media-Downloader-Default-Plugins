@@ -45,6 +45,10 @@ public final class SledovaniTVServerPlugin extends PluginBase {
 				.withDefaultValue(""));
 		}
 		
+		builder.addProperty(ConfigurationProperty.ofString("profile_id").asHidden(true));
+		builder.addProperty(ConfigurationProperty.ofString("device_id").asHidden(true));
+		builder.addProperty(ConfigurationProperty.ofString("device_auth").asHidden(true));
+		builder.addProperty(ConfigurationProperty.ofString("device_time").asHidden(true));
 		configuration = builder;
 	}
 	

@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.net.HttpCookie;
 import java.net.URI;
 import java.net.http.HttpClient.Redirect;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
@@ -22,6 +23,8 @@ import javafx.scene.image.Image;
 import sune.app.mediadown.MediaDownloader;
 import sune.app.mediadown.authentication.CredentialsManager;
 import sune.app.mediadown.authentication.EmailCredentials;
+import sune.app.mediadown.concurrent.VarLoader;
+import sune.app.mediadown.configuration.Configuration;
 import sune.app.mediadown.entity.Server;
 import sune.app.mediadown.gui.Dialog;
 import sune.app.mediadown.language.Translation;
@@ -42,10 +45,12 @@ import sune.app.mediadown.net.Web;
 import sune.app.mediadown.net.Web.Request;
 import sune.app.mediadown.net.Web.Response;
 import sune.app.mediadown.plugin.PluginBase;
+import sune.app.mediadown.plugin.PluginConfiguration;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.task.ListTask;
 import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.JSON.JSONCollection;
+import sune.app.mediadown.util.NIO;
 import sune.app.mediadown.util.Opt;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Utils.Ignore;
@@ -78,6 +83,10 @@ public class SledovaniTVServer implements Server {
 		return MediaDownloader.translation().getTranslation(path);
 	}
 	
+	private static final PluginConfiguration configuration() {
+		return PLUGIN.getContext().getConfiguration();
+	}
+	
 	private static final void displayError(String name) {
 		Translation tr = translation().getTranslation("error");
 		String message = tr.getSingle("value." + name);
@@ -85,12 +94,28 @@ public class SledovaniTVServer implements Server {
 		Dialog.showContentInfo(tr.getSingle("title"), tr.getSingle("text"), message);
 	}
 	
-	private static final JSONCollection recordingInfo(URI uri) throws Exception {
+	private static final JSONCollection recordingInfo(Authenticator.Session session, URI uri) throws Exception {
 		String recordId = Utils.afterFirst(uri.getFragment(), ":");
 		URI uriInfo = Net.uri(Utils.format(URI_TEMPLATE_RECORDING, "recordId", recordId));
 		
-		try(Response.OfStream response = Web.requestStream(Request.of(uriInfo).GET())) {
+		try(Response.OfStream response = Web.requestStream(
+			Request.of(uriInfo)
+				.addHeaders(session.headers())
+				.followRedirects(Redirect.NEVER)
+				.GET()
+		)) {
+			if(response.statusCode() != 200) {
+				// Not logged in correctly
+				return null;
+			}
+			
 			return JSON.read(response.stream());
+		}
+	}
+	
+	private static final boolean isError(URI streamUri) throws Exception {
+		try(Response.OfStream response = Web.peek(Request.of(streamUri).followRedirects(Redirect.NEVER).HEAD())) {
+			return Net.uriBasename(response.headers().firstValue("location").get()).toString().startsWith("error");
 		}
 	}
 	
@@ -101,16 +126,42 @@ public class SledovaniTVServer implements Server {
 			
 			// Must be logged in to download the recording
 			if((session = Authenticator.login()) == null) {
-				return; // Failed to log in, do not continue
+				// Failed to log in, do not continue
+				return;
 			}
 			
-			JSONCollection info = recordingInfo(uri);
+			JSONCollection info;
+			int retry = 0;
+			final int numOfRetries = 1;
+			
+			do {
+				if(retry > 0) {
+					// The info is still null, try to login again
+					if((session = Authenticator.refresh()) == null) {
+						// Failed to log in, do not continue
+						return;
+					}
+				}
+				
+				info = recordingInfo(session, uri);
+			} while(info == null && ++retry <= numOfRetries);
+			
+			if(info == null) {
+				// Already retried enough times, nothing else to do
+				throw new IllegalStateException("Unable to obtain media information");
+			}
+			
 			URI streamUri = Net.uri(info.getString("url"));
+			
+			if(isError(streamUri)) {
+				throw new IllegalStateException("Too many requests, wait a little bit and try again");
+			}
+			
 			String title = info.getString("title");
 			MediaSource source = MediaSource.of(this);
 			MediaMetadata metadata = MediaMetadata.of(
 				"profileId", session.profileId(),
-				"deviceId", session.deviceId()
+				"deviceId", session.device().id()
 			);
 			
 			List<Media.Builder<?, ?>> builders = MediaUtils.createMediaBuilders(
@@ -237,6 +288,8 @@ public class SledovaniTVServer implements Server {
 		
 		private static final URI URI_LOGIN = Net.uri("https://sledovanitv.cz/welcome/login");
 		
+		private static final VarLoader<Session> session = VarLoader.ofChecked(Authenticator::createSession);
+		
 		private Authenticator() {
 		}
 		
@@ -247,10 +300,78 @@ public class SledovaniTVServer implements Server {
 						.findFirst().orElse(null);
 		}
 		
+		private static final Path configurationPath() {
+			return NIO.localPath("resources/config/" + PLUGIN.getContext().getPlugin().instance().name() + ".ssdf");
+		}
+		
+		private static final Session loadSession() {
+			PluginConfiguration configuration = configuration();
+			String profileId = configuration.stringValue("profile_id");
+			String deviceId = configuration.stringValue("device_id");
+			String deviceAuth = configuration.stringValue("device_auth");
+			String deviceTime = configuration.stringValue("device_time");
+			
+			if(profileId == null || profileId.isEmpty()
+					|| deviceId == null || deviceId.isEmpty()
+					|| deviceAuth == null || deviceAuth.isEmpty()
+					|| deviceTime == null || deviceTime.isEmpty()) {
+				return null; // Normalize to null
+			}
+			
+			return new Session(
+				profileId,
+				new Device(deviceId, deviceAuth, deviceTime)
+			);
+		}
+		
+		private static final Device loadDeviceFromCookies() {
+			URI uri = Net.uri("https://sledovanitv.cz");
+			List<HttpCookie> cookies = Web.cookieManager().getCookieStore().get(uri);
+			String deviceId = cookieOfName(cookies, "device_id");
+			String deviceAuth = cookieOfName(cookies, "device_auth");
+			String deviceTime = cookieOfName(cookies, "device_auth_set");
+			
+			if(deviceId == null || deviceId.isEmpty()
+					|| deviceAuth == null || deviceAuth.isEmpty()
+					|| deviceTime == null || deviceTime.isEmpty()) {
+				return null; // Normalize to null
+			}
+			
+			return new Device(deviceId, deviceAuth, deviceTime);
+		}
+		
+		private static final void saveSession(Session session) throws IOException {
+			Configuration.Writer writer = configuration().writer();
+			String profileId = session.profileId();
+			Device device = session.device();
+			writer.set("profile_id", profileId);
+			writer.set("device_id", device.id());
+			writer.set("device_auth", device.auth());
+			writer.set("device_time", device.time());
+			writer.save(configurationPath());
+		}
+		
+		private static final void removeSession() throws IOException {
+			Configuration.Writer writer = configuration().writer();
+			// Must use empty values, not null
+			writer.set("profile_id", "");
+			writer.set("device_id", "");
+			writer.set("device_auth", "");
+			writer.set("device_time", 0L);
+			writer.save(configurationPath());
+		}
+		
 		private static final Session doLogin(String username, String password) throws Exception {
 			if(username == null || username.isBlank() || password == null || password.isBlank()) {
 				displayError("not_logged_in");
 				return null; // Do not continue
+			}
+			
+			Session session;
+			
+			// Return the session from configuration, if it already exists
+			if((session = loadSession()) != null) {
+				return session;
 			}
 			
 			String body = Net.queryString(
@@ -260,53 +381,101 @@ public class SledovaniTVServer implements Server {
 				"_do", "userLoginControl-signInForm-submit"
 			);
 			
-			// This cookie is important to be able to login
-			HttpCookie cookie = new HttpCookie("_nss", "1");
-			cookie.setPath("/");
-			cookie.setSecure(true);
-			cookie.setDomain("sledovanitv.cz");
-			cookie.setHttpOnly(true);
-			Web.Cookies.add(URI_LOGIN, cookie);
-			
 			try(Response.OfStream response = Web.requestStream(
 				Request.of(URI_LOGIN)
 					.addHeader("Referer", "https://sledovanitv.cz/welcome/login")
+					.addCookie(Web.Cookie.builder("_nss", "1").path("/").secure(true).build())
 					.followRedirects(Redirect.NEVER)
 					.POST(body, "application/x-www-form-urlencoded")
-			)) { /* Do nothing */ }
+			)) {
+				String redirectUri = response.headers().firstValue("location").get();
+				
+				if(!redirectUri.equals("https://sledovanitv.cz/home")) {
+					throw new IllegalStateException("Unable to log in");
+				}
+			}
 			
 			// Select the first available profile
 			Document document = HTML.from(Request.of(Net.uri("https://sledovanitv.cz/profile")).GET());
 			Element profile = document.selectFirst(".profiles__list--item > a");
 			Web.requestStream(Request.of(Net.uri(profile.absUrl("href"))).GET());
 			
-			List<HttpCookie> cookies = Web.cookieManager().getCookieStore().get(Net.uri("https://sledovanitv.cz"));
 			String profileId = Net.queryDestruct(profile.absUrl("href")).valueOf("profileId");
-			String deviceId = cookieOfName(cookies, "device_id");
+			Device device = loadDeviceFromCookies();
 			
-			return new Session(profileId, deviceId);
+			if(profileId == null || profileId.isEmpty() || device == null) {
+				throw new IllegalStateException("Invalid session");
+			}
+			
+			session = new Session(profileId, device);
+			// Save the session to the configuration for later requests
+			saveSession(session);
+			
+			return session;
+		}
+		
+		private static final Session createSession() throws Exception {
+			return doLogin(AuthenticationData.email(), AuthenticationData.password());
 		}
 		
 		public static final Session login() throws Exception {
-			return doLogin(AuthenticationData.email(), AuthenticationData.password());
+			return session.valueChecked();
+		}
+		
+		public static final void reset() throws Exception {
+			removeSession(); // Discard the saved session
+			Web.cookieManager().getCookieStore().removeAll(); // Clear session
+			session.unset();
+		}
+		
+		public static final Session refresh() throws Exception {
+			reset();
+			return login();
+		}
+		
+		private static final class Device {
+			
+			private final String id;
+			private final String auth;
+			private final String time;
+			
+			public Device(String id, String auth, String time) {
+				this.id = id;
+				this.auth = auth;
+				this.time = time;
+			}
+			
+			public String id() { return id; }
+			public String auth() { return auth; }
+			public String time() { return time; }
 		}
 		
 		private static final class Session {
 			
 			private final String profileId;
-			private final String deviceId;
+			private final Device device;
+			private Map<String, List<String>> headers;
 			
-			public Session(String profileId, String deviceId) {
+			public Session(String profileId, Device device) {
 				this.profileId = Objects.requireNonNull(profileId);
-				this.deviceId = Objects.requireNonNull(deviceId);
+				this.device = Objects.requireNonNull(device);
 			}
 			
-			public String profileId() {
-				return profileId;
-			}
+			public String profileId() { return profileId; }
+			public Device device() { return device; }
 			
-			public String deviceId() {
-				return deviceId;
+			public Map<String, List<String>> headers() {
+				if(headers == null) {
+					headers = Map.of(
+						"Cookie", List.of(
+							"device_id=" + device.id(),
+							"device_auth=" + device.auth(),
+							"device_auth_set=" + device.time()
+						)
+					);
+				}
+				
+				return headers;
 			}
 		}
 		
