@@ -153,7 +153,7 @@ public final class SimpleDownloader implements Download, DownloadResult {
 	}
 	
 	private final void noConversion(ResolvedMedia output, ConversionMedia input) throws IOException {
-		NIO.move_force(input.path(), output.path());
+		NIO.moveForce(input.path(), output.path());
 		pipelineResult = DownloadPipelineResult.noConversion();
 	}
 	
