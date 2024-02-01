@@ -4,7 +4,6 @@ import java.io.IOException;
 import java.net.http.HttpHeaders;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
@@ -46,13 +45,11 @@ import sune.app.mediadown.net.Web;
 import sune.app.mediadown.net.Web.Request;
 import sune.app.mediadown.net.Web.Response;
 import sune.app.mediadown.pipeline.DownloadPipelineResult;
-import sune.app.mediadown.util.Metadata;
 import sune.app.mediadown.util.NIO;
 import sune.app.mediadown.util.Opt;
 import sune.app.mediadown.util.Pair;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Utils.Ignore;
-import sune.app.mediadown.util.VideoUtils;
 
 public final class SimpleDownloader implements Download, DownloadResult {
 	
@@ -152,13 +149,13 @@ public final class SimpleDownloader implements Download, DownloadResult {
 		}
 	}
 	
-	private final void noConversion(ResolvedMedia output, ConversionMedia input) throws IOException {
+	private final void noConversion(ConversionMedia input, ResolvedMedia output) throws IOException {
 		NIO.moveForce(input.path(), output.path());
 		pipelineResult = DownloadPipelineResult.noConversion();
 	}
 	
-	private final void doConversion(ResolvedMedia output, double duration, List<ConversionMedia> inputs) {
-		pipelineResult = DownloadPipelineResult.doConversion(output, inputs, Metadata.of("duration", duration));
+	private final void doConversion(List<ConversionMedia> inputs, ResolvedMedia output) {
+		pipelineResult = DownloadPipelineResult.doConversion(inputs, output);
 	}
 	
 	private final List<Path> temporaryFiles(int count) {
@@ -281,15 +278,9 @@ public final class SimpleDownloader implements Download, DownloadResult {
 			
 			if(mediaHolders.size() == 1
 					&& mediaHolders.get(0).media().format().is(configuration.outputFormat())) {
-				noConversion(output, inputs.get(0));
+				noConversion(inputs.get(0), output);
 			} else {
-				double duration = inputs.stream()
-					.map(ConversionMedia::path)
-					.map(VideoUtils::duration)
-					.max(Comparator.naturalOrder())
-					.orElse(-1.0);
-				
-				doConversion(output, duration, inputs);
+				doConversion(inputs, output);
 			}
 			
 			state.set(TaskStates.DONE);
