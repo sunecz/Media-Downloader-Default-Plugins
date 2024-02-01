@@ -59,7 +59,6 @@ import sune.app.mediadown.net.Web;
 import sune.app.mediadown.net.Web.Request;
 import sune.app.mediadown.net.Web.Response;
 import sune.app.mediadown.pipeline.DownloadPipelineResult;
-import sune.app.mediadown.util.Metadata;
 import sune.app.mediadown.util.NIO;
 import sune.app.mediadown.util.Opt;
 import sune.app.mediadown.util.Opt.OptCondition;
@@ -67,6 +66,7 @@ import sune.app.mediadown.util.Pair;
 import sune.app.mediadown.util.Range;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Utils.Ignore;
+import sune.app.mediadown.util.VideoUtils;
 
 public final class SegmentsDownloader implements Download, DownloadResult {
 	
@@ -232,8 +232,8 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		return state.is(TaskStates.RUNNING);
 	}
 	
-	private final void doConversion(ResolvedMedia output, double duration, List<ConversionMedia> inputs) {
-		pipelineResult = DownloadPipelineResult.doConversion(output, inputs, Metadata.of("duration", duration));
+	private final void doConversion(List<ConversionMedia> inputs, ResolvedMedia output) {
+		pipelineResult = DownloadPipelineResult.doConversion(inputs, output);
 	}
 	
 	private final boolean computeTotalSize(List<? extends RemoteFile> segments, List<? extends RemoteFile> subtitles)
@@ -471,15 +471,22 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		
 		double duration = segmentsHolders.stream()
 			.mapToDouble(FileSegmentsHolder::duration)
-			.max()
-			.orElse(MediaConstants.UNKNOWN_DURATION);
+			.filter((d) -> d > 0.0)
+			.min().orElse(MediaConstants.UNKNOWN_DURATION);
 		
+		if(duration <= 0.0) {
+			// If we do not have any duration information from the segments, try to obtain it
+			// from the downloaded files.
+			duration = VideoUtils.tryGetDuration(outputs);
+		}
+		
+		final double finalDuration = duration;
 		ResolvedMedia output = new ResolvedMedia(media, dest, configuration);
 		List<ConversionMedia> inputs = Utils.zip(mediaSingles.stream(), outputs.stream(), Pair::new)
-			.map((p) -> new ConversionMedia(p.a, p.b, MediaConstants.UNKNOWN_DURATION))
+			.map((p) -> new ConversionMedia(p.a, p.b, finalDuration))
 			.collect(Collectors.toList());
 		
-		doConversion(output, duration, inputs);
+		doConversion(inputs, output);
 		return true;
 	}
 	
