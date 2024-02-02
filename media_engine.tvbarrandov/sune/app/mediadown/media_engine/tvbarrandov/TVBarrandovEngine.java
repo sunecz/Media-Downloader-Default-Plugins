@@ -39,6 +39,7 @@ import sune.app.mediadown.entity.MediaEngine;
 import sune.app.mediadown.entity.MediaGetter;
 import sune.app.mediadown.entity.MediaGetters;
 import sune.app.mediadown.entity.Program;
+import sune.app.mediadown.exception.IncorrectCredentials;
 import sune.app.mediadown.gui.control.IntegerTextField;
 import sune.app.mediadown.language.Translation;
 import sune.app.mediadown.media.Media;
@@ -198,7 +199,7 @@ public final class TVBarrandovEngine implements MediaEngine {
 		return ListTask.of((task) -> {
 			// Try to log in to the user's account, if the details are present
 			if(Authenticator.areLoginDetailsPresent() && !Authenticator.authenticate()) {
-				throw new IllegalStateException("Unable to log in to the account");
+				throw new IncorrectCredentials();
 			}
 			
 			Document document = HTML.from(uri);

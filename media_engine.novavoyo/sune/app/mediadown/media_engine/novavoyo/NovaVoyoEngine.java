@@ -29,6 +29,8 @@ import sune.app.mediadown.configuration.Configuration;
 import sune.app.mediadown.entity.Episode;
 import sune.app.mediadown.entity.MediaEngine;
 import sune.app.mediadown.entity.Program;
+import sune.app.mediadown.exception.IncorrectCredentials;
+import sune.app.mediadown.exception.MissingCredentials;
 import sune.app.mediadown.gui.Dialog;
 import sune.app.mediadown.language.Translation;
 import sune.app.mediadown.media.Media;
@@ -696,11 +698,11 @@ public final class NovaVoyoEngine implements MediaEngine {
 			}
 			
 			if(!Authenticator.areLoginDetailsPresent()) {
-				throw new IllegalStateException("No login credentials");
+				throw new MissingCredentials();
 			}
 			
 			if(!Authenticator.login()) {
-				throw new IllegalStateException("Unable to log in");
+				throw new IncorrectCredentials();
 			}
 			
 			for(HttpCookie hc : Web.cookieManager().getCookieStore().getCookies()) {
