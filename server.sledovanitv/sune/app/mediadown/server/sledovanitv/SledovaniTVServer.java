@@ -114,7 +114,7 @@ public class SledovaniTVServer implements Server {
 	}
 	
 	private static final boolean isError(URI streamUri) throws Exception {
-		try(Response.OfStream response = Web.peek(Request.of(streamUri).followRedirects(Redirect.NEVER).HEAD())) {
+		try(Response response = Web.peek(Request.of(streamUri).followRedirects(Redirect.NEVER).HEAD())) {
 			return Net.uriBasename(response.headers().firstValue("location").get()).toString().startsWith("error");
 		}
 	}
