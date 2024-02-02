@@ -39,6 +39,7 @@ import sune.app.mediadown.media_engine.iprima.IPrimaHelper.SimpleExecutor;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper.ThreadedSpawnableTaskQueue;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper._Singleton;
 import sune.app.mediadown.media_engine.iprima.PrimaCommon.JSONSerializable;
+import sune.app.mediadown.media_engine.iprima.PrimaCommon.MessageException;
 import sune.app.mediadown.media_engine.iprima.PrimaCommon.RPC;
 import sune.app.mediadown.net.Net;
 import sune.app.mediadown.net.Web;
@@ -101,6 +102,10 @@ final class PrimaPlus implements IPrima {
 			List<String> genres = new ArrayList<>();
 			JSONCollection result = RPC.request(method);
 			
+			if(RPC.isError(result)) {
+				throw new MessageException(result.getString("error.message"));
+			}
+			
 			for(JSONCollection genre : result.getCollection("data").collectionsIterable()) {
 				String type = genre.getString("type");
 				
@@ -127,6 +132,10 @@ final class PrimaPlus implements IPrima {
 				"limit", limit,
 				"offset", offset
 			);
+			
+			if(RPC.isError(result)) {
+				throw new MessageException(result.getString("error.message"));
+			}
 			
 			return result.getCollection("data");
 		}
@@ -178,6 +187,10 @@ final class PrimaPlus implements IPrima {
 				)
 			);
 			
+			if(RPC.isError(result)) {
+				throw new MessageException(result.getString("error.message"));
+			}
+			
 			for(JSONCollection seasonData : result.getCollection("data").collectionsIterable()) {
 				String id = seasonData.getString("id");
 				String title = seasonData.getString("title", "");
@@ -205,6 +218,10 @@ final class PrimaPlus implements IPrima {
 					"direction", "desc"
 				)
 			);
+			
+			if(RPC.isError(result)) {
+				throw new MessageException(result.getString("error.message"));
+			}
 			
 			int numSeason = result.getInt("data.seasonNumber", 0);
 			String programTitle = program.title();
@@ -309,6 +326,10 @@ final class PrimaPlus implements IPrima {
 								"limit", perPage,
 								"filter", stripGroup.filter()
 							);
+							
+							if(RPC.isError(result)) {
+								throw new MessageException(result.getString("error.message"));
+							}
 							
 							for(JSONCollection strip : result.getCollection("data").collectionsIterable()) {
 								String stripId = strip.name();

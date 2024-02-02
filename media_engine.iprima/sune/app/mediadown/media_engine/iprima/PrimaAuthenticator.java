@@ -350,6 +350,10 @@ public final class PrimaAuthenticator {
 				"_accessToken", accessToken()
 			);
 			
+			if(RPC.isError(response)) {
+				throw new MessageException(response.getString("error.message"));
+			}
+			
 			return Utils.stream(response.getCollection("data").collectionsIterable())
 						.map(Devices::parseDevice);
 		}
@@ -389,6 +393,10 @@ public final class PrimaAuthenticator {
 				"_accessToken", accessToken(),
 				"slotId", device.id()
 			);
+			
+			if(RPC.isError(response)) {
+				throw new MessageException(response.getString("error.message"));
+			}
 			
 			return response.getBoolean("data.valid");
 		}
