@@ -480,7 +480,8 @@ public final class NovaVoyoEngine implements MediaEngine {
 					}
 					
 					switch(error.type()) {
-						case "player_not_logged_in": {
+						case "player_not_logged_in":
+						case "player_logged_in_no_access": {
 							// Only try a new token when this is the first attempt
 							if(attempt++ == 0) {
 								VoyoAccount.resetAuthCookie();
