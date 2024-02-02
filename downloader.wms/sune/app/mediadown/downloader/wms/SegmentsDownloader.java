@@ -238,11 +238,12 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		pipelineResult = DownloadPipelineResult.doConversion(inputs, output);
 	}
 	
-	private final boolean computeTotalSize(List<List<? extends RemoteFile>> segments, List<? extends RemoteFile> subtitles)
-			throws Exception {
+	private final boolean computeTotalSize(
+			List<List<? extends RemoteFile>> segments, List<? extends RemoteFile> subtitles
+	) throws Exception {
 		List<? extends RemoteFile> flattenSegments = segments.stream()
-				.flatMap(List::stream)
-				.collect(Collectors.toList());
+			.flatMap(List::stream)
+			.collect(Collectors.toList());
 		
 		Pair<Boolean, Long> sizeResult = sizeOrEstimatedSize(flattenSegments, subtitles);
 		sizeSet(sizeResult.b);
@@ -850,16 +851,21 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 			double count = segments.size() + subtitles.size();
 			AtomicInteger counter = new AtomicInteger();
 			worker = Worker.createThreadedWorker();
+			
+			Stream<RemoteFile> files = Stream.concat(
+				segments.stream(),
+				subtitles.stream()
+			);
+			
 			try {
-				for(RemoteFile file : Utils.iterable(Stream.concat(segments.stream(), subtitles.stream()).iterator())) {
+				for(RemoteFile file : Utils.iterable(files.iterator())) {
 					if(!checkState()) {
-						// Important to interrupt before break
-						worker.stop();
 						// Exit the loop
 						break;
 					}
 					
 					long segmentSize = file.size();
+					
 					if(segmentSize > 0L) {
 						sizeAdd(segmentSize - file.estimatedSize());
 						tracker.progress(counter.incrementAndGet() / count);
@@ -868,12 +874,14 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 							long fileSize = MediaConstants.UNKNOWN_SIZE;
 							
 							for(int i = 0; fileSize < 0L && i <= maxRetryAttempts; ++i) {
-								fileSize = Ignore.defaultValue(() -> sizeOf(file.uri(), HEADERS),
-								                               MediaConstants.UNKNOWN_SIZE);
+								fileSize = Ignore.defaultValue(
+									() -> sizeOf(file.uri(), HEADERS),
+									MediaConstants.UNKNOWN_SIZE
+								);
 							}
 							
-							file.size(fileSize);
 							if(fileSize > 0L) {
+								file.size(fileSize);
 								sizeAdd(fileSize - file.estimatedSize());
 							}
 							
@@ -886,7 +894,6 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 				return true;
 			} finally {
 				worker.stop();
-				worker = null;
 			}
 		}
 		
