@@ -175,7 +175,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 						for(VOD.Playlist.Stream stream : playlist.streams()) {
 							URI finalUri;
 							
-							try(Response.OfStream response = Web.peek(Request.of(stream.uri()).HEAD())) {
+							try(Response response = Web.peek(Request.of(stream.uri()).HEAD())) {
 								finalUri = response.uri();
 							}
 							
@@ -889,7 +889,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 					// does not exist all of them do not exist.
 					URI subtitleUri = entry.getValue().get(0);
 					
-					try(Response.OfStream response = Web.peek(Request.of(subtitleUri).HEAD())) {
+					try(Response response = Web.peek(Request.of(subtitleUri).HEAD())) {
 						// Existing subtitles return status code of 200 and non-existent return 400,
 						// but check for 'OK' status rather than 'Not found' status.
 						if(response.statusCode() == 200) {
