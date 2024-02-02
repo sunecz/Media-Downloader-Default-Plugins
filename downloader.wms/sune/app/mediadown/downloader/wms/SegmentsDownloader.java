@@ -140,10 +140,6 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		return new Pair<>(allHaveSize, stream(segments, subtitles).mapToLong(mapper).sum());
 	}
 	
-	private static final int numberOfAsyncTotalSizeComputeWorkers() {
-		return Math.max(1, MediaDownloader.configuration().acceleratedDownload() - 1);
-	}
-	
 	private static final <P, A> void sync(P value, BiConsumer<P, A> function, A arg) {
 		synchronized(value) {
 			function.accept(value, arg);
@@ -183,6 +179,12 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 	
 	private static final boolean allowOnlySuccessfulResponse(Response response) {
 		return response.statusCode() == 200;
+	}
+	
+	private static final List<? extends RemoteFile> listSegments(SegmentedMedia media) {
+		return ((SegmentedMedia) media).segments().segments().stream()
+					.map(RemoteFileSegment::new)
+					.collect(Collectors.toList());
 	}
 	
 	private final void waitMs(long ms, TimeUpdateTrackerBase tracker) {
@@ -236,9 +238,13 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		pipelineResult = DownloadPipelineResult.doConversion(inputs, output);
 	}
 	
-	private final boolean computeTotalSize(List<? extends RemoteFile> segments, List<? extends RemoteFile> subtitles)
+	private final boolean computeTotalSize(List<List<? extends RemoteFile>> segments, List<? extends RemoteFile> subtitles)
 			throws Exception {
-		Pair<Boolean, Long> sizeResult = sizeOrEstimatedSize(segments, subtitles);
+		List<? extends RemoteFile> flattenSegments = segments.stream()
+				.flatMap(List::stream)
+				.collect(Collectors.toList());
+		
+		Pair<Boolean, Long> sizeResult = sizeOrEstimatedSize(flattenSegments, subtitles);
 		sizeSet(sizeResult.b);
 		
 		// All files (segments and subtitles) have computed size (not estimated)
@@ -250,7 +256,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		
 		// Obtain the total size compute strategy and compute the size
 		totalSizeComputer = asyncTotalSize ? new AsynchronousTotalSizeComputer() : new SynchronousTotalSizeComputer();
-		return totalSizeComputer.compute(segments, subtitles);
+		return totalSizeComputer.compute(flattenSegments, subtitles);
 	}
 	
 	private final void sizeSet(long value) {
@@ -282,13 +288,13 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		return tempFiles;
 	}
 	
-	private final boolean doDownload(InternalDownloader downloader, FileSegmentsHolder segmentsHolder, Path output)
+	private final boolean doDownload(InternalDownloader downloader, List<? extends RemoteFile> segments, Path output)
 			throws Exception {
 		Tracker previousTracker = null;
 		RetryDownloadSimpleTracker retryTracker = null;
 		long written = 0L, bytes;
 		
-		for(FileSegment segment : segmentsHolder.segments()) {
+		for(RemoteFile segment : segments) {
 			if(!checkState()) return false;
 			
 			Request request = Request.of(segment.uri()).headers(HEADERS).GET();
@@ -352,10 +358,15 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 						size = downloader.totalBytes();
 					}
 					
-					// Check whether the downloaded size equals the total size, if not
-					// just retry the download again.
-					if(size >= 0L && downloadedBytes != size) {
-						error = true;
+					if(size >= 0L) {
+						sync(segment, RemoteFile::size, size);
+						sizeAdd(size - segment.estimatedSize());
+						
+						// Check whether the downloaded size equals the total size, if not
+						// just retry the download again.
+						if(downloadedBytes != size) {
+							error = true;
+						}
 					}
 				}
 				
@@ -399,7 +410,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 	
 	private final boolean doDownload(InternalDownloader downloader, Media media, Path output) throws Exception {
 		return media.isSegmented()
-			? doDownload(downloader, ((SegmentedMedia) media).segments(), output)
+			? doDownload(downloader, listSegments((SegmentedMedia) media), output)
 			: doDownload(downloader, Request.of(media.uri()).headers(HEADERS).GET(), output);
 	}
 	
@@ -416,11 +427,11 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		));
 	}
 	
-	private final boolean download(List<FileSegmentsHolder> segmentsHolders, List<Path> outputs) throws Exception {
+	private final boolean download(List<List<? extends RemoteFile>> segments, List<Path> outputs) throws Exception {
 		Iterator<Path> output = outputs.iterator();
 		
-		for(FileSegmentsHolder segmentsHolder : segmentsHolders) {
-			if(!doDownload(downloader, segmentsHolder, output.next())) {
+		for(List<? extends RemoteFile> list : segments) {
+			if(!doDownload(downloader, list, output.next())) {
 				return false;
 			}
 		}
@@ -465,6 +476,12 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		return true;
 	}
 	
+	private final void stopTotalSizeComputation() throws Exception {
+		if(totalSizeComputer != null) {
+			totalSizeComputer.stop();
+		}
+	}
+	
 	private final boolean convert(List<Media> mediaSingles, List<FileSegmentsHolder> segmentsHolders,
 			List<Path> outputs) throws Exception {
 		if(!checkState()) return false;
@@ -506,11 +523,14 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 			.map(SegmentsDownloader::mediaToSegmentsHolder)
 			.collect(Collectors.toList());
 		
-		List<RemoteFile> segments = mediaSingles.stream().flatMap((m) -> {
+		List<List<? extends RemoteFile>> segments = mediaSingles.stream().map((m) -> {
 			double estimatedSize = MediaUtils.estimateTotalSize(m);
 			List<? extends FileSegment> fileSegments = mediaToSegmentsHolder(m).segments();
 			long est = (long) Math.ceil(estimatedSize / fileSegments.size());
-			return fileSegments.stream().map(RemoteFileSegment::new).peek((s) -> s.estimatedSize(est));
+			return fileSegments.stream()
+						.map(RemoteFileSegment::new)
+						.peek((s) -> { long v; s.estimatedSize((v = s.size()) > 0L ? v : est); })
+						.collect(Collectors.toList());
 		}).collect(Collectors.toList());
 		
 		// Prepare the subtitles that should be downloaded, may be none
@@ -539,10 +559,11 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 			.responseFilter(SegmentsDownloader::allowOnlySuccessfulResponse);
 		
 		try {
-			List<Path> tempFiles = temporaryFiles(segmentsHolders.size());
+			List<Path> tempFiles = temporaryFiles(segments.size());
 			NIO.createFile(dest);
-			if(!download(segmentsHolders, tempFiles)) return;
+			if(!download(segments, tempFiles)) return;
 			if(!downloadSubtitles(subtitles, dest)) return;
+			stopTotalSizeComputation();
 			if(!convert(mediaSingles, segmentsHolders, tempFiles)) return;
 			state.set(TaskStates.DONE);
 		} catch(Exception ex) {
@@ -893,59 +914,45 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 	
 	private final class AsynchronousTotalSizeComputer implements TotalSizeComputer {
 		
-		private Worker workerOuter;
-		private Worker workerInner;
+		private Worker worker;
 		
 		@Override
 		public boolean compute(
 				List<? extends RemoteFile> segments,
 				List<? extends RemoteFile> subtitles
 		) throws Exception {
-			workerOuter = Worker.createWorker();
-			workerOuter.submit(() -> {
-				workerInner = Worker.createWorker(numberOfAsyncTotalSizeComputeWorkers());
+			worker = Worker.createWorker();
+			worker.submit(() -> {
+				Stream<RemoteFile> files = Stream.concat(
+					reversedStream(segments),
+					reversedStream(subtitles)
+				);
 				
 				try {
-					for(RemoteFile file : Utils.iterable(Stream.concat(reversedStream(segments),
-					                                                   reversedStream(subtitles))
-					                                           .iterator())) {
+					for(RemoteFile file : Utils.iterable(files.iterator())) {
 						if(!checkState()) {
-							// Important to interrupt before break
-							workerInner.stop();
-							workerOuter.stop();
 							// Exit the loop
 							break;
 						}
 						
-						long segmentSize = sync(file, RemoteFile::size);
-						if(segmentSize > 0L) {
-							sizeAdd(segmentSize - file.estimatedSize());
-						} else {
-							workerInner.submit(() -> {
-								long fileSize = sync(file, RemoteFile::size);
-								
-								if(fileSize <= 0L) {
-									for(int i = 0; fileSize < 0L && i <= maxRetryAttempts; ++i) {
-										fileSize = Ignore.defaultValue(() -> sizeOf(file.uri(), HEADERS),
-										                               MediaConstants.UNKNOWN_SIZE);
-									}
-									
-									sync(file, RemoteFile::size, fileSize);
-								}
-								
-								if(fileSize > 0L) {
-									sizeAdd(fileSize - file.estimatedSize());
-								}
-							});
+						long fileSize = sync(file, RemoteFile::size);
+						
+						if(fileSize <= 0L) {
+							for(int i = 0; fileSize < 0L && i <= maxRetryAttempts; ++i) {
+								fileSize = Ignore.defaultValue(
+									() -> sizeOf(file.uri(), HEADERS),
+									MediaConstants.UNKNOWN_SIZE
+								);
+							}
+							
+							if(fileSize > 0L) {
+								sync(file, RemoteFile::size, fileSize);
+								sizeAdd(fileSize - file.estimatedSize());
+							}
 						}
 					}
-					
-					workerInner.waitTillDone();
 				} finally {
-					workerInner.stop();
-					workerOuter.stop();
-					workerInner = null;
-					workerOuter = null;
+					worker.stop();
 				}
 			});
 			
@@ -954,34 +961,22 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		
 		@Override
 		public void stop() throws Exception {
-			if(workerInner != null) {
-				workerInner.stop();
-			}
-			
-			if(workerOuter != null) {
-				workerOuter.stop();
+			if(worker != null) {
+				worker.stop();
 			}
 		}
 		
 		@Override
 		public void pause() throws Exception {
-			if(workerInner != null) {
-				workerInner.pause();
-			}
-			
-			if(workerOuter != null) {
-				workerOuter.pause();
+			if(worker != null) {
+				worker.pause();
 			}
 		}
 		
 		@Override
 		public void resume() throws Exception {
-			if(workerInner != null) {
-				workerInner.resume();
-			}
-			
-			if(workerOuter != null) {
-				workerOuter.resume();
+			if(worker != null) {
+				worker.resume();
 			}
 		}
 	}
@@ -1005,11 +1000,13 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 	private final static class RemoteMedia implements RemoteFile {
 		
 		private final Media media;
-		private long size = MediaConstants.UNKNOWN_SIZE;
-		private long estimatedSize = 0L;
+		private volatile long size;
+		private volatile long estimatedSize;
 		
 		public RemoteMedia(Media media) {
 			this.media = Objects.requireNonNull(media);
+			this.size = MediaConstants.UNKNOWN_SIZE;
+			this.estimatedSize = 0L;
 		}
 		
 		@Override public Object value() { return media; }
@@ -1023,8 +1020,8 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 	private final static class RemoteFileSegment implements RemoteFile {
 		
 		private final FileSegment segment;
-		private long size;
-		private long estimatedSize;
+		private volatile long size;
+		private volatile long estimatedSize;
 		
 		public RemoteFileSegment(FileSegment segment) {
 			this.segment = Objects.requireNonNull(segment);
