@@ -524,11 +524,16 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			List<String> seasons = metadata.seasons();
 			int seasonIndex = 0;
 			CollectionAPIResult result;
+			Set<URI> visited = null;
 			
-			if(seasons.isEmpty()) {
-				// At least one "season" must be always available
-				seasons.add(null);
+			if(!seasons.isEmpty()) {
+				// Only check episodes for the "All episodes" season when there
+				// are other seasons.
+				visited = new HashSet<>();
 			}
+			
+			// Always check the "All episodes" season
+			seasons.add(null);
 			
 			for(String seasonId : seasons) {
 				int offset = 0, total = -1;
@@ -538,8 +543,15 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 				do {
 					result = getEpisodes(idec, offset, MAX_ITEMS_PER_PAGE, seasonId);
 					
+					// Always use the "No season" season for the "All episodes" season.
+					int alteredSeasonIndex = seasonId == null ? -1 : seasonIndex;
+					
 					for(JSONCollection item : result.items().collectionsIterable()) {
-						Episode episode = parseEpisode(program, item, episodeIndex++, seasonIndex);
+						Episode episode = parseEpisode(program, item, episodeIndex++, alteredSeasonIndex);
+						
+						if(visited != null && !visited.add(episode.uri())) {
+							continue; // Episode already visited
+						}
 						
 						if(!task.add(episode)) {
 							break loop;
