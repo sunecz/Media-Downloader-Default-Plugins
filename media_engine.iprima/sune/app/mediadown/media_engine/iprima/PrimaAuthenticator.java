@@ -243,14 +243,14 @@ public final class PrimaAuthenticator {
 			
 			String profileId = AuthenticationData.profile();
 			
-			if(profileId.equalsIgnoreCase("auto")) {
+			if(profileId == null || profileId.equalsIgnoreCase("auto")) {
 				return profiles.get(0);
 			}
 			
 			return profiles.stream()
-				.filter((p) -> p.id().equalsIgnoreCase(profileId))
-				.findFirst()
-				.orElseGet(() -> profiles.get(0));
+						.filter((p) -> p.id().equalsIgnoreCase(profileId))
+						.findFirst()
+						.orElseGet(() -> profiles.get(0));
 		}
 		
 		private static final Device getDevice() throws Exception {
