@@ -855,7 +855,7 @@ public final class NovaVoyoEngine implements MediaEngine {
 	        );
 			
 			String body = Net.queryString(args);
-			Response.OfString response = Web.request(Request.of(uri).headers(headers).POST(body));
+			Response.OfStream response = Web.requestStream(Request.of(uri).headers(headers).POST(body));
 			return response.uri().toString().equals(URL_REDIRECT_LOGIN);
 		}
 		
