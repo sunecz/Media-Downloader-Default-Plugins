@@ -1,6 +1,7 @@
 package sune.app.mediadown.downloader.wms;
 
 import java.net.URI;
+import java.net.http.HttpClient.Version;
 import java.net.http.HttpHeaders;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -64,6 +65,7 @@ import sune.app.mediadown.util.Opt;
 import sune.app.mediadown.util.Opt.OptCondition;
 import sune.app.mediadown.util.Pair;
 import sune.app.mediadown.util.Range;
+import sune.app.mediadown.util.Ref;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Utils.Ignore;
 import sune.app.mediadown.util.VideoUtils;
@@ -127,8 +129,9 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		int cmp; return (cmp = Integer.compare(b.length(), a.length())) == 0 ? 1 : cmp;
 	}
 	
-	private static final long sizeOf(URI uri, HttpHeaders headers) throws Exception {
-		return Web.size(Request.of(uri).headers(headers).HEAD());
+	private static final Pair<Long, Version> sizeAndVersionOf(URI uri, HttpHeaders headers) throws Exception {
+		Response response = Web.peek(Request.of(uri).headers(headers).HEAD());
+		return new Pair<>(Web.size(response), response.version());
 	}
 	
 	private static final Pair<Boolean, Long> sizeOrEstimatedSize(
@@ -858,8 +861,10 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 			);
 			
 			try {
+				Ref.Mutable<Boolean> cancel = new Ref.Mutable<>(false);
+				
 				for(RemoteFile file : Utils.iterable(files.iterator())) {
-					if(!checkState()) {
+					if(!checkState() || cancel.get()) {
 						// Exit the loop
 						break;
 					}
@@ -874,10 +879,17 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 							long fileSize = MediaConstants.UNKNOWN_SIZE;
 							
 							for(int i = 0; fileSize < 0L && i <= maxRetryAttempts; ++i) {
-								fileSize = Ignore.defaultValue(
-									() -> sizeOf(file.uri(), HEADERS),
-									MediaConstants.UNKNOWN_SIZE
-								);
+								Pair<Long, Version> pair = Ignore.call(() -> sizeAndVersionOf(file.uri(), HEADERS));
+								
+								if(pair != null) {
+									fileSize = pair.a;
+									
+									// Do not compute total size when HTTP/2 is not used
+									if(pair.b != Version.HTTP_2) {
+										cancel.set(true);
+										return; // Do not continue
+									}
+								}
 							}
 							
 							if(fileSize > 0L) {
@@ -890,7 +902,10 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 					}
 				}
 				
-				worker.waitTillDone();
+				if(!cancel.get()) {
+					worker.waitTillDone();
+				}
+				
 				return true;
 			} finally {
 				worker.stop();
@@ -946,10 +961,16 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 						
 						if(fileSize <= 0L) {
 							for(int i = 0; fileSize < 0L && i <= maxRetryAttempts; ++i) {
-								fileSize = Ignore.defaultValue(
-									() -> sizeOf(file.uri(), HEADERS),
-									MediaConstants.UNKNOWN_SIZE
-								);
+								Pair<Long, Version> pair = Ignore.call(() -> sizeAndVersionOf(file.uri(), HEADERS));
+								
+								if(pair != null) {
+									fileSize = pair.a;
+									
+									// Do not compute total size when HTTP/2 is not used
+									if(pair.b != Version.HTTP_2) {
+										return; // Do not continue
+									}
+								}
 							}
 							
 							if(fileSize > 0L) {
