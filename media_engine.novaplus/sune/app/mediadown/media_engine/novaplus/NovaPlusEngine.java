@@ -4,6 +4,7 @@ import java.net.URI;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.regex.Matcher;
 
 import org.jsoup.nodes.Document;
@@ -82,20 +83,22 @@ public final class NovaPlusEngine implements MediaEngine {
 		return MediaDownloader.translation().getTranslation(path);
 	}
 	
-	private static final String mediaTitle(Document document) {
-		// Since using the measuring.streamInfo is not reliable, we use Linked Data.
-		JSONCollection data = null;
-		
+	private static final JSONCollection linkedData(Document document, Set<String> types) {
 		for(Element script : document.select("script[type='application/ld+json']")) {
 			JSONCollection content = JSON.read(script.html());
 			
 			// Skip Linked Data of the website itself
-			if(content.getString("@type").equalsIgnoreCase("website")) {
-				continue;
+			if(types.contains(content.getString("@type"))) {
+				return content;
 			}
-			
-			data = content;
 		}
+		
+		return null;
+	}
+	
+	private static final String mediaTitle(Document document) {
+		// Since using the measuring.streamInfo is not reliable, we use Linked Data.
+		JSONCollection data = linkedData(document, Set.of("TVEpisode", "Article", "VideoObject"));
 		
 		// The Linked data should always be present
 		if(data == null) {
@@ -107,6 +110,17 @@ public final class NovaPlusEngine implements MediaEngine {
 		int numSeason = data.getInt("partOfSeason.seasonNumber", -1);
 		int numEpisode = data.getInt("episodeNumber", -1);
 		Matcher matcher;
+		
+		if(programName == null) {
+			// Alternative "program name" for a VideoObject
+			if(!episodeName.isEmpty()) {
+				programName = episodeName;
+				episodeName = "";
+			} else {
+				// Alternative "program name" for an Article
+				programName = data.getString("headline");
+			}
+		}
 		
 		if((matcher = REGEX_EPISODE.matcher(episodeName)).matches()) {
 			if(numEpisode < 0) {
