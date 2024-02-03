@@ -7,6 +7,10 @@
 					media_unavailable: {
 						title: "Nedostupné médium",
 						text:  "Video není dostupné z následujícího důvodu:"
+					},
+					media_unavailable_no_content: {
+						title: "Nedostupné médium",
+						text:  "Video již není dostupné."
 					}
 				}
 			}

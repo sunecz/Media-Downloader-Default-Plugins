@@ -333,9 +333,14 @@ public final class NovaPlusEngine implements MediaEngine {
 		
 		// Video is not available, probably due to licensing issues
 		if(begin < 0) {
-			Translation tr = translation().getTranslation("error.media_unavailable");
-			String message = HTML.parse(content).selectFirst(".b-player .e-title").text();
-			Dialog.showContentInfo(tr.getSingle("title"), tr.getSingle("text"), message);
+			Element elTitle = HTML.parse(content).selectFirst(".b-player .e-title");
+			String message = Optional.ofNullable(elTitle).map(Element::text).orElse(null);
+			String trPath = "error.media_unavailable" + (message == null ? "_no_content" : "");
+			Translation tr = translation().getTranslation(trPath);
+			String title = tr.getSingle("title");
+			String text = tr.getSingle("text");
+			if(message == null) Dialog.showInfo(title, text);
+			else Dialog.showContentInfo(title, text, message);
 			return; // Do not continue
 		}
 		

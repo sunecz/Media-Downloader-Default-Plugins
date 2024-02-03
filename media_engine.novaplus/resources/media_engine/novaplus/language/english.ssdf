@@ -7,6 +7,10 @@
 					media_unavailable: {
 						title: "Media unavailable",
 						text:  "The video is not available due to the following reason:"
+					},
+					media_unavailable_no_content: {
+						title: "Media unavailable",
+						text:  "The video is already not available."
 					}
 				}
 			}
