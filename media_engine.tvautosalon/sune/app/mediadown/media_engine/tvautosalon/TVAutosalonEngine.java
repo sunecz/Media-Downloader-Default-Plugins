@@ -415,7 +415,8 @@ public final class TVAutosalonEngine implements MediaEngine {
 		String host = uri.getHost();
 		if((host.startsWith("www."))) // www prefix
 			host = host.substring(4);
-		if(!host.equals("autosalon.tv"))
+		if(!host.equals("autosalon.tv")
+				&& !host.equals("fotrnatripu.tv"))
 			return false;
 		// Otherwise, it is probably compatible URL
 		return true;
