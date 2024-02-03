@@ -51,8 +51,7 @@ public final class TVAutosalonEngine implements MediaEngine {
 	public static final Image  ICON    = PLUGIN.getIcon();
 	
 	// URLs
-	private static final String URL_HOME    = "https://autosalon.tv/";
-	private static final String URL_REFERER = "https://autosalon.tv/";
+	private static final String URL_HOME = "https://autosalon.tv/";
 	
 	// Selectors
 	private static final String SELECTOR_PROGRAMS   = "#ms-navbar > .navbar-nav > .nav-item:first-child > .dropdown-menu > li.dropdown-header";
@@ -347,9 +346,12 @@ public final class TVAutosalonEngine implements MediaEngine {
 			if(frameURL == null) {
 				return;
 			}
-
+			
+			// Since Fotr na tripu is on its own domain now, obtain the Referer dynamically
+			String referer = uri.resolve("/").toString();
+			
 			// Send the request to obtain the frame's content
-			HttpHeaders headers = Web.Headers.ofSingle("Referer", URL_REFERER);
+			HttpHeaders headers = Web.Headers.ofSingle("Referer", referer);
 			String content = Web.request(Request.of(Net.uri(frameURL)).headers(headers).GET()).body();
 			
 			JSONCollection playerVideos = null;
