@@ -31,7 +31,6 @@ public final class WMSDownloader implements Downloader {
 		return new SegmentsDownloader(
 			media, destination, configuration,
 			pluginConfiguration.intValue("maxRetryAttempts"),
-			pluginConfiguration.booleanValue("asyncTotalSize"),
 			pluginConfiguration.intValue("waitOnRetryMs")
 		);
 	}

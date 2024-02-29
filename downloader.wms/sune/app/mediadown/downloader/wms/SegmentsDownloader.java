@@ -9,7 +9,6 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
@@ -42,7 +41,6 @@ import sune.app.mediadown.event.Listener;
 import sune.app.mediadown.event.tracker.DownloadTracker;
 import sune.app.mediadown.event.tracker.PipelineProgress;
 import sune.app.mediadown.event.tracker.PipelineStates;
-import sune.app.mediadown.event.tracker.PlainTextTracker;
 import sune.app.mediadown.event.tracker.SimpleTracker;
 import sune.app.mediadown.event.tracker.Tracker;
 import sune.app.mediadown.event.tracker.TrackerManager;
@@ -65,7 +63,6 @@ import sune.app.mediadown.util.Opt;
 import sune.app.mediadown.util.Opt.OptCondition;
 import sune.app.mediadown.util.Pair;
 import sune.app.mediadown.util.Range;
-import sune.app.mediadown.util.Ref;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Utils.Ignore;
 import sune.app.mediadown.util.VideoUtils;
@@ -83,7 +80,6 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 	private final Path dest;
 	private final MediaDownloadConfiguration configuration;
 	private final int maxRetryAttempts;
-	private final boolean asyncTotalSize;
 	private final int waitOnRetryMs;
 	
 	private final InternalState state = new InternalState();
@@ -99,13 +95,13 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 	private DownloadConfiguration.Builder configurationBuilder;
 	private DownloadEventHandler handler;
 	
-	SegmentsDownloader(Media media, Path dest, MediaDownloadConfiguration configuration, int maxRetryAttempts,
-			boolean asyncTotalSize, int waitOnRetryMs) {
+	SegmentsDownloader(
+			Media media, Path dest, MediaDownloadConfiguration configuration, int maxRetryAttempts, int waitOnRetryMs
+	) {
 		this.media            = Objects.requireNonNull(media);
 		this.dest             = Objects.requireNonNull(dest);
 		this.configuration    = Objects.requireNonNull(configuration);
 		this.maxRetryAttempts = checkMaxRetryAttempts(maxRetryAttempts);
-		this.asyncTotalSize   = asyncTotalSize;
 		this.waitOnRetryMs    = checkMilliseconds(waitOnRetryMs);
 	}
 	
@@ -259,7 +255,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		}
 		
 		// Obtain the total size compute strategy and compute the size
-		totalSizeComputer = asyncTotalSize ? new AsynchronousTotalSizeComputer() : new SynchronousTotalSizeComputer();
+		totalSizeComputer = new AsynchronousTotalSizeComputer();
 		return totalSizeComputer.compute(flattenSegments, subtitles);
 	}
 	
@@ -833,104 +829,6 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		@Override
 		public String textProgress() {
 			return progressText;
-		}
-	}
-	
-	private final class SynchronousTotalSizeComputer implements TotalSizeComputer {
-		
-		private Worker worker;
-		
-		@Override
-		public boolean compute(
-				List<? extends RemoteFile> segments,
-				List<? extends RemoteFile> subtitles
-		) throws Exception {
-			String text = translation.getSingle("progress.compute_total_size");
-			PlainTextTracker tracker = new PlainTextTracker();
-			trackerManager.tracker(tracker);
-			tracker.text(text);
-			tracker.progress(0.0);
-			
-			double count = segments.size() + subtitles.size();
-			AtomicInteger counter = new AtomicInteger();
-			worker = Worker.createThreadedWorker();
-			
-			Stream<RemoteFile> files = Stream.concat(
-				segments.stream(),
-				subtitles.stream()
-			);
-			
-			try {
-				Ref.Mutable<Boolean> cancel = new Ref.Mutable<>(false);
-				
-				for(RemoteFile file : Utils.iterable(files.iterator())) {
-					if(!checkState() || cancel.get()) {
-						// Exit the loop
-						break;
-					}
-					
-					long segmentSize = file.size();
-					
-					if(segmentSize > 0L) {
-						sizeAdd(segmentSize - file.estimatedSize());
-						tracker.progress(counter.incrementAndGet() / count);
-					} else {
-						worker.submit(() -> {
-							long fileSize = MediaConstants.UNKNOWN_SIZE;
-							
-							for(int i = 0; fileSize < 0L && i <= maxRetryAttempts; ++i) {
-								Pair<Long, Version> pair = Ignore.call(() -> sizeAndVersionOf(file.uri(), HEADERS));
-								
-								if(pair != null) {
-									fileSize = pair.a;
-									
-									// Do not compute total size when HTTP/2 is not used
-									if(pair.b != Version.HTTP_2) {
-										cancel.set(true);
-										return; // Do not continue
-									}
-								}
-							}
-							
-							if(fileSize > 0L) {
-								file.size(fileSize);
-								sizeAdd(fileSize - file.estimatedSize());
-							}
-							
-							tracker.progress(counter.incrementAndGet() / count);
-						});
-					}
-				}
-				
-				if(!cancel.get()) {
-					worker.waitTillDone();
-				}
-				
-				return true;
-			} finally {
-				worker.stop();
-			}
-		}
-		
-		@Override
-		public void stop() throws Exception {
-			if(worker != null) {
-				worker.stop();
-			}
-		}
-		
-		@Override
-		public void pause() throws Exception {
-			if(worker != null) {
-				worker.pause();
-			}
-		}
-		
-		@Override
-		public void resume() throws Exception {
-			if(worker != null) {
-				worker.resume();
-			}
 		}
 	}
 	

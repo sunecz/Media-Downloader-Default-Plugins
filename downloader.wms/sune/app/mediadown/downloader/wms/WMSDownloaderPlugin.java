@@ -19,9 +19,8 @@ public final class WMSDownloaderPlugin extends PluginBase {
 	private static final String NAME = "wms";
 	
 	// Default values of configuration properties
-	private static final int     DEFAULT_MAX_RETRY_ATTEMPTS = 1000;
-	private static final boolean DEFAULT_ASYNC_TOTAL_SIZE   = true;
-	private static final int     DEFAULT_WAIT_ON_RETRY_MS   = 250;
+	private static final int DEFAULT_MAX_RETRY_ATTEMPTS = 1000;
+	private static final int DEFAULT_WAIT_ON_RETRY_MS   = 250;
 	
 	private String translatedTitle;
 	private PluginConfiguration.Builder configuration;
@@ -34,10 +33,6 @@ public final class WMSDownloaderPlugin extends PluginBase {
 			.inGroup(ApplicationConfigurationAccessor.GROUP_DOWNLOAD)
 			.withDefaultValue(DEFAULT_MAX_RETRY_ATTEMPTS)
 			.withOrder(60));
-		builder.addProperty(ConfigurationProperty.ofBoolean("asyncTotalSize")
-			.inGroup(ApplicationConfigurationAccessor.GROUP_DOWNLOAD)
-			.withDefaultValue(DEFAULT_ASYNC_TOTAL_SIZE)
-			.withOrder(31));
 		builder.addProperty(ConfigurationProperty.ofInteger("waitOnRetryMs")
 			.inGroup(ApplicationConfigurationAccessor.GROUP_DOWNLOAD)
 			.withDefaultValue(DEFAULT_WAIT_ON_RETRY_MS)
