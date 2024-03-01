@@ -7,6 +7,8 @@ import sune.app.mediadown.entity.Downloaders;
 import sune.app.mediadown.plugin.Plugin;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginConfiguration;
+import sune.app.mediadown.plugin.PluginLoaderContext;
+import sune.app.mediadown.update.Version;
 
 @Plugin(name          = "downloader.wms",
 	    title         = "plugin.downloader.wms.title",
@@ -19,7 +21,7 @@ public final class WMSDownloaderPlugin extends PluginBase {
 	private static final String NAME = "wms";
 	
 	// Default values of configuration properties
-	private static final int DEFAULT_MAX_RETRY_ATTEMPTS = 1000;
+	private static final int DEFAULT_MAX_RETRY_ATTEMPTS = 500;
 	private static final int DEFAULT_WAIT_ON_RETRY_MS   = 250;
 	
 	private String translatedTitle;
@@ -41,11 +43,32 @@ public final class WMSDownloaderPlugin extends PluginBase {
 		configuration = builder;
 	}
 	
+	private final void initUpdateTriggers() {
+		PluginBase plugin = PluginLoaderContext.getContext().getInstance();
+		
+		// Update maxRetryAttempts to the new default value
+		MediaDownloader.ApplicationUpdateTriggers.add(
+			Version.ZERO,
+			Version.of("00.02.09-dev.18"),
+			() -> {
+				PluginConfiguration configuration = plugin.getContext().getConfiguration();
+				final int oldDefaultValue = 1000;
+				final int newDefaultValue = DEFAULT_MAX_RETRY_ATTEMPTS;
+				int currentValue = configuration.intValue("maxRetryAttempts");
+				
+				if(currentValue == oldDefaultValue) {
+					configuration.writer().set("maxRetryAttempts", newDefaultValue);
+				}
+			}
+		);
+	}
+	
 	@Override
 	public void init() throws Exception {
 		translatedTitle = MediaDownloader.translation().getSingle(super.getTitle());
 		Downloaders.add(NAME, WMSDownloader.class);
 		initConfiguration();
+		initUpdateTriggers();
 	}
 	
 	@Override
