@@ -7,7 +7,7 @@ import sune.app.mediadown.plugin.PluginBase;
 
 @Plugin(name          = "server.rtvs",
 	    title         = "plugin.server.rtvs.title",
-	    version       = "00.02.09-0001",
+	    version       = "00.02.09-0002",
 	    author        = "Sune",
 	    updateBaseURL = "https://app.sune.tech/mediadown/dat/plugin/0002/server/rtvs/",
 	    updatable     = true,
