@@ -62,6 +62,7 @@
 		<antcall target="build-server"><param name="var.name" value="youtube"     /></antcall>
 		<antcall target="build-server"><param name="var.name" value="direct"      /></antcall>
 		<antcall target="build-server"><param name="var.name" value="sledovanitv" /></antcall>
+		<antcall target="build-server"><param name="var.name" value="rtvs"        /></antcall>
 		<!-- DRM engines -->
 		<antcall target="build-drm-engine"><param name="var.name" value="ceskatelevize" /></antcall>
 		<antcall target="build-drm-engine"><param name="var.name" value="novavoyo"      /></antcall>

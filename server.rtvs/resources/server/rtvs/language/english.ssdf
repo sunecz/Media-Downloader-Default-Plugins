@@ -1,0 +1,9 @@
+{
+	plugin: {
+		server: {
+			rtvs: {
+				title: "RTVS"
+			}
+		}
+	}
+}

@@ -1,0 +1,24 @@
+[1mdiff --git a/build.xml b/build.xml[m
+[1mindex ed3496d..cd678bf 100644[m
+[1m--- a/build.xml[m
+[1m+++ b/build.xml[m
+[36m@@ -62,6 +62,7 @@[m
+ 		<antcall target="build-server"><param name="var.name" value="youtube"     /></antcall>[m
+ 		<antcall target="build-server"><param name="var.name" value="direct"      /></antcall>[m
+ 		<antcall target="build-server"><param name="var.name" value="sledovanitv" /></antcall>[m
+[32m+[m		[32m<antcall target="build-server"><param name="var.name" value="rtvs"        /></antcall>[m
+ 		<!-- DRM engines -->[m
+ 		<antcall target="build-drm-engine"><param name="var.name" value="ceskatelevize" /></antcall>[m
+ 		<antcall target="build-drm-engine"><param name="var.name" value="novavoyo"      /></antcall>[m
+[1mdiff --git a/src/module-info.java b/src/module-info.java[m
+[1mindex ce96309..d3b8cda 100644[m
+[1m--- a/src/module-info.java[m
+[1m+++ b/src/module-info.java[m
+[36m@@ -25,6 +25,7 @@[m [mmodule sune.app.mediadown.default_plugins {[m
+ 	exports sune.app.mediadown.server.youtube;[m
+ 	exports sune.app.mediadown.server.direct;[m
+ 	exports sune.app.mediadown.server.sledovanitv;[m
+[32m+[m	[32mexports sune.app.mediadown.server.rtvs;[m
+ 	exports sune.app.mediadown.drm_engine.ceskatelevize;[m
+ 	exports sune.app.mediadown.drm_engine.novavoyo;[m
+ 	exports sune.app.mediadown.drm_engine.iprima;[m
