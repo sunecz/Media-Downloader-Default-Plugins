@@ -11,7 +11,7 @@ import sune.app.mediadown.plugin.PluginBase;
 	    author        = "Sune",
 	    updateBaseURL = "https://app.sune.tech/mediadown/dat/plugin/0002/server/rtvs/",
 	    updatable     = true,
-	    url           = "",
+	    url           = "https://www.rtvs.sk",
 	    icon          = "resources/server/rtvs/icon/rtvs.png")
 public final class RTVSServerPlugin extends PluginBase {
 	
