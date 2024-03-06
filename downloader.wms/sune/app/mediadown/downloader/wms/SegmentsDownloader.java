@@ -43,6 +43,7 @@ import sune.app.mediadown.event.tracker.PipelineProgress;
 import sune.app.mediadown.event.tracker.PipelineStates;
 import sune.app.mediadown.event.tracker.SimpleTracker;
 import sune.app.mediadown.event.tracker.Tracker;
+import sune.app.mediadown.event.tracker.TrackerEvent;
 import sune.app.mediadown.event.tracker.TrackerManager;
 import sune.app.mediadown.event.tracker.WaitTracker;
 import sune.app.mediadown.exception.RejectedResponseException;
@@ -191,6 +192,9 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 			return;
 		}
 		
+		// Update the tracker, so it is visible to the user
+		tracker.totalTimeMs(ms);
+		
 		// Optimization for low wait values
 		if(ms <= TIME_UPDATE_RESOLUTION_MS) {
 			try {
@@ -201,9 +205,6 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 			
 			return; // No need to continue
 		}
-		
-		// Update the tracker, so it is visible to the user
-		tracker.totalTimeMs(ms);
 		
 		for(long first  = System.nanoTime(),
 				 target = ms * 1000000L,
@@ -315,6 +316,12 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 				if(i > 0) {
 					if(retryTracker == null) {
 						retryTracker = new RetryDownloadSimpleTracker();
+						
+						// We have to translate the update event to the download update event since
+						// the registry is only for the download events.
+						retryTracker.addEventListener(TrackerEvent.UPDATE, (o) -> {
+							eventRegistry.call(DownloadEvent.UPDATE, this);
+						});
 					}
 					
 					if(previousTracker == null) {
