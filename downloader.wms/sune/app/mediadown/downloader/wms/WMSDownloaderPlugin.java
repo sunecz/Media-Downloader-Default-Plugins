@@ -47,9 +47,10 @@ public final class WMSDownloaderPlugin extends PluginBase {
 		PluginBase plugin = PluginLoaderContext.getContext().getInstance();
 		
 		// Update maxRetryAttempts to the new default value
-		MediaDownloader.ApplicationUpdateTriggers.add(
+		MediaDownloader.UpdateTriggers.OfPlugin.add(
+			plugin.getContext().getPlugin().instance().name(),
 			Version.ZERO,
-			Version.of("00.02.09-dev.18"),
+			Version.of("00.02.09-0007"),
 			() -> {
 				PluginConfiguration configuration = plugin.getContext().getConfiguration();
 				final int oldDefaultValue = 1000;
