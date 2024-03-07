@@ -50,7 +50,7 @@ public final class WMSDownloaderPlugin extends PluginBase {
 		MediaDownloader.UpdateTriggers.OfPlugin.add(
 			plugin.getContext().getPlugin().instance().name(),
 			Version.ZERO,
-			Version.of("00.02.09-0007"),
+			Version.of("00.02.09-0008"),
 			() -> {
 				PluginConfiguration configuration = plugin.getContext().getConfiguration();
 				final int oldDefaultValue = 1000;
