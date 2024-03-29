@@ -52,15 +52,16 @@ public class SledovaniTVDRMEngine implements DRMEngine {
 		}
 		
 		@Override
-		public Request createRequest(Media media) {
-			MediaMetadata metadata = media.metadata();
+		public Request createRequest(Media media, byte[] licenseRequest) {
+			Media root = Media.root(media);
+			MediaMetadata metadata = root.metadata();
 			String profileId = metadata.get("profileId", "");
 			String deviceId = metadata.get("deviceId", "");
-			String streamUrl = media.uri().toString();
+			String streamUrl = root.uri().toString();
 			
 			String referer = Utils.format(
 				"https://%{host}s/",
-				"host", media.metadata().sourceURI().getHost()
+				"host", root.metadata().sourceURI().getHost()
 			);
 			
 			URI licenseUri = Net.uri(Utils.format(
@@ -70,10 +71,9 @@ public class SledovaniTVDRMEngine implements DRMEngine {
 				"stream_url", Utils.base64URLEncode(streamUrl)
 			));
 			
-			// The body will be replaced with content of the challenge
 			return Request.of(licenseUri)
 				.addHeaders("Referer", referer)
-				.POST("", "application/octet-stream");
+				.POST(licenseRequest, "application/octet-stream");
 		}
 	}
 }

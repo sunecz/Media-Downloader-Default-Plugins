@@ -48,11 +48,10 @@ public class CeskaTelevizeDRMEngine implements DRMEngine {
 		}
 		
 		@Override
-		public Request createRequest(Media media) {
-			// The body will be replaced with content of the challenge
+		public Request createRequest(Media media, byte[] licenseRequest) {
 			return Request.of(LICENSE_URI)
 				.addHeaders("Referer", "https://player.ceskatelevize.cz/")
-				.POST("", "application/octet-stream");
+				.POST(licenseRequest, "application/octet-stream");
 		}
 	}
 }

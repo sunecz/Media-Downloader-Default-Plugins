@@ -45,13 +45,12 @@ public class NovaPlusDRMEngine implements DRMEngine {
 		}
 		
 		@Override
-		public Request createRequest(Media media) {
-			String token = media.metadata().get("drmToken", "");
+		public Request createRequest(Media media, byte[] licenseRequest) {
+			String token = Media.root(media).metadata().get("drmToken", "");
 			
-			// The body will be replaced with content of the challenge
 			return Request.of(LICENSE_URI)
 				.addHeaders("Referer", "https://media.cms.nova.cz/", "X-AxDRM-Message", token)
-				.POST("", "application/octet-stream");
+				.POST(licenseRequest, "application/octet-stream");
 		}
 	}
 }
