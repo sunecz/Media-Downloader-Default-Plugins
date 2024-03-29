@@ -95,7 +95,13 @@ public class SledovaniTVServer implements Server {
 	}
 	
 	private static final JSONCollection recordingInfo(Authenticator.Session session, URI uri) throws Exception {
-		String recordId = Utils.afterFirst(uri.getFragment(), ":");
+		String uriFragment = uri.getFragment();
+		
+		if(uriFragment == null) {
+			throw new IllegalArgumentException("Unsupported URI");
+		}
+		
+		String recordId = Utils.afterFirst(uriFragment, ":");
 		URI uriInfo = Net.uri(Utils.format(URI_TEMPLATE_RECORDING, "recordId", recordId));
 		
 		try(Response.OfStream response = Web.requestStream(
