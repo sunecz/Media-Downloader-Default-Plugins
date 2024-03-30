@@ -4,6 +4,7 @@ import java.lang.StackWalker.Option;
 import java.lang.StackWalker.StackFrame;
 import java.lang.reflect.Constructor;
 import java.net.URI;
+import java.net.http.HttpConnectTimeoutException;
 import java.net.http.HttpHeaders;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -16,8 +17,10 @@ import java.util.Map.Entry;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.regex.Matcher;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -52,6 +55,7 @@ import sune.app.mediadown.net.Web.Response;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.task.ListTask;
+import sune.app.mediadown.util.CheckedSupplier;
 import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.JSON.JSONCollection;
 import sune.app.mediadown.util.JSON.JSONObject;
@@ -132,8 +136,9 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 	public ListTask<Episode> getEpisodes(Program program) throws Exception {
 		return ListTask.of((task) -> {
 			// We need to get the IDEC of the given program first
-			Document document = HTML.from(program.uri());
-			WebMediaMetadata metadata = WebMediaMetadataExtractor.extract(document, true);
+			WebMediaMetadata metadata = Common.retry(
+				() -> WebMediaMetadataExtractor.extract(HTML.from(program.uri()), true)
+			);
 			API.getEpisodes(task, program, metadata);
 		});
 	}
@@ -161,7 +166,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 						
 						// Always try the new API first, the old one just as a fallback
 						for(VOD.API api : List.of(VOD.v1(), VOD.v0())) {
-							playlist = api.ofExternal(info);
+							playlist = Common.retry(() -> api.ofExternal(info));
 							
 							if(playlist != null) {
 								break; // Successfully obtained
@@ -283,6 +288,34 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 	@Override
 	public String toString() {
 		return TITLE;
+	}
+	
+	private static final class Common {
+		
+		private static final int MAX_RETRY_ATTEMPTS = 5;
+		
+		private Common() {}
+		
+		public static final <T> T retry(CheckedSupplier<T> action) throws Exception {
+			return retry(action, MAX_RETRY_ATTEMPTS);
+		}
+		
+		public static final <T> T retry(CheckedSupplier<T> action, int maxNumOfAttempts) throws Exception {
+			for(int attempt = 1;; ++attempt) {
+				try {
+					return action.get();
+				} catch(TimeoutException ex) {
+					if(attempt >= maxNumOfAttempts) {
+						throw ex; // Rethrow
+					}
+				} catch(ExecutionException ex) {
+					if(attempt >= maxNumOfAttempts
+							|| !(ex.getCause() instanceof HttpConnectTimeoutException)) {
+						throw ex; // Rethrow
+					}
+				}
+			}
+		}
 	}
 	
 	private static final class API {
@@ -499,7 +532,8 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 				
 				loop:
 				do {
-					result = getProgramsWithCategory(categoryId, offset, MAX_ITEMS_PER_PAGE);
+					final int off = offset;
+					result = Common.retry(() -> getProgramsWithCategory(categoryId, off, MAX_ITEMS_PER_PAGE));
 					
 					for(JSONCollection item : result.items().collectionsIterable()) {
 						Program program = parseProgram(item);
@@ -541,7 +575,8 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 				
 				loop:
 				do {
-					result = getEpisodes(idec, offset, MAX_ITEMS_PER_PAGE, seasonId);
+					final int off = offset;
+					result = Common.retry(() -> getEpisodes(idec, off, MAX_ITEMS_PER_PAGE, seasonId));
 					
 					// Always use the "No season" season for the "All episodes" season.
 					int alteredSeasonIndex = seasonId == null ? -1 : seasonIndex;
