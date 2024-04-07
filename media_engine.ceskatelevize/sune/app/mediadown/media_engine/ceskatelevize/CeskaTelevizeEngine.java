@@ -495,6 +495,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			return json.toString(true).replaceAll("\\n", "\\\\n");
 		}
 		
+		@SuppressWarnings("resource")
 		private static final JSONCollection doOperation(String operationName, String query, Object... variables)
 				throws Exception {
 			String body = createRequestBody(operationName, query, variables);
