@@ -21,6 +21,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -137,7 +138,8 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		return ListTask.of((task) -> {
 			// We need to get the IDEC of the given program first
 			WebMediaMetadata metadata = Common.retry(
-				() -> WebMediaMetadataExtractor.extract(HTML.from(program.uri()), true)
+				() -> WebMediaMetadataExtractor.extract(HTML.from(program.uri()), true),
+				Objects::nonNull
 			);
 			API.getEpisodes(task, program, metadata);
 		});
@@ -297,13 +299,26 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		private Common() {}
 		
 		public static final <T> T retry(CheckedSupplier<T> action) throws Exception {
-			return retry(action, MAX_RETRY_ATTEMPTS);
+			return retry(action, (v) -> true, MAX_RETRY_ATTEMPTS);
 		}
 		
-		public static final <T> T retry(CheckedSupplier<T> action, int maxNumOfAttempts) throws Exception {
+		public static final <T> T retry(CheckedSupplier<T> action, Predicate<T> isValid) throws Exception {
+			return retry(action, isValid, MAX_RETRY_ATTEMPTS);
+		}
+		
+		public static final <T> T retry(CheckedSupplier<T> action, Predicate<T> isValid, int maxNumOfAttempts)
+				throws Exception {
 			for(int attempt = 1;; ++attempt) {
 				try {
-					return action.get();
+					T value = action.get();
+					
+					if(isValid.test(value)) {
+						return value;
+					}
+					
+					if(attempt >= maxNumOfAttempts) {
+						throw new IllegalStateException("Invalid value");
+					}
 				} catch(TimeoutException ex) {
 					if(attempt >= maxNumOfAttempts) {
 						throw ex; // Rethrow
@@ -533,7 +548,10 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 				loop:
 				do {
 					final int off = offset;
-					result = Common.retry(() -> getProgramsWithCategory(categoryId, off, MAX_ITEMS_PER_PAGE));
+					result = Common.retry(
+						()  -> getProgramsWithCategory(categoryId, off, MAX_ITEMS_PER_PAGE),
+						(v) -> v.items() != null
+					);
 					
 					for(JSONCollection item : result.items().collectionsIterable()) {
 						Program program = parseProgram(item);
@@ -576,7 +594,10 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 				loop:
 				do {
 					final int off = offset;
-					result = Common.retry(() -> getEpisodes(idec, off, MAX_ITEMS_PER_PAGE, seasonId));
+					result = Common.retry(
+						()  -> getEpisodes(idec, off, MAX_ITEMS_PER_PAGE, seasonId),
+						(v) -> v.items() != null
+					);
 					
 					// Always use the "No season" season for the "All episodes" season.
 					int alteredSeasonIndex = seasonId == null ? -1 : seasonIndex;
@@ -618,7 +639,12 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		}
 		
 		public static final String getShowId(String showCode) throws Exception {
-			return Opt.of(Utils.stream(searchShows(showCode, 0, 1).items().collectionsIterable())
+			CollectionAPIResult result = Common.retry(
+				()  -> searchShows(showCode, 0, 1),
+				(v) -> v.items() != null
+			);
+			
+			return Opt.of(Utils.stream(result.items().collectionsIterable())
 			                   .filter((c) -> c.getString("code").equals(showCode))
 			                   .findFirst())
 					  .<Optional<JSONCollection>>castAny()
@@ -1210,7 +1236,11 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			// Iteratively get as many episodes as needed in chunks and find the needed one
 			API.CollectionAPIResult result;
 			do {
-				result = API.getEpisodes(programIDEC, offset, API.MAX_ITEMS_PER_PAGE, seasonId);
+				final int off = offset;
+				result = Common.retry(
+					()  -> API.getEpisodes(programIDEC, off, API.MAX_ITEMS_PER_PAGE, seasonId),
+					(v) -> v.items() != null
+				);
 				
 				JSONCollection items = result.items();
 				ctr = 0;
