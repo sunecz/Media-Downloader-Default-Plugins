@@ -7,7 +7,7 @@ import sune.app.mediadown.plugin.PluginBase;
 
 @Plugin(name          = "drm_engine.novavoyo",
 	    title         = "plugin.drm_engine.novavoyo.title",
-	    version       = "00.02.09-0001",
+	    version       = "00.02.09-0002",
 	    author        = "Sune",
 	    updateBaseURL = "https://app.sune.tech/mediadown/dat/plugin/0002/drm_engine/novavoyo/",
 	    updatable     = true,
