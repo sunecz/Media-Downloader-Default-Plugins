@@ -869,6 +869,12 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 					JSONCollection json = JSON.read(response.stream());
 					
 					for(JSONCollection item : json.getCollection("playlist").collectionsIterable()) {
+						// Ignore non-VOD sources, such as TRAILER, which is often the video about
+						// minimal age requirement or parental supervision.
+						if(!item.getString("type").equals("VOD")) {
+							continue;
+						}
+						
 						Playlist.Stream stream = parseStream(item);
 						
 						if(stream == null) {
