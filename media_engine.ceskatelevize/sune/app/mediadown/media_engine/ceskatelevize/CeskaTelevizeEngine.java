@@ -4,6 +4,7 @@ import java.lang.StackWalker.Option;
 import java.lang.StackWalker.StackFrame;
 import java.lang.reflect.Constructor;
 import java.net.URI;
+import java.net.http.HttpConnectTimeoutException;
 import java.net.http.HttpHeaders;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -16,8 +17,11 @@ import java.util.Map.Entry;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -52,6 +56,7 @@ import sune.app.mediadown.net.Web.Response;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.task.ListTask;
+import sune.app.mediadown.util.CheckedSupplier;
 import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.JSON.JSONCollection;
 import sune.app.mediadown.util.JSON.JSONObject;
@@ -132,8 +137,10 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 	public ListTask<Episode> getEpisodes(Program program) throws Exception {
 		return ListTask.of((task) -> {
 			// We need to get the IDEC of the given program first
-			Document document = HTML.from(program.uri());
-			WebMediaMetadata metadata = WebMediaMetadataExtractor.extract(document, true);
+			WebMediaMetadata metadata = Common.retry(
+				() -> WebMediaMetadataExtractor.extract(HTML.from(program.uri()), true),
+				Objects::nonNull
+			);
 			API.getEpisodes(task, program, metadata);
 		});
 	}
@@ -161,7 +168,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 						
 						// Always try the new API first, the old one just as a fallback
 						for(VOD.API api : List.of(VOD.v1(), VOD.v0())) {
-							playlist = api.ofExternal(info);
+							playlist = Common.retry(() -> api.ofExternal(info));
 							
 							if(playlist != null) {
 								break; // Successfully obtained
@@ -283,6 +290,47 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 	@Override
 	public String toString() {
 		return TITLE;
+	}
+	
+	private static final class Common {
+		
+		private static final int MAX_RETRY_ATTEMPTS = 5;
+		
+		private Common() {}
+		
+		public static final <T> T retry(CheckedSupplier<T> action) throws Exception {
+			return retry(action, (v) -> true, MAX_RETRY_ATTEMPTS);
+		}
+		
+		public static final <T> T retry(CheckedSupplier<T> action, Predicate<T> isValid) throws Exception {
+			return retry(action, isValid, MAX_RETRY_ATTEMPTS);
+		}
+		
+		public static final <T> T retry(CheckedSupplier<T> action, Predicate<T> isValid, int maxNumOfAttempts)
+				throws Exception {
+			for(int attempt = 1;; ++attempt) {
+				try {
+					T value = action.get();
+					
+					if(isValid.test(value)) {
+						return value;
+					}
+					
+					if(attempt >= maxNumOfAttempts) {
+						throw new IllegalStateException("Invalid value");
+					}
+				} catch(TimeoutException ex) {
+					if(attempt >= maxNumOfAttempts) {
+						throw ex; // Rethrow
+					}
+				} catch(ExecutionException ex) {
+					if(attempt >= maxNumOfAttempts
+							|| !(ex.getCause() instanceof HttpConnectTimeoutException)) {
+						throw ex; // Rethrow
+					}
+				}
+			}
+		}
 	}
 	
 	private static final class API {
@@ -447,6 +495,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			return json.toString(true).replaceAll("\\n", "\\\\n");
 		}
 		
+		@SuppressWarnings("resource")
 		private static final JSONCollection doOperation(String operationName, String query, Object... variables)
 				throws Exception {
 			String body = createRequestBody(operationName, query, variables);
@@ -499,7 +548,11 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 				
 				loop:
 				do {
-					result = getProgramsWithCategory(categoryId, offset, MAX_ITEMS_PER_PAGE);
+					final int off = offset;
+					result = Common.retry(
+						()  -> getProgramsWithCategory(categoryId, off, MAX_ITEMS_PER_PAGE),
+						(v) -> v.items() != null
+					);
 					
 					for(JSONCollection item : result.items().collectionsIterable()) {
 						Program program = parseProgram(item);
@@ -541,7 +594,11 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 				
 				loop:
 				do {
-					result = getEpisodes(idec, offset, MAX_ITEMS_PER_PAGE, seasonId);
+					final int off = offset;
+					result = Common.retry(
+						()  -> getEpisodes(idec, off, MAX_ITEMS_PER_PAGE, seasonId),
+						(v) -> v.items() != null
+					);
 					
 					// Always use the "No season" season for the "All episodes" season.
 					int alteredSeasonIndex = seasonId == null ? -1 : seasonIndex;
@@ -583,7 +640,12 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		}
 		
 		public static final String getShowId(String showCode) throws Exception {
-			return Opt.of(Utils.stream(searchShows(showCode, 0, 1).items().collectionsIterable())
+			CollectionAPIResult result = Common.retry(
+				()  -> searchShows(showCode, 0, 1),
+				(v) -> v.items() != null
+			);
+			
+			return Opt.of(Utils.stream(result.items().collectionsIterable())
 			                   .filter((c) -> c.getString("code").equals(showCode))
 			                   .findFirst())
 					  .<Optional<JSONCollection>>castAny()
@@ -807,6 +869,12 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 					JSONCollection json = JSON.read(response.stream());
 					
 					for(JSONCollection item : json.getCollection("playlist").collectionsIterable()) {
+						// Ignore non-VOD sources, such as TRAILER, which is often the video about
+						// minimal age requirement or parental supervision.
+						if(!item.getString("type").equals("VOD")) {
+							continue;
+						}
+						
 						Playlist.Stream stream = parseStream(item);
 						
 						if(stream == null) {
@@ -1175,7 +1243,11 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			// Iteratively get as many episodes as needed in chunks and find the needed one
 			API.CollectionAPIResult result;
 			do {
-				result = API.getEpisodes(programIDEC, offset, API.MAX_ITEMS_PER_PAGE, seasonId);
+				final int off = offset;
+				result = Common.retry(
+					()  -> API.getEpisodes(programIDEC, off, API.MAX_ITEMS_PER_PAGE, seasonId),
+					(v) -> v.items() != null
+				);
 				
 				JSONCollection items = result.items();
 				ctr = 0;
