@@ -4,6 +4,7 @@ import java.net.URI;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.regex.Matcher;
 
 import org.jsoup.nodes.Document;
@@ -18,6 +19,7 @@ import sune.app.mediadown.entity.Program;
 import sune.app.mediadown.gui.Dialog;
 import sune.app.mediadown.language.Translation;
 import sune.app.mediadown.media.Media;
+import sune.app.mediadown.media.MediaFormat;
 import sune.app.mediadown.media.MediaLanguage;
 import sune.app.mediadown.media.MediaMetadata;
 import sune.app.mediadown.media.MediaSource;
@@ -31,6 +33,7 @@ import sune.app.mediadown.net.Web.Response;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.task.ListTask;
+import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.JSON.JSONCollection;
 import sune.app.mediadown.util.JavaScript;
 import sune.app.mediadown.util.Ref;
@@ -58,18 +61,15 @@ public final class MarkizaPlusEngine implements MediaEngine {
 	private static final String SEL_PROGRAMS = ":not(.tab-content) > .c-show-wrapper > .c-show";
 	private static final String SEL_EPISODES = ".c-article-wrapper [class^='col-']";
 	private static final String SEL_EPISODES_LOAD_MORE = ".js-article-load-more .c-button";
-	private static final String SEL_PLAYER_IFRAME = ".c-content iframe";
+	private static final String SEL_PLAYER_IFRAME = "iframe[data-video-id]";
 	private static final String SEL_LABEL_VOYO = ".c-badge";
 	
 	// Others
-	private static final String TXT_PLAYER_CONFIG_BEGIN = "Player.init(";
+	private static final String TXT_PLAYER_CONFIG_BEGIN = "player:";
 	private static final int RESULT_EXIT = -1;
 	
 	// Regex
-	private static final Regex REGEX_CONTENT_TITLE = Regex.of("(?i)Séria (\\d+), epizóda (\\d+)");
-	private static final Regex REGEX_EPISODE_TEXT_TITLE = Regex.of(
-		"^(?:.*?(?: - |: ))?(\\d+)\\. díl(?:(?: - |: )(.*))?$"
-	);
+	private static final Regex REGEX_EPISODE = Regex.of("(?iu)^(?:.*?(?: - |: ))?(\\d+)\\. díl(?:(?: - |: )(.*))?$");
 	private static final Regex REGEX_EPISODE_TITLE = Regex.of(
 		"(?iu)(?:(?:\\s+[\\-\\u2013\\u2014]|\\s*:)\\s+)?(\\d+)\\.\\s+epizóda(?:\\s+[\\-\\u2013\\u2014]\\s+)?"
 	);
@@ -83,62 +83,51 @@ public final class MarkizaPlusEngine implements MediaEngine {
 		return MediaDownloader.translation().getTranslation(path);
 	}
 	
-	private static final String mediaTitle(JSONCollection streamInfo, Document document) {
-		// Markiza Plus has weird naming, so this is actually correct
-		String programName = streamInfo.getString("episode", "");
-		String episodeText = streamInfo.getString("programName", "");
-		int numSeason = streamInfo.getInt("seasonNumber", 0);
-		int numEpisode = -1;
-		String episodeName = ""; // Use empty string rather than null
+	private static final JSONCollection linkedData(Document document, Set<String> types) {
+		for(Element script : document.select("script[type='application/ld+json']")) {
+			JSONCollection content = JSON.read(script.html());
+			
+			// Skip Linked Data of the website itself
+			if(types.contains(content.getString("@type"))) {
+				return content;
+			}
+		}
 		
-		Matcher matcher = REGEX_EPISODE_TEXT_TITLE.matcher(episodeText);
-		if(matcher.matches()) {
-			numEpisode = Integer.valueOf(matcher.group(1));
+		return null;
+	}
+	
+	private static final String mediaTitle(Document document) {
+		// Since using the measuring.streamInfo is not reliable, we use Linked Data.
+		JSONCollection data = linkedData(document, Set.of("TVEpisode", "Article", "VideoObject"));
+		
+		// The Linked data should always be present
+		if(data == null) {
+			throw new IllegalStateException("No Linked data");
+		}
+		
+		String programName = data.getString("partOfSeries.name");
+		String episodeName = data.getString("name", "");
+		int numSeason = data.getInt("partOfSeason.seasonNumber", -1);
+		int numEpisode = data.getInt("episodeNumber", -1);
+		Matcher matcher;
+		
+		if(programName == null) {
+			// Alternative "program name" for a VideoObject
+			if(!episodeName.isEmpty()) {
+				programName = episodeName;
+				episodeName = "";
+			} else {
+				// Alternative "program name" for an Article
+				programName = data.getString("headline");
+			}
+		}
+		
+		if((matcher = REGEX_EPISODE.matcher(episodeName)).matches()) {
+			if(numEpisode < 0) {
+				numEpisode = Integer.valueOf(matcher.group(1));
+			}
+			
 			episodeName = Optional.ofNullable(matcher.group(2)).orElse("");
-		}
-		
-		Element elContentTitle = null;
-		if(numSeason <= 0 || numEpisode <= 0) {
-			// Usually the season and episode number is in the title of the video
-			elContentTitle = document.selectFirst(".c-hero .c-title");
-			
-			if(elContentTitle != null
-					&& (matcher = REGEX_CONTENT_TITLE.matcher(elContentTitle.text().strip())).find()) {
-				numSeason = Integer.valueOf(matcher.group(1));
-				numEpisode = Integer.valueOf(matcher.group(2));
-			} else {
-				elContentTitle = null; // Reset for further checks
-			}
-		}
-		
-		if(programName.isEmpty()) {
-			// Obtain the program name from the page navigation
-			Element elNavProgramItem = document.selectFirst(".c-breadcrumbs li:nth-child(2) > a");
-			
-			if(elNavProgramItem != null) {
-				programName = elNavProgramItem.text().strip();
-			}
-		}
-		
-		if(episodeName.isEmpty()) {
-			// Obtain the episode name from the content title
-			if(elContentTitle != null) {
-				// If the content title contains the season and episode number, remove it first
-				int start = matcher.start(0);
-				int end = matcher.end(0);
-				String text = elContentTitle.text().strip();
-				
-				if(start > 0) {
-					episodeName = text.substring(0, start);
-				}
-				
-				if(end < text.length()) {
-					episodeName += text.substring(end);
-				}
-			} else {
-				elContentTitle = document.selectFirst(".c-hero .c-title");
-				episodeName = elContentTitle.text().strip();
-			}
 		}
 		
 		return MediaUtils.mediaTitle(programName, numSeason, numEpisode, episodeName);
@@ -357,24 +346,43 @@ public final class MarkizaPlusEngine implements MediaEngine {
 			JSONCollection scriptData = JavaScript.readObject(conScript);
 			
 			if(scriptData != null) {
-				JSONCollection tracks = scriptData.getCollection("tracks");
+				JSONCollection tracks = scriptData.getCollection("lib.source.sources");
 				URI sourceUri = uri;
 				MediaSource source = MediaSource.of(this);
-				String title = mediaTitle(scriptData.getCollection("plugins.measuring.streamInfo"), document);
+				String title = mediaTitle(document);
 				
 				for(JSONCollection node : tracks.collectionsIterable()) {
-					for(JSONCollection coll : ((JSONCollection) node).collectionsIterable()) {
-						URI videoUrl = Net.uri(coll.getString("src"));
-						MediaLanguage language = MediaLanguage.ofCode(coll.getString("lang"));
+					String type = node.getString("type");
+					MediaFormat format = MediaFormat.fromMimeType(type);
+					URI videoUri = Net.uri(node.getString("src"));
+					MediaLanguage language = MediaLanguage.UNKNOWN;
+					MediaMetadata metadata = MediaMetadata.empty();
+					
+					if(node.hasCollection("contentProtection")) {
+						JSONCollection drmInfo = node.getCollection("contentProtection");
+						String drmToken = null;
 						
-						List<Media> media = MediaUtils.createMedia(
-							source, videoUrl, sourceUri, title, language, MediaMetadata.empty()
-						);
+						switch(format.name().toLowerCase()) {
+							case "dash":
+								drmToken = drmInfo.getString("token");
+								break;
+							default:
+								// Widevine not supported, do not add media sources
+								continue;
+						}
 						
-						for(Media m : media) {
-							if(!task.add(m)) {
-								return; // Do not continue
-							}
+						if(drmToken != null) {
+							metadata = MediaMetadata.of("drmToken", drmToken);
+						}
+					}
+					
+					List<Media> media = MediaUtils.createMedia(
+						source, videoUri, sourceUri, title, language, metadata
+					);
+					
+					for(Media s : media) {
+						if(!task.add(s)) {
+							return; // Do not continue
 						}
 					}
 				}
