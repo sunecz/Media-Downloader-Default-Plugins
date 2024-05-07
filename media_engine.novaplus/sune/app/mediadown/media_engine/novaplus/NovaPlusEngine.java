@@ -205,7 +205,15 @@ public final class NovaPlusEngine implements MediaEngine {
 	
 	private final String callUriTemplate(Element btnLoadMore) {
 		QueryArgument urlArgs = Net.queryDestruct(btnLoadMore.absUrl("data-href"));
-		String contentId = urlArgs.valueOf("content");
+		String contentId = urlArgs.valueOf("content", null);
+		
+		// In the latest version of the website (as of date 2024-05-07) the 'content'
+		// argument's name in the query arguments list may be empty, '0' when parsed.
+		// Obtain it using that name instead.
+		if(contentId == null) {
+			contentId = urlArgs.valueOf("0");
+		}
+		
 		return Utils.format(URL_EPISODE_LIST, "content", contentId);
 	}
 	
