@@ -344,33 +344,41 @@ public final class NovaVoyoEngine implements MediaEngine {
 			return VoyoError.ofFailure(null);
 		}
 		
-		private static final String mediaTitle(JSONCollection streamInfo, Document document) {
-			// Nova Voyo has weird naming, this is actually correct
-			String programName = streamInfo.getString("episode", "");
-			int numSeason = -1;
-			int numEpisode = -1;
-			String episodeName = null;
+		private static final String mediaTitle(Document document) {
+			// Since using the measuring.streamInfo is not reliable, we use Linked Data.
+			LinkingData linkingData = LinkingData.from(document).stream()
+				.filter((ld) -> Utils.contains(Set.of("Movie", "TVEpisode"), ld.type()))
+				.findFirst().orElseGet(LinkingData::empty);
 			
-			if(programName.isEmpty()) {
-				// No useful information can be extracted from streamInfo, use LinkingData
-				LinkingData linkingData = LinkingData.from(document).stream()
-					.filter((ld) -> Utils.contains(Set.of("Movie", "TVEpisode"), ld.type()))
-					.findFirst().orElseGet(LinkingData::empty);
-				
-				if(!linkingData.isEmpty()) {
-					programName = linkingData.data().getString("name", "");
-				}
-			} else {
-				String episodeText = streamInfo.getString("programName", "");
-				numSeason = streamInfo.getInt("seasonNumber", 0);
-				
-				Matcher matcher = REGEX_EPISODE.matcher(episodeText);
-				if(matcher.matches()) {
-					numEpisode = Integer.parseInt(matcher.group(1));
-					episodeName = Optional.ofNullable(matcher.group(2)).orElse("");
+			// The Linked data should always be present
+			if(linkingData.isEmpty()) {
+				throw new IllegalStateException("No Linked data");
+			}
+			
+			JSONCollection data = linkingData.data();
+			String programName = data.getString("partOfSeries.name");
+			String episodeName = data.getString("name", "");
+			int numSeason = data.getInt("partOfSeason.seasonNumber", -1);
+			int numEpisode = data.getInt("episodeNumber", -1);
+			Matcher matcher;
+			
+			if(programName == null) {
+				// Alternative "program name" for a VideoObject
+				if(!episodeName.isEmpty()) {
+					programName = episodeName;
+					episodeName = "";
 				} else {
-					episodeName = episodeText;
+					// Alternative "program name" for an Article
+					programName = data.getString("headline");
 				}
+			}
+			
+			if((matcher = REGEX_EPISODE.matcher(episodeName)).matches()) {
+				if(numEpisode < 0) {
+					numEpisode = Integer.valueOf(matcher.group(1));
+				}
+				
+				episodeName = Optional.ofNullable(matcher.group(2)).orElse("");
 			}
 			
 			return MediaUtils.mediaTitle(programName, numSeason, numEpisode, episodeName);
@@ -516,7 +524,7 @@ public final class NovaVoyoEngine implements MediaEngine {
 				for(Element elScript : embedDoc.select("script:not([src])")) {
 					String content = elScript.html();
 					int index;
-					if((index = content.indexOf("Player.init")) >= 0) {
+					if((index = content.indexOf("player:")) >= 0) {
 						content = Utils.bracketSubstring(content, '{', '}', false, index, content.length());
 						settings = JavaScript.readObject(content);
 						break;
@@ -526,55 +534,43 @@ public final class NovaVoyoEngine implements MediaEngine {
 				if(settings == null)
 					return; // Do not continue
 				
-				JSONCollection tracks = settings.getCollection("tracks");
+				JSONCollection tracks = settings.getCollection("lib.source.sources");
 				URI sourceURI = uri;
 				MediaSource source = MediaSource.of(engine);
+				String title = mediaTitle(document);
 				
-				String title = mediaTitle(settings.getCollection("plugins.measuring.streamInfo"), document);
 				for(JSONCollection node : tracks.collectionsIterable()) {
-					MediaFormat format = MediaFormat.fromName(node.name());
-					String formatName = node.name().toLowerCase();
+					String type = node.getString("type");
+					MediaFormat format = MediaFormat.fromMimeType(type);
+					URI videoUri = Net.uri(node.getString("src"));
+					MediaLanguage language = MediaLanguage.UNKNOWN;
+					MediaMetadata metadata = MediaMetadata.empty();
 					
-					for(JSONCollection coll : ((JSONCollection) node).collectionsIterable()) {
-						String videoURL = coll.getString("src");
-						MediaLanguage language = MediaLanguage.ofCode(coll.getString("lang"));
-						MediaMetadata metadata = MediaMetadata.empty();
+					if(node.hasCollection("contentProtection")) {
+						JSONCollection drmInfo = node.getCollection("contentProtection");
+						String drmToken = null;
 						
-						if(format == MediaFormat.UNKNOWN) {
-							format = MediaFormat.fromPath(videoURL);
+						switch(format.name().toLowerCase()) {
+							case "dash":
+								drmToken = drmInfo.getString("token");
+								break;
+							default:
+								// Widevine not supported, do not add media sources
+								continue;
 						}
 						
-						if(coll.hasCollection("drm")) {
-							JSONCollection drmInfo = coll.getCollection("drm");
-							String drmToken = null;
-							
-							switch(formatName) {
-								case "dash":
-									drmToken = Utils.stream(drmInfo.collectionsIterable())
-										.filter((c) -> c.getString("keySystem").equals("com.widevine.alpha"))
-										.flatMap((c) -> Utils.stream(c.getCollection("headers").collectionsIterable()))
-										.filter((h) -> h.getString("name").equals("X-AxDRM-Message"))
-										.map((h) -> h.getString("value"))
-										.findFirst().orElse(null);
-									break;
-								default:
-									// Widevine not supported, do not add media sources
-									continue;
-							}
-							
-							if(drmToken != null) {
-								metadata = MediaMetadata.of("drmToken", drmToken);
-							}
+						if(drmToken != null) {
+							metadata = MediaMetadata.of("drmToken", drmToken);
 						}
-						
-						List<Media> media = MediaUtils.createMedia(
-							source, Net.uri(videoURL), sourceURI, title, language, metadata
-						);
-						
-						for(Media s : media) {
-							if(!task.add(s)) {
-								return; // Do not continue
-							}
+					}
+					
+					List<Media> media = MediaUtils.createMedia(
+						source, videoUri, sourceURI, title, language, metadata
+					);
+					
+					for(Media s : media) {
+						if(!task.add(s)) {
+							return; // Do not continue
 						}
 					}
 				}
