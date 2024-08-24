@@ -357,6 +357,11 @@ public final class SimpleDownloader implements Download, DownloadResult {
 	}
 	
 	@Override
+	public void close() throws Exception {
+		downloader.close();
+	}
+	
+	@Override
 	public Download download() {
 		return this;
 	}
