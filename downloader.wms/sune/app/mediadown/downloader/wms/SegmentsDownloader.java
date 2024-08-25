@@ -162,15 +162,16 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		SegmentedMedia media,
 		Path output
 	) throws Exception {
-		InternalSegmentsDownloader segmentsDownloader = newDownloader();
-		Segments segments = new Segments(
-			media,
-			listSegments((SegmentedMedia) media),
-			new Destination.OfPath(output),
-			MediaConstants.UNKNOWN_DURATION
-		);
-		
-		return segmentsDownloader.download(segments);
+		try(InternalSegmentsDownloader segmentsDownloader = newDownloader()) {
+			Segments segments = new Segments(
+				media,
+				listSegments((SegmentedMedia) media),
+				new Destination.OfPath(output),
+				MediaConstants.UNKNOWN_DURATION
+			);
+			
+			return segmentsDownloader.download(segments);
+		}
 	}
 	
 	private final boolean doDownloadSolidMedia(
@@ -248,15 +249,15 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 	}
 	
 	private final boolean download(List<Segments> segmentsList) throws Exception {
-		InternalSegmentsDownloader downloader = newDownloader();
-		
-		for(Segments segments : segmentsList) {
-			if(!downloader.download(segments)) {
-				return false;
+		try(InternalSegmentsDownloader downloader = newDownloader()) {
+			for(Segments segments : segmentsList) {
+				if(!downloader.download(segments)) {
+					return false;
+				}
 			}
+			
+			return true;
 		}
-		
-		return true;
 	}
 	
 	private final InternalDownloader createSubtitlesDownloader() {
@@ -268,6 +269,10 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		return downloader;
 	}
 	
+	private final InternalDownloader createSubtitlesDownloader(SubtitlesMedia media) {
+		return media.isSegmented() ? createSubtitlesDownloader() : createDownloader();
+	}
+	
 	private final boolean downloadSubtitles(List<RemoteMedia> subtitles, Path destination) throws Exception {
 		if(subtitles.isEmpty()) {
 			return true;
@@ -276,28 +281,16 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		Path directory = destination.getParent();
 		String baseName = Utils.OfPath.baseName(destination);
 		
-		InternalDownloader normalDownloader = null;
-		
 		for(RemoteMedia subtitle : subtitles) {
 			if(!state.check()) return false;
 			
 			SubtitlesMedia media = (SubtitlesMedia) subtitle.value();
 			Path path = subtitlesPath(media, baseName, directory);
 			
-			// TODO: Clean up
-			InternalDownloader downloader;
-			if(media.isSegmented()) {
-				downloader = createSubtitlesDownloader();
-			} else {
-				if(normalDownloader == null) {
-					normalDownloader = createDownloader();
+			try(InternalDownloader downloader = createSubtitlesDownloader(media)) {
+				if(!doDownload(downloader, media, path)) {
+					return false;
 				}
-				
-				downloader = normalDownloader;
-			}
-			
-			if(!doDownload(downloader, media, path)) {
-				return false;
 			}
 		}
 		

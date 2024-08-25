@@ -99,33 +99,16 @@ public final class ParallelSegmentsDownloader implements InternalSegmentsDownloa
 		merger.start();
 		
 		try {
+			// Wait for the download workers to finish
 			synchronizer.await();
 			// Notify the merger that it should terminate after no more requests are available,
 			// otherwise we would wait here forever.
 			merger.terminate();
 			merger.await();
+			// At this point, we're done
 			return true;
 		} finally {
-			for(DownloadWorker worker : workers) {
-				worker.stop();
-			}
-			
-			merger.stop();
-			
-			// Clean up temporary files
-			for(DownloadWorker worker : workers) {
-				try {
-					NIO.deleteFile(worker.output());
-				} catch(IOException ex) {
-					// Ignore
-				}
-			}
-			
-			// Clean up
-			Arrays.fill(workers, null);
-			Arrays.fill(retryEntries, null);
-			this.merger = null;
-			previousTracker = null;
+			close();
 		}
 	}
 	
@@ -210,21 +193,45 @@ public final class ParallelSegmentsDownloader implements InternalSegmentsDownloa
 	
 	@Override
 	public void close() throws Exception {
+		Exception exception = null;
+		
 		for(DownloadWorker worker : workers) {
 			if(worker == null) {
 				continue;
 			}
 			
 			try {
+				worker.stop();
 				worker.close();
 			} catch(Exception ex) {
+				exception = ex;
+			}
+			
+			try {
+				NIO.deleteFile(worker.output());
+			} catch(IOException ex) {
 				// Ignore
 			}
 		}
 		
 		Merger merger;
 		if((merger = this.merger) != null) {
-			merger.close();
+			try {
+				merger.stop();
+				merger.close();
+			} catch(Exception ex) {
+				exception = ex;
+			}
+		}
+		
+		// Clean up
+		Arrays.fill(workers, null);
+		Arrays.fill(retryEntries, null);
+		this.merger = null;
+		previousTracker = null;
+		
+		if(exception != null) {
+			throw exception; // Rethrow
 		}
 	}
 	
