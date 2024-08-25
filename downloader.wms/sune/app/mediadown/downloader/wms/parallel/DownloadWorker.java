@@ -1,25 +1,37 @@
 package sune.app.mediadown.downloader.wms.parallel;
 
 import java.io.IOException;
+import java.nio.channels.FileChannel;
+import java.nio.file.OpenOption;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.Objects;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
 import sune.app.mediadown.concurrent.Threads;
+import sune.app.mediadown.download.Destination;
+import sune.app.mediadown.download.DownloadCommon;
 import sune.app.mediadown.downloader.wms.common.RemoteFileSegment;
 
 // package-private
 final class DownloadWorker implements AutoCloseable {
 	
 	private static final long COMPACT_MIN_SEGMENT_SIZE = 1024L * 1024L; // 1 MB
+	private static final OpenOption[] OPEN_OPTIONS = {
+		StandardOpenOption.READ,
+		StandardOpenOption.WRITE,
+		StandardOpenOption.CREATE,
+		StandardOpenOption.TRUNCATE_EXISTING,
+	};
 	
 	private final Synchronizer synchronizer;
 	private final DownloadQueue queue;
 	private final Merger merger;
 	private final SerialDownloader downloader;
-	private final Path path;
+	private final Destination destination;
+	private final FileChannel channel;
 	
 	private final Lock lock = new ReentrantLock();
 	private final Condition isDone = lock.newCondition();
@@ -41,26 +53,28 @@ final class DownloadWorker implements AutoCloseable {
 		Merger merger,
 		SerialDownloader downloader,
 		Path path
-	) {
+	) throws IOException {
 		this.synchronizer = Objects.requireNonNull(synchronizer);
 		this.queue = Objects.requireNonNull(queue);
 		this.merger = Objects.requireNonNull(merger);
 		this.downloader = Objects.requireNonNull(downloader);
-		this.path = Objects.requireNonNull(path);
 		this.compactThresholdBytes = calculateCompactThresholdBytes(queue);
+		this.channel = openFileChannel(Objects.requireNonNull(path));
+		this.destination = new Destination.OfFileChannel(channel, path);
 	}
 	
 	private static final long calculateCompactThresholdBytes(DownloadQueue queue) {
 		return Math.max(queue.averageSize(), COMPACT_MIN_SEGMENT_SIZE) * 16L;
 	}
 	
-	static int compactCount = 0;
-	static final Object compactSync = new Object();
+	private static final FileChannel openFileChannel(Path path) throws IOException {
+		return FileChannel.open(path, OPEN_OPTIONS);
+	}
 	
 	private final void compact(long size, long totalSize) throws IOException {
 		FileCompactor compactor;
 		if((compactor = this.compactor) == null) {
-			compactor = new FileCompactor(path);
+			compactor = new FileCompactor(channel, DownloadCommon.bufferSize(destination.path()));
 			this.compactor = compactor;
 		}
 		
@@ -96,7 +110,7 @@ final class DownloadWorker implements AutoCloseable {
 	
 	private final boolean doDownloadSegment(RemoteFileSegment segment) throws Exception {
 		downloadOffset = downloader.written(); // Remember for the merge request
-		return downloader.downloadSegment(segment, path);
+		return downloader.downloadSegment(segment, destination);
 	}
 	
 	private final void requestMerge(RemoteFileSegment segment) {
@@ -208,10 +222,15 @@ final class DownloadWorker implements AutoCloseable {
 	
 	@Override
 	public void close() throws Exception {
+		channel.close();
 		downloader.close();
 	}
 	
+	public FileChannel channel() {
+		return channel;
+	}
+	
 	public Path output() {
-		return path;
+		return destination.path();
 	}
 }

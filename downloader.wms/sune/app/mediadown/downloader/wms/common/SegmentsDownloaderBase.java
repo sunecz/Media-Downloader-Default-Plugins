@@ -1,9 +1,9 @@
 package sune.app.mediadown.downloader.wms.common;
 
-import java.nio.file.Path;
 import java.util.List;
 import java.util.Objects;
 
+import sune.app.mediadown.download.Destination;
 import sune.app.mediadown.download.DownloadConfiguration;
 import sune.app.mediadown.download.InternalDownloader;
 import sune.app.mediadown.event.Event;
@@ -36,7 +36,10 @@ public abstract class SegmentsDownloaderBase implements InternalSegmentsDownload
 	
 	protected abstract boolean doRetry(int attempt);
 	
-	protected boolean downloadSegment(RemoteFile segment, Path output) throws Exception {
+	protected boolean downloadSegment(
+		RemoteFile segment,
+		Destination destination
+	) throws Exception {
 		if(!state.check()) return false;
 		
 		final int maxRetryAttempts = state.maxRetryAttempts();
@@ -64,7 +67,7 @@ public abstract class SegmentsDownloaderBase implements InternalSegmentsDownload
 			try {
 				downloadedBytes = downloader.start(
 					request,
-					output,
+					destination,
 					configurationBuilder
 						.totalBytes(segment.size())
 						.rangeOutput(new Range<>(written, -1L))
@@ -136,12 +139,12 @@ public abstract class SegmentsDownloaderBase implements InternalSegmentsDownload
 	
 	protected boolean download(
 		List<? extends RemoteFile> segments,
-		Path output
+		Destination destination
 	) throws Exception {
 		written = 0L;
 		
 		for(RemoteFile segment : segments) {
-			if(!downloadSegment(segment, output)) {
+			if(!downloadSegment(segment, destination)) {
 				return false;
 			}
 		}
@@ -151,7 +154,7 @@ public abstract class SegmentsDownloaderBase implements InternalSegmentsDownload
 	
 	@Override
 	public boolean download(Segments segments) throws Exception {
-		return download(segments.segments(), segments.output());
+		return download(segments.segments(), segments.destination());
 	}
 	
 	@Override

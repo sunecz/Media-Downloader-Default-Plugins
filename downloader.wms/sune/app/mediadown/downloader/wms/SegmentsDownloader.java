@@ -11,6 +11,7 @@ import java.util.stream.Stream;
 
 import sune.app.mediadown.TaskStates;
 import sune.app.mediadown.conversion.ConversionMedia;
+import sune.app.mediadown.download.Destination;
 import sune.app.mediadown.download.Download;
 import sune.app.mediadown.download.DownloadConfiguration;
 import sune.app.mediadown.download.DownloadContext;
@@ -165,7 +166,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		Segments segments = new Segments(
 			media,
 			listSegments((SegmentedMedia) media),
-			output,
+			new Destination.OfPath(output),
 			MediaConstants.UNKNOWN_DURATION
 		);
 		
@@ -315,14 +316,17 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 			// If we do not have any duration information from the segments, try to obtain it
 			// from the downloaded files.
 			duration = VideoUtils.tryGetDuration(
-				segmentsList.stream().map(Segments::output).collect(Collectors.toList())
+				segmentsList.stream()
+					.map(Segments::destination)
+					.map(Destination::path)
+					.collect(Collectors.toList())
 			);
 		}
 		
 		final double finalDuration = duration;
 		ResolvedMedia output = new ResolvedMedia(media, dest, configuration);
 		List<ConversionMedia> inputs = segmentsList.stream()
-			.map((s) -> new ConversionMedia(s.media(), s.output(), finalDuration))
+			.map((s) -> new ConversionMedia(s.media(), s.destination().path(), finalDuration))
 			.collect(Collectors.toList());
 		
 		doConversion(inputs, output);
@@ -347,7 +351,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 			.collect(Collectors.toList());
 		Path output = temporaryFile(ctr);
 		double duration = mediaToSegmentsHolder(m).duration();
-		return new Segments(m, remoteFiles, output, duration);
+		return new Segments(m, remoteFiles, new Destination.OfPath(output), duration);
 	}
 	
 	@Override

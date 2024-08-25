@@ -250,29 +250,16 @@ final class Merger implements AutoCloseable {
 	
 	@Override
 	public void close() throws Exception {
-		for(DownloadWorkerState state : workerStates.values()) {
-			try {
-				state.close();
-			} catch(IOException ex) {
-				// Ignore
-			}
-		}
-		
 		outputChannel.close();
 	}
 	
-	private static final class DownloadWorkerState implements AutoCloseable {
+	private static final class DownloadWorkerState {
 		
 		private final DownloadWorker worker;
 		private final Map<Integer, Long> epochOffsets = new HashMap<>();
-		private FileChannel channel;
 		
 		public DownloadWorkerState(DownloadWorker worker) {
 			this.worker = Objects.requireNonNull(worker);
-		}
-		
-		private final FileChannel fileChannel() throws IOException {
-			return FileChannel.open(worker.output(), StandardOpenOption.READ);
 		}
 		
 		public void addOffset(int epoch, long offset) {
@@ -288,20 +275,7 @@ final class Merger implements AutoCloseable {
 		}
 		
 		public FileChannel channel() throws IOException {
-			FileChannel ch;
-			if((ch = channel) == null) {
-				channel = ch = fileChannel();
-			}
-			
-			return ch;
-		}
-		
-		@Override
-		public void close() throws IOException {
-			FileChannel ch;
-			if((ch = channel) != null) {
-				ch.close();
-			}
+			return worker.channel();
 		}
 	}
 }

@@ -3,28 +3,17 @@ package sune.app.mediadown.downloader.wms.parallel;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
-import java.nio.file.OpenOption;
-import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
 import java.util.Objects;
 
-import sune.app.mediadown.downloader.wms.common.Common;
-
 // package-private
-final class FileCompactor implements AutoCloseable {
-	
-	private static final OpenOption[] OPEN_OPTIONS = {
-		StandardOpenOption.READ,
-		StandardOpenOption.WRITE,
-	};
+final class FileCompactor {
 	
 	private final FileChannel channel;
 	private final ByteBuffer buf;
 	
-	public FileCompactor(Path path) throws IOException {
-		Objects.requireNonNull(path);
-		this.channel = FileChannel.open(path, OPEN_OPTIONS);
-		this.buf = Common.newDirectBuffer(path);
+	public FileCompactor(FileChannel channel, int bufferSize) throws IOException {
+		this.channel = Objects.requireNonNull(channel);
+		this.buf = ByteBuffer.allocateDirect(bufferSize);
 	}
 	
 	public void compact(long size, long totalSize) throws IOException {
@@ -48,13 +37,5 @@ final class FileCompactor implements AutoCloseable {
 			for(n = num; n > 0 && (v = channel.write(buf, wr)) >= 0; wr += v, n -= v);
 			buf.clear();
 		}
-		
-		// Make changes visible to other opened FileChannels
-		channel.force(false);
-	}
-	
-	@Override
-	public void close() throws IOException {
-		channel.close();
 	}
 }

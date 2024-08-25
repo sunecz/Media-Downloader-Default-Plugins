@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.function.Supplier;
 
+import sune.app.mediadown.download.Destination;
 import sune.app.mediadown.download.DownloadConfiguration;
 import sune.app.mediadown.download.InternalDownloader;
 import sune.app.mediadown.downloader.wms.common.DownloadRetry;
@@ -67,10 +68,10 @@ public final class ParallelSegmentsDownloader implements InternalSegmentsDownloa
 	
 	private final boolean download(
 		List<? extends RemoteFile> segments,
-		Path output
+		Destination destination
 	) throws Exception {
-		// TODO: Clean up
 		final int numOfWorkers = workers.length;
+		Path output = destination.path();
 		DownloadQueue queue = new DownloadQueue(segments);
 		Merger merger = new Merger(output);
 		Synchronizer synchronizer = new Synchronizer(numOfWorkers);
@@ -99,17 +100,10 @@ public final class ParallelSegmentsDownloader implements InternalSegmentsDownloa
 		
 		try {
 			synchronizer.await();
+			// Notify the merger that it should terminate after no more requests are available,
+			// otherwise we would wait here forever.
 			merger.terminate();
 			merger.await();
-			
-			for(DownloadWorker worker : workers) {
-				try {
-					NIO.deleteFile(worker.output());
-				} catch(IOException ex) {
-					// Ignore
-				}
-			}
-			
 			return true;
 		} finally {
 			for(DownloadWorker worker : workers) {
@@ -118,9 +112,19 @@ public final class ParallelSegmentsDownloader implements InternalSegmentsDownloa
 			
 			merger.stop();
 			
+			// Clean up temporary files
+			for(DownloadWorker worker : workers) {
+				try {
+					NIO.deleteFile(worker.output());
+				} catch(IOException ex) {
+					// Ignore
+				}
+			}
+			
 			// Clean up
 			Arrays.fill(workers, null);
 			Arrays.fill(retryEntries, null);
+			this.merger = null;
 			previousTracker = null;
 		}
 	}
@@ -201,7 +205,7 @@ public final class ParallelSegmentsDownloader implements InternalSegmentsDownloa
 	
 	@Override
 	public boolean download(Segments segments) throws Exception {
-		return download(segments.segments(), segments.output());
+		return download(segments.segments(), segments.destination());
 	}
 	
 	@Override
@@ -262,8 +266,11 @@ public final class ParallelSegmentsDownloader implements InternalSegmentsDownloa
 		}
 		
 		@Override
-		public boolean downloadSegment(RemoteFile segment, Path output) throws Exception {
-			return super.downloadSegment(segment, output); // Delegate
+		public boolean downloadSegment(
+			RemoteFile segment,
+			Destination destination
+		) throws Exception {
+			return super.downloadSegment(segment, destination); // Delegate
 		}
 		
 		@Override public void addWritten(long value) { written += value; }
