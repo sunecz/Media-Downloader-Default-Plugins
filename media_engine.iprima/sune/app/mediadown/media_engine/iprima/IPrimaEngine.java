@@ -11,12 +11,10 @@ import sune.app.mediadown.entity.Program;
 import sune.app.mediadown.media.Media;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper.ConcurrentLoop;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper.DefaultMediaObtainer;
-import sune.app.mediadown.media_engine.iprima.IPrimaHelper.DefaultMediaObtainerNewURL;
-import sune.app.mediadown.media_engine.iprima.IPrimaHelper.PlayIdMediaObtainer;
-import sune.app.mediadown.media_engine.iprima.IPrimaHelper.PrimaAPIProgramObtainer;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper.SnippetEpisodeObtainer;
+import sune.app.mediadown.media_engine.iprima.IPrimaHelper.SnippetProgramObtainer;
+import sune.app.mediadown.media_engine.iprima.IPrimaHelper.StaticEpisodeObtainer;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper.StaticProgramObtainer;
-import sune.app.mediadown.media_engine.iprima.IPrimaHelper.ThemedContentEpisodeObtainer;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper._Singleton;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
@@ -36,7 +34,6 @@ public final class IPrimaEngine implements MediaEngine {
 		PrimaPlus.getInstance(),
 		ZoomIPrima.getInstance(),
 		CNNIPrima.getInstance(),
-		PauzaIPrima.getInstance(),
 	};
 	
 	// Allow to create an instance when registering the engine
@@ -74,7 +71,9 @@ public final class IPrimaEngine implements MediaEngine {
 	}
 	
 	private final boolean isCompatibleSubdomain(String subdomain) {
-		return Stream.of(SUPPORTED_WEBS).anyMatch((w) -> w.isCompatibleSubdomain(subdomain));
+		return subdomain != null
+					&& Stream.of(SUPPORTED_WEBS)
+					         .anyMatch((w) -> w.isCompatibleSubdomain(subdomain));
 	}
 	
 	@Override
@@ -84,7 +83,7 @@ public final class IPrimaEngine implements MediaEngine {
 				
 				@Override
 				protected void iteration(IPrima web) throws Exception {
-					ListTask<Program> webTask = web.getPrograms(IPrimaEngine.this);
+					ListTask<Program> webTask = web.getPrograms();
 					webTask.forwardAdd(task);
 					webTask.startAndWait();
 				}
@@ -94,13 +93,13 @@ public final class IPrimaEngine implements MediaEngine {
 	
 	@Override
 	public ListTask<Episode> getEpisodes(Program program) throws Exception {
-		IPrima iprima = program.get("source");
+		IPrima iprima = sourceFromURL(program.uri());
 		
 		if(iprima == null) {
-			throw new IllegalStateException("Invalid program, no source found");
+			throw new IllegalStateException("Cannot obtain source from the URL");
 		}
 		
-		return iprima.getEpisodes(this, program);
+		return iprima.getEpisodes(program);
 	}
 	
 	@Override
@@ -121,9 +120,7 @@ public final class IPrimaEngine implements MediaEngine {
 	
 	@Override
 	public boolean isCompatibleURI(URI uri) {
-		String subdomain;
-		return (subdomain = subdomainOrNullIfIncompatible(uri)) != null
-					&& isCompatibleSubdomain(subdomain);
+		return isCompatibleSubdomain(subdomainOrNullIfIncompatible(uri));
 	}
 	
 	@Override
@@ -158,8 +155,8 @@ public final class IPrimaEngine implements MediaEngine {
 	
 	protected static interface IPrima {
 		
-		ListTask<Program> getPrograms(IPrimaEngine engine) throws Exception;
-		ListTask<Episode> getEpisodes(IPrimaEngine engine, Program program) throws Exception;
+		ListTask<Program> getPrograms() throws Exception;
+		ListTask<Episode> getEpisodes(Program program) throws Exception;
 		ListTask<Media> getMedia(IPrimaEngine engine, URI uri) throws Exception;
 		boolean isCompatibleSubdomain(String subdomain);
 	}
@@ -172,18 +169,18 @@ public final class IPrimaEngine implements MediaEngine {
 		public static final ZoomIPrima getInstance() { return _Singleton.getInstance(); }
 		
 		@Override
-		public ListTask<Program> getPrograms(IPrimaEngine engine) throws Exception {
-			return PrimaAPIProgramObtainer.getInstance().getPrograms(this, SUBDOMAIN);
+		public ListTask<Program> getPrograms() throws Exception {
+			return SnippetProgramObtainer.getPrograms(SUBDOMAIN);
 		}
 		
 		@Override
-		public ListTask<Episode> getEpisodes(IPrimaEngine engine, Program program) throws Exception {
-			return SnippetEpisodeObtainer.getInstance().getEpisodes(program);
+		public ListTask<Episode> getEpisodes(Program program) throws Exception {
+			return StaticEpisodeObtainer.getEpisodes(program);
 		}
 		
 		@Override
 		public ListTask<Media> getMedia(IPrimaEngine engine, URI uri) throws Exception {
-			return DefaultMediaObtainerNewURL.getInstance().getMedia(uri, engine);
+			return DefaultMediaObtainer.getMedia(uri, engine);
 		}
 		
 		@Override
@@ -191,7 +188,7 @@ public final class IPrimaEngine implements MediaEngine {
 			return subdomain.equalsIgnoreCase(SUBDOMAIN);
 		}
 	}
-
+	
 	private static final class CNNIPrima implements IPrima {
 		
 		private static final String SUBDOMAIN = "cnn";
@@ -201,46 +198,18 @@ public final class IPrimaEngine implements MediaEngine {
 		public static final CNNIPrima getInstance() { return _Singleton.getInstance(); }
 		
 		@Override
-		public ListTask<Program> getPrograms(IPrimaEngine engine) throws Exception {
-			return StaticProgramObtainer.getInstance().getPrograms(this, URL_PROGRAMS);
+		public ListTask<Program> getPrograms() throws Exception {
+			return StaticProgramObtainer.getPrograms(URL_PROGRAMS);
 		}
 		
 		@Override
-		public ListTask<Episode> getEpisodes(IPrimaEngine engine, Program program) throws Exception {
-			return SnippetEpisodeObtainer.getInstance().getEpisodes(program);
-		}
-		
-		@Override
-		public ListTask<Media> getMedia(IPrimaEngine engine, URI uri) throws Exception {
-			return PlayIdMediaObtainer.getInstance().getMedia(uri, engine);
-		}
-		
-		@Override
-		public boolean isCompatibleSubdomain(String subdomain) {
-			return subdomain.equalsIgnoreCase(SUBDOMAIN);
-		}
-	}
-	
-	private static final class PauzaIPrima implements IPrima {
-		
-		private static final String SUBDOMAIN = "pauza";
-		
-		private PauzaIPrima() {}
-		public static final PauzaIPrima getInstance() { return _Singleton.getInstance(); }
-		
-		@Override
-		public ListTask<Program> getPrograms(IPrimaEngine engine) throws Exception {
-			return PrimaAPIProgramObtainer.getInstance().getPrograms(this, SUBDOMAIN);
-		}
-		
-		@Override
-		public ListTask<Episode> getEpisodes(IPrimaEngine engine, Program program) throws Exception {
-			return ThemedContentEpisodeObtainer.getInstance().getEpisodes(program, SUBDOMAIN);
+		public ListTask<Episode> getEpisodes(Program program) throws Exception {
+			return SnippetEpisodeObtainer.getEpisodes(program);
 		}
 		
 		@Override
 		public ListTask<Media> getMedia(IPrimaEngine engine, URI uri) throws Exception {
-			return DefaultMediaObtainer.getInstance().getMedia(uri, engine);
+			return DefaultMediaObtainer.getMedia(uri, engine);
 		}
 		
 		@Override

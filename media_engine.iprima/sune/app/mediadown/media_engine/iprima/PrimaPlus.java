@@ -13,7 +13,7 @@ import java.util.Map.Entry;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.function.BiFunction;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -61,18 +61,18 @@ final class PrimaPlus implements IPrima {
 	public static final PrimaPlus getInstance() { return _Singleton.getInstance(); }
 	
 	@Override
-	public ListTask<Program> getPrograms(IPrimaEngine engine) throws Exception {
-		return API.getPrograms(this, engine);
+	public ListTask<Program> getPrograms() throws Exception {
+		return API.getPrograms();
 	}
 	
 	@Override
-	public ListTask<Episode> getEpisodes(IPrimaEngine engine, Program program) throws Exception {
-		return API.getEpisodes(this, engine, program);
+	public ListTask<Episode> getEpisodes(Program program) throws Exception {
+		return API.getEpisodes(program);
 	}
 	
 	@Override
 	public ListTask<Media> getMedia(IPrimaEngine engine, URI uri) throws Exception {
-		return API.getMedia(this, engine, uri);
+		return API.getMedia(engine, uri);
 	}
 	
 	@Override
@@ -140,10 +140,10 @@ final class PrimaPlus implements IPrima {
 			return result.getCollection("data");
 		}
 		
-		private static final <T> int parseItems(ListTask<T> task, IPrima iprima, JSONCollection items,
-				Set<T> existing, BiFunction<IPrima, JSONCollection, T> transformer) throws Exception {
+		private static final <T> int parseItems(ListTask<T> task, JSONCollection items,
+				Set<T> existing, Function<JSONCollection, T> transformer) throws Exception {
 			for(JSONCollection item : items.collectionsIterable()) {
-				T value = transformer.apply(iprima, item);
+				T value = transformer.apply(item);
 				
 				if(existing.add(value) && !task.add(value)) {
 					return EXIT_CALLBACK; // Do not continue
@@ -153,7 +153,7 @@ final class PrimaPlus implements IPrima {
 			return EXIT_SUCCESS;
 		}
 		
-		private static final Program stripItemToProgram(IPrima iprima, JSONCollection item) {
+		private static final Program stripItemToProgram(JSONCollection item) {
 			String id = item.getString("id");
 			String title = item.getString("title");
 			String type = item.getString("type");
@@ -170,7 +170,7 @@ final class PrimaPlus implements IPrima {
 				}
 			}
 			
-			return new Program(Net.uri(uri), title, "source", iprima, "id", id, "type", type);
+			return new Program(Net.uri(uri), title, "id", id, "type", type);
 		}
 		
 		private static final List<Season> listSeasons(String programId) throws Exception {
@@ -279,7 +279,7 @@ final class PrimaPlus implements IPrima {
 			Dialog.showContentError(tr.getSingle("title"), tr.getSingle("text"), message);
 		}
 		
-		public static final ListTask<Program> getPrograms(IPrima iprima, IPrimaEngine engine) throws Exception {
+		public static final ListTask<Program> getPrograms() throws Exception {
 			return ListTask.of(PrimaCommon.handleErrors((task) -> {
 				// Note: Obtaining the list of programs is not stable using this method.
 				//       Since there is no currently known other method how to obtain
@@ -313,7 +313,7 @@ final class PrimaPlus implements IPrima {
 				
 				try(
 					ThreadedSpawnableTaskQueue<NextItemsTaskArgs, Integer> queue = new ProgramTasks(
-						numMaxThreads, task, iprima, existing, perPage
+						numMaxThreads, task, existing, perPage
 					);
 					SimpleExecutor<Void> executor = SimpleExecutor.ofFixed(numMaxFixed);
 				) {
@@ -337,7 +337,7 @@ final class PrimaPlus implements IPrima {
 								boolean hasNextItems = strip.getBoolean("isNextItems");
 								JSONCollection items = strip.getCollection("items");
 								
-								parseItems(task, iprima, items, existing, API::stripItemToProgram);
+								parseItems(task, items, existing, API::stripItemToProgram);
 								
 								if(hasNextItems) {
 									queue.addTask(new NextItemsTaskArgs(stripId, recommId, perPage));
@@ -349,7 +349,7 @@ final class PrimaPlus implements IPrima {
 			}));
 		}
 		
-		public static final ListTask<Episode> getEpisodes(IPrima iprima, IPrimaEngine engine, Program program)
+		public static final ListTask<Episode> getEpisodes(Program program)
 				throws Exception {
 			return ListTask.of(PrimaCommon.handleErrors((task) -> {
 				// Handle movies separately since they do not have any episodes
@@ -384,7 +384,7 @@ final class PrimaPlus implements IPrima {
 			}));
 		}
 		
-		public static final ListTask<Media> getMedia(IPrima iprima, IPrimaEngine engine, URI uri) throws Exception {
+		public static final ListTask<Media> getMedia(IPrimaEngine engine, URI uri) throws Exception {
 			return ListTask.of(PrimaCommon.handleErrors((task) -> {
 				// Always log in first to ensure the data are correct
 				HttpHeaders requestHeaders = logInHeaders();
@@ -595,15 +595,13 @@ final class PrimaPlus implements IPrima {
 		private static final class ProgramTasks extends ThreadedSpawnableTaskQueue<NextItemsTaskArgs, Integer> {
 			
 			private final ListTask<Program> task;
-			private final IPrima iprima;
 			private final Set<Program> existing;
 			private final int perPage;
 			
-			public ProgramTasks(int maxThreads, ListTask<Program> task, IPrima iprima, Set<Program> existing,
+			public ProgramTasks(int maxThreads, ListTask<Program> task, Set<Program> existing,
 					int perPage) {
 				super(maxThreads);
 				this.task = task;
-				this.iprima = iprima;
 				this.existing = existing;
 				this.perPage = perPage;
 			}
@@ -614,7 +612,7 @@ final class PrimaPlus implements IPrima {
 				JSONCollection items = strip.getCollection("items");
 				
 				int result;
-				if((result = parseItems(task, iprima, items, existing, API::stripItemToProgram)) != EXIT_SUCCESS) {
+				if((result = parseItems(task, items, existing, API::stripItemToProgram)) != EXIT_SUCCESS) {
 					return result;
 				}
 				

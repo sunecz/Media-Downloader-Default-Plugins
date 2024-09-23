@@ -7,29 +7,28 @@ import java.lang.StackWalker.Option;
 import java.lang.StackWalker.StackFrame;
 import java.lang.reflect.Constructor;
 import java.net.URI;
-import java.net.URL;
 import java.net.http.HttpHeaders;
 import java.nio.channels.ClosedByInterruptException;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoField;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
+import java.util.stream.IntStream;
 import java.util.stream.Stream;
 import java.util.zip.GZIPInputStream;
 
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
-import org.jsoup.select.Elements;
 
 import sune.app.mediadown.MediaDownloader;
 import sune.app.mediadown.concurrent.CounterLock;
@@ -43,12 +42,12 @@ import sune.app.mediadown.media.MediaLanguage;
 import sune.app.mediadown.media.MediaMetadata;
 import sune.app.mediadown.media.MediaSource;
 import sune.app.mediadown.media.MediaUtils;
-import sune.app.mediadown.media_engine.iprima.IPrimaEngine.IPrima;
 import sune.app.mediadown.net.HTML;
 import sune.app.mediadown.net.Net;
 import sune.app.mediadown.net.Web;
 import sune.app.mediadown.net.Web.Request;
 import sune.app.mediadown.net.Web.Response;
+import sune.app.mediadown.net.Web.Response.OfStream;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginConfiguration;
 import sune.app.mediadown.task.ListTask;
@@ -56,17 +55,15 @@ import sune.app.mediadown.util.CheckedRunnable;
 import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.JSON.JSONCollection;
 import sune.app.mediadown.util.JSON.JSONType;
-import sune.app.mediadown.util.JavaScript;
-import sune.app.mediadown.util.Opt;
 import sune.app.mediadown.util.Reflection;
 import sune.app.mediadown.util.Regex;
+import sune.app.mediadown.util.Regex.ReusableMatcher;
 import sune.app.mediadown.util.Utils;
 
 final class IPrimaHelper {
 	
 	private static PluginBase PLUGIN;
 	
-	private static final Regex REGEX_EPISODE_NAME = Regex.of("^\\d+\\.[^\\-]+-\\s+(.*)$");
 	private static final HttpHeaders HEADERS_GZIP = Web.Headers.ofSingle("Accept-Encoding", "gzip");
 	
 	private static final HttpHeaders ensureAcceptGzip(HttpHeaders headers) {
@@ -82,24 +79,20 @@ final class IPrimaHelper {
 		return Web.Headers.ofMap(Utils.mergeNew(headers.map(), HEADERS_GZIP.map()));
 	}
 	
-	private static final String request(URI uri, HttpHeaders headers) throws Exception {
-		try(Response.OfStream response = Web.requestStream(Request.of(uri).headers(ensureAcceptGzip(headers)).GET())) {
-			InputStream stream = response.stream();
-			boolean isGzip = response.headers()
-				.firstValue("Content-Encoding")
-				.filter("gzip"::equalsIgnoreCase)
-				.isPresent();
-			
-			if(isGzip) {
-				stream = new GZIPInputStream(stream);
-			}
-			
-			return Utils.streamToString(stream);
-		}
+	private static final StreamResponse requestResponse(URI uri, HttpHeaders headers) throws Exception {
+		return new StreamResponse(Web.requestStream(
+			Request.of(uri).headers(ensureAcceptGzip(headers)).GET()
+		));
 	}
 	
-	private static final String request(URI uri) throws Exception {
-		return request(uri, Web.Headers.empty());
+	private static final InputStream requestStream(URI uri, HttpHeaders headers) throws Exception {
+		return requestResponse(uri, headers).stream();
+	}
+	
+	private static final String request(URI uri, HttpHeaders headers) throws Exception {
+		try(InputStream stream = requestStream(uri, headers)) {
+			return Utils.streamToString(stream);
+		}
 	}
 	
 	private static final HttpHeaders authenticationRequestHeaders() {
@@ -140,184 +133,358 @@ final class IPrimaHelper {
 		return "plugin/" + PLUGIN.getContext().getPlugin().instance().name().replace('.', '/');
 	}
 	
-	private static abstract class DefaultMediaObtainerBase {
+	private static final class StreamResponse implements AutoCloseable {
 		
-		protected DefaultMediaObtainerBase() {
+		private final Response.OfStream response;
+		
+		public StreamResponse(OfStream response) {
+			this.response = Objects.requireNonNull(response);
 		}
 		
-		protected abstract String playURL();
+		public long size() {
+			return Web.size(response.headers());
+		}
 		
-		public ListTask<Media> getMedia(URI uri, MediaEngine engine) throws Exception {
-			return ListTask.of(PrimaCommon.handleErrors((task) -> {
-				Document document = HTML.from(uri);
-				String productId = null;
+		public InputStream stream() throws Exception {
+			InputStream stream = response.stream();
+			boolean isGzip = response.headers()
+				.firstValue("Content-Encoding")
+				.filter("gzip"::equalsIgnoreCase)
+				.isPresent();
+			
+			if(isGzip) {
+				stream = new GZIPInputStream(stream);
+			}
+			
+			return stream;
+		}
+		
+		public String content() throws Exception {
+			return Utils.streamToString(stream());
+		}
+		
+		@Override
+		public void close() throws Exception {
+			response.close();
+		}
+	}
+	
+	private static final class PlayIdExtractor {
+		
+		private static final Regex REGEX_PLAYER_INIT = Regex.of("function initPlayer\\d+");
+		private static final Regex REGEX_PLAYER_OPTIONS = Regex.of("(?ms)playerOptions\\s*=\\s*(\\{.*?\\});");
+		private static final Regex REGEX_PLAYER_TYPE = Regex.of("playerType:\\s*\"([^\"]+)\"");
+		private static final Regex REGEX_PLAY_IDS = Regex.of("videos\\s*=\\s*'([^']+)';");
+		
+		private PlayIdExtractor() {
+		}
+		
+		private static final boolean isMainPlayer(String content) {
+			Matcher matcher;
+			return (matcher = REGEX_PLAYER_OPTIONS.matcher(content)).find()
+						&& (matcher = REGEX_PLAYER_TYPE.matcher(matcher.group(1))).find()
+						&& "player".equals(matcher.group(1));
+		}
+		
+		private static final List<String> extractPlayIds(String content) {
+			Matcher matcher;
+			return (matcher = REGEX_PLAY_IDS.matcher(content)).find()
+						? List.of(matcher.group(1).split(","))
+						: null;
+		}
+		
+		public static final List<String> extract(Document document) throws Exception {
+			ReusableMatcher matcher = REGEX_PLAYER_INIT.reusableMatcher();
+			
+			for(Element elScript : document.select("script:not([src])")) {
+				String content = elScript.html();
 				
-				// (1) Extract product ID from iframe's URL
-				Element elIframe;
-				if((elIframe = document.selectFirst("iframe.video-embed")) != null) {
-					productId = Net.queryDestruct(elIframe.attr("src")).valueOf("id", null);
+				if(!matcher.reset(content).find()) {
+					continue;
 				}
 				
-				// (2) OR Extract product ID from JavaScript player configuration
-				if(productId == null) {
-					for(Element elScript : document.select("script[type='text/javascript']")) {
-						String scriptContent = elScript.html();
-						if(scriptContent.contains("productId")) {
-							productId = Utils.unquote(JavaScript.varcontent(scriptContent, "productId"));
-							break;
-						}
-					}
+				content = Utils.bracketSubstring(
+					content, '{', '}', false, matcher.start(0), content.length()
+				);
+				
+				if(!isMainPlayer(content)) {
+					continue;
 				}
 				
-				// (3) OR Extract product ID from JavaScript player configuration (videos variable)
-				if(productId == null) {
-					for(Element elScript : document.select("script:not([type='text/javascript'])")) {
-						String scriptContent = elScript.html();
-						if(scriptContent.contains("videos")) {
-							productId = Utils.unquote(JavaScript.varcontent(scriptContent, "videos"));
-							break;
-						}
-					}
+				List<String> playIds;
+				if((playIds = extractPlayIds(content)) != null) {
+					return playIds;
+				}
+			}
+			
+			return List.of(); // No play ID found
+		}
+	}
+	
+	private static final class LinkedData {
+		
+		private static final Regex REGEX_EPISODE_NUMBER = Regex.of("\\s*\\((\\d+)\\)$");
+		
+		private LinkedData() {
+		}
+		
+		private static final String videoMediaTitle(JSONCollection data) {
+			return MediaUtils.mediaTitle(data.getString("name", "Video"), 0, 0, null);
+		}
+		
+		private static final String episodeMediaTitle(JSONCollection data) {
+			String programName = data.getString("partOfSeries.name", "");
+			String episodeName = data.getString("name", "");
+			String seasonName = data.getString("partOfSeason.name", "");
+			int seasonNumber = data.getInt("partOfSeason.seasonNumber", 0);
+			int episodeNumber = data.getInt("episodeNumber", 0);
+			
+			// TVSeries not present, use the TVEpisode name
+			if(programName.isEmpty()) {
+				programName = episodeName;
+				episodeName = null;
+			}
+			
+			// Unknown episode number, try to extract it from the program's name
+			if(episodeNumber == 0) {
+				Matcher matcher = REGEX_EPISODE_NUMBER.matcher(programName);
+				
+				if(matcher.find()) {
+					episodeNumber = Integer.parseInt(matcher.group(1));
 				}
 				
-				if(productId == null) {
-					return; // Do not continue
+				// Remove the episode number from the program's name
+				programName = REGEX_EPISODE_NUMBER.replaceAll(programName, "");
+			}
+			
+			// Unknown season number, try to extract if from the season's name
+			if(seasonNumber == 0) {
+				String[] parts = seasonName.split(" ");
+				
+				// The season number in the season name is in roman numerals,
+				// convert it to an integer, starting from the end.
+				seasonNumber = IntStream.range(0, parts.length)
+					.mapToObj((i) -> parts[parts.length - i - 1])
+					.map(Utils::romanToInteger)
+					.findFirst().orElse(-1);
+			}
+			
+			// Program's name cannot be empty, replace it with the episode number, if present
+			if(programName.isEmpty() && episodeName != null) {
+				programName = episodeName;
+				episodeName = null;
+			}
+			
+			// Remove program's name from the episode's name, if present
+			if(episodeName != null) {
+				String normProgramName = Utils.normalize(programName);
+				String normEpisodeName = Utils.normalize(episodeName);
+				
+				Regex regex = Regex.of("(?i)" + Regex.quote(normProgramName));
+				Matcher matcher = regex.matcher(normEpisodeName);
+				
+				if(matcher.find()) {
+					// Remove the program's name by its position in the normalized string from
+					// the original string. Should work fine for accented characters, since they
+					// are each a single glyph, thus occupying a single position.
+					episodeName = Utils.OfString.delete(
+						episodeName, matcher.start(0), matcher.end(0)
+					).strip();
 				}
+			}
+			
+			return MediaUtils.mediaTitle(programName, seasonNumber, episodeNumber, episodeName);
+		}
+		
+		private static final JSONCollection findLinkedData(Document document, Set<String> types) {
+			for(Element elScript : document.select("script[type='application/ld+json']")) {
+				JSONCollection content = JSON.read(elScript.html());
 				
-				URL configURL = Net.url(Utils.format(playURL(), "product_id", productId));
-				
-				HttpHeaders requestHeaders = authenticationRequestHeaders();
-				String content = request(Net.uri(configURL), requestHeaders);
-				if(content == null || content.isEmpty()) {
-					return; // Do not continue
+				if(types.contains(content.getString("@type"))) {
+					return content;
 				}
-				
-				JSONCollection data = JSON.read(content);
-				// Try to obtain the full title of the media
-				String title = "";
-				Element elMediaInfo = document.selectFirst("script[type='application/ld+json']");
-				
-				if(elMediaInfo != null) {
-					JSONCollection mediaInfo = JSON.read(elMediaInfo.html());
-					String programName = mediaInfo.getString("partOfSeries.name", "");
-					String seasonName = mediaInfo.getString("partOfSeason.name", "");
-					String rawEpisode = mediaInfo.getString("episodeNumber", "0");
-					String numEpisode = String.format("%02d", Integer.valueOf(rawEpisode));
-					
-					// If a video is not part of any series, there is only a name of the video
-					if(programName.isEmpty()) {
-						programName = mediaInfo.getString("name", "");
-						String regexNumEpisode = "\\s*\\((\\d+)\\)$";
-						
-						// Extract the episode number, if it exists in the name
-						if(rawEpisode.equals("0")) {
-							Matcher matcher = Regex.of(regexNumEpisode).matcher(programName);
-							
-							if(matcher.find()) {
-								numEpisode = String.format("%02d", Integer.valueOf(matcher.group(1)));
-							}
-						}
-						
-						// Remove the episode number, if it exists in the name
-						programName = programName.replaceAll(regexNumEpisode, "");
-					}
-					
-					// The season number is probably in roman numerals, we have to convert it to an integer
-					String seasonRoman = Opt.of(seasonName.split(" "))
-		                    .ifTrue((a) -> a.length > 1).map((a) -> a[1])
-		                    .orElse("I");
-					int intSeason = Utils.romanToInteger(seasonRoman);
-					String numSeason = "";
-					boolean splitSeasonAndEpisode = false;
-					
-					// The season can also be a string, in that case we have to return different title
-					if(intSeason < 0) {
-						numSeason = Utils.validateFileName(seasonName)
-								.replace("Sezóna", "")
-								.replaceAll("([\\p{L}0-9]+)\\s+", "$1")
-								.replaceAll("[^[\\p{L}0-9]+]", "_")
-								.replaceAll("(^_+|_+$)", "")
-								.replaceAll("_([^_]+)(_|$)", "($1)")
-								.replaceAll("\\s+", " ")
-								.trim();
-						
-						// Check whether the last character is an alpha-numeric one
-						if(!numSeason.isEmpty()
-								&& numSeason.substring(numSeason.length() - 1).matches("\\p{L}$")) {
-							// If so, the appended 'x' would cause a problem, so we have to split the season
-							// number and the episode number.
-							splitSeasonAndEpisode = true;
-						}
-					} else {
-						// Season is a valid roman integer and was successfully converted
-						numSeason = String.format("%02d", intSeason);
-					}
-					
-					// The episode name is not present in the mediaInfo, so we have to get it from the document
-					final String find = "videoData = {";
-					String fullName = "";
-					
-					for(Element script : document.select("script[type='text/javascript']")) {
-						String con = script.html();
-						int index = con.indexOf(find);
-						
-						if(index > 0) {
-							con = Utils.bracketSubstring(con, '{', '}', false, index + find.length() - 1, con.length());
-							JSONCollection json = JavaScript.readObject(con);
-							fullName = json.getString("title", "");
-							
-							if(!fullName.isEmpty()) {
-								break;
-							}
-						}
-					}
-					
-					// Finally, extract only the episode name from the full name
-					String episodeName = "";
-					Matcher matcher = REGEX_EPISODE_NAME.matcher(fullName);
-					
-					if(matcher.matches()) {
-						episodeName = matcher.group(1);
-						// The episode name can be in the format "[program_name] - [season] ([episode])",
-						// which is not desirable.
-						String text = programName + " " + seasonRoman + " (" + rawEpisode + ")";
-						
-						if(episodeName.equalsIgnoreCase(text)) {
-							episodeName = "";
-						}
-					}
-					
-					title = MediaUtils.mediaTitle(programName, numSeason, numEpisode, episodeName, splitSeasonAndEpisode);
-				}
-				
-				// The outer collection may be an array, we have to flatten it first, if it is
-				JSONCollection streamInfos;
-				if(data.type() == JSONType.ARRAY) {
-					streamInfos = JSONCollection.emptyArray();
-					Utils.stream(data.collectionsIterator())
+			}
+			
+			return JSONCollection.empty();
+		}
+		
+		public static final String mediaTitle(Document document) {
+			JSONCollection ld = findLinkedData(
+				document,
+				Set.of("TVEpisode", "VideoObject")
+			);
+			
+			switch(ld.getString("@type", "VideoObject")) {
+				case "TVEpisode": return episodeMediaTitle(ld);
+				case "VideoObject": return videoMediaTitle(ld);
+				default: return null;
+			}
+		}
+	}
+	
+	static final class DefaultMediaObtainer {
+		
+		private DefaultMediaObtainer() {
+		}
+		
+		private static final URI playUri(String playId) {
+			return Net.uri(Utils.format(
+				"https://api.play-backend.iprima.cz/api/v1/products/play/ids-%{play_id}s",
+				"play_id", playId
+			));
+		}
+		
+		private static final Iterable<JSONCollection> getStreamInfos(
+			String playId
+		) throws Exception {
+			HttpHeaders requestHeaders = authenticationRequestHeaders();
+			String content = request(playUri(playId), requestHeaders);
+			
+			if(content == null || content.isEmpty()) {
+				return List.of(); // Do not continue
+			}
+			
+			JSONCollection data = JSON.read(content);
+			Iterable<JSONCollection> streamInfos;
+			
+			// The outer collection may be an array, if so, we have to flatten it first
+			if(data.type() == JSONType.ARRAY) {
+				streamInfos = Utils.iterable(
+					Utils.stream(data.collectionsIterable())
 						.flatMap(
 							(c) -> c.hasCollection("streamInfos")
-										? Utils.stream(c.getCollection("streamInfos").collectionsIterator())
+										? Utils.stream(
+												c.getCollection("streamInfos")
+												 .collectionsIterable()
+										)
 										: Stream.empty()
 						)
-						.forEach(streamInfos::add);
-				} else {
-					streamInfos = data.getCollection("streamInfos");
-				}
+						.iterator()
+				);
+			} else {
+				streamInfos = Utils.iterable(
+					Utils.stream(data.getCollection("streamInfos").collectionsIterable())
+						.iterator()
+				);
+			}
+			
+			return streamInfos;
+		}
+		
+		public static ListTask<Media> getMedia(URI uri, MediaEngine engine) throws Exception {
+			return ListTask.of(PrimaCommon.handleErrors((task) -> {
+				Document document = HTML.from(uri);
 				
+				String title = LinkedData.mediaTitle(document);
 				URI sourceURI = uri;
 				MediaSource source = MediaSource.of(engine);
 				
-				for(JSONCollection streamInfo : streamInfos.collectionsIterable()) {
-					String src = streamInfo.getString("url");
-					MediaLanguage language = MediaLanguage.ofCode(streamInfo.getString("lang.key"));
+				for(String playId : PlayIdExtractor.extract(document)) {
+					for(JSONCollection info : getStreamInfos(playId)) {
+						URI src = Net.uri(info.getString("url"));
+						MediaLanguage language = MediaLanguage.ofCode(info.getString("lang.key"));
+						
+						List<Media> media = MediaUtils.createMedia(
+							source, src, sourceURI, title, language, MediaMetadata.empty()
+						);
+						
+						for(Media m : media) {
+							if(!task.add(m)) {
+								return; // Do not continue
+							}
+						}
+					}
+				}
+			}));
+		}
+	}
+	
+	static final class StaticProgramObtainer {
+		
+		private static final String SELECTOR_PROGRAMS
+			= ".swiper-primary-programmes .molecule-programme-title > a,"
+					+ ".programmes-list .molecule-programme-title > a";
+		
+		private StaticProgramObtainer() {
+		}
+		
+		public static ListTask<Program> getPrograms(String urlPrograms) throws Exception {
+			return ListTask.of(PrimaCommon.handleErrors((task) -> {
+				Document document = HTML.from(Net.uri(urlPrograms));
+				
+				for(Element elItem : document.select(SELECTOR_PROGRAMS)) {
+					URI uri = Net.uri(elItem.absUrl("href"));
+					String title = elItem.text().strip();
+					Program program = new Program(uri, title);
 					
-					List<Media> media = MediaUtils.createMedia(
-						source, Net.uri(src), sourceURI, title, language, MediaMetadata.empty()
-					);
+					if(!task.add(program)) {
+						return; // Do not continue
+					}
+				}
+			}));
+		}
+	}
+	
+	static final class SnippetProgramObtainer {
+		
+		private static final String URI_TEMPLATE = "https://%{subdomain}s.iprima.cz"
+			+ "/snippet/programme/%{limit}d/%{offset}d/programme";
+		
+		private SnippetProgramObtainer() {
+		}
+		
+		private static final URI pageUri(String uriTemplate, int offset, int limit) {
+			return Net.uri(Utils.format(uriTemplate, "offset", offset, "limit", limit));
+		}
+		
+		private static final boolean isActiveItem(Element elItem) {
+			Element elImage;
+			return (elImage = elItem.selectFirst("img[srcset]")) != null
+						&& Stream.of(Utils.OfString.split(elImage.attr("srcset"), ","))
+								.anyMatch((i) -> !i.contains("fallback-image.jpg"));
+		}
+		
+		private static final boolean parseProgramList(
+			ListTask<Program> task,
+			Document document
+		) throws Exception {
+			for(Element elItem : document.select("article")) {
+				if(!isActiveItem(elItem)) {
+					continue;
+				}
+				
+				Element elLink = elItem.selectFirst(".card-small-heading a");
+				URI uri = Net.uri(elLink.absUrl("href"));
+				String title = elLink.text().strip();
+				Program program = new Program(uri, title);
+				
+				if(!task.add(program)) {
+					return false; // Do not continue
+				}
+			}
+			
+			return true;
+		}
+		
+		public static final ListTask<Program> getPrograms(String subdomain) {
+			return ListTask.of(PrimaCommon.handleErrors((task) -> {
+				String uriTemplate = Utils.format(URI_TEMPLATE, "subdomain", subdomain);
+				final int limit = 100;
+				
+				for(int offset = 0;; offset += limit) {
+					URI pageUri = pageUri(uriTemplate, offset, limit);
 					
-					for(Media s : media) {
-						if(!task.add(s)) {
+					try(StreamResponse response = requestResponse(pageUri, HEADERS_GZIP)) {
+						String content;
+						
+						if(response.size() == 0L
+								|| (content = response.content()).isBlank()) {
+							break;
+						}
+						
+						Document document = HTML.parse(content, pageUri);
+						
+						if(!parseProgramList(task, document)) {
 							return; // Do not continue
 						}
 					}
@@ -326,178 +493,25 @@ final class IPrimaHelper {
 		}
 	}
 	
-	static final class PrimaAPIProgramObtainer {
+	static final class StaticEpisodeObtainer {
 		
-		// URLs
-		private static final String URL_API = "https://prima.iprima.cz/iprima-api/ListWithFilter/%{type}s/Content"
-			+ "?filter=all"
-			+ "&channel_restriction=%{subdomain}s";
+		private static final String SELECTOR_EPISODES = "#episodes-video-holder > article";
 		
-		// Constants
-		private static final String TYPE_MOVIE = "Movies";
-		private static final String TYPE_SHOW = "Series";
-		private static final String GRAPHQL_TYPE_MOVIE = "VideoNode";
-		private static final String GRAPHQL_TYPE_SHOW = "ProgramNode";
-		
-		// Other
-		private static PrimaAPIProgramObtainer INSTANCE;
-		
-		private PrimaAPIProgramObtainer() {
+		private StaticEpisodeObtainer() {
 		}
 		
-		public static final PrimaAPIProgramObtainer getInstance() {
-			return INSTANCE == null ? (INSTANCE = new PrimaAPIProgramObtainer()) : INSTANCE;
-		}
-		
-		private static final void getProgramsOfType(ListTask<Program> task, IPrima iprima, String subdomain,
-				String type, String graphQLType) throws Exception {
-			URI apiUri = Net.uri(Utils.format(URL_API, "subdomain", subdomain, "type", type));
-			String response = request(apiUri);
-			
-			if(response == null) {
-				return; // Do not continue
-			}
-			
-			JSONCollection json = JSON.read(response);
-			String content = json.getString("content");
-			Document document = HTML.parse(content);
-			Elements programs = document.select(".component--scope--cinematography > a");
-			
-			for(Element elProgram : programs) {
-				// Ignore non-free programs
-				if(elProgram.selectFirst(".component--scope--cinematography--picture--bottom--price") != null) {
-					continue;
-				}
-				
-				URI url = Net.uri(Net.uriFix(elProgram.attr("href")));
-				String title = elProgram.attr("title");
-				JSONCollection data = JSON.read(elProgram.attr("data-item-json"));
-				String id = String.valueOf(data.getInt("id"));
-				Program program = new Program(url, title, "source", iprima, "id", id, "type", graphQLType);
-				
-				if(!task.add(program)) {
-					return; // Do not continue
-				}
-			}
-		}
-		
-		public ListTask<Program> getPrograms(IPrima iprima, String subdomain) throws Exception {
+		public static final ListTask<Episode> getEpisodes(Program program) {
 			return ListTask.of(PrimaCommon.handleErrors((task) -> {
-				getProgramsOfType(task, iprima, subdomain, TYPE_SHOW, GRAPHQL_TYPE_SHOW);
-				getProgramsOfType(task, iprima, subdomain, TYPE_MOVIE, GRAPHQL_TYPE_MOVIE);
-			}));
-		}
-	}
-	
-	static final class StaticProgramObtainer {
-		
-		// Selectors
-		private static final String SELECTOR_PROGRAM = ".programmes-list .w-full h2 > a";
-		
-		// Other
-		private static StaticProgramObtainer INSTANCE;
-		
-		private StaticProgramObtainer() {
-		}
-		
-		public static final StaticProgramObtainer getInstance() {
-			return INSTANCE == null ? (INSTANCE = new StaticProgramObtainer()) : INSTANCE;
-		}
-		
-		public ListTask<Program> getPrograms(IPrima iprima, String urlPrograms) throws Exception {
-			return ListTask.of(PrimaCommon.handleErrors((task) -> {
-				URI uriPrograms = Net.uri(urlPrograms);
-				String response = request(uriPrograms);
-				Document document = HTML.parse(response, uriPrograms);
+				Document document = HTML.from(program.uri());
 				
-				for(Element elProgram : document.select(SELECTOR_PROGRAM)) {
-					String url = elProgram.absUrl("href");
-					String title = elProgram.text();
-					Program program = new Program(Net.uri(url), title, "source", iprima, "type", "ProgramNode");
-					
-					if(!task.add(program)) {
-						break; // Do not continue
-					}
-				}
-			}));
-		}
-	}
-	
-	static final class ThemedContentEpisodeObtainer {
-		
-		// General
-		private static final String URL_API_IPRIMA
-			= "https://%{subdomain}s.iprima.cz/iprima-api/View_Entity_Node_Program/ThemedContent/More"
-					+ "?id=%{id}s"
-					+ "&offset=%{offset}d"
-					+ "&subpage_type=%{type}s";
-		
-		// Selectors
-		private static final String	SELECTOR_EPISODE = ".program";
-		
-		// Other
-		private static ThemedContentEpisodeObtainer INSTANCE;
-		
-		private ThemedContentEpisodeObtainer() {
-		}
-		
-		public static final ThemedContentEpisodeObtainer getInstance() {
-			return INSTANCE == null ? (INSTANCE = new ThemedContentEpisodeObtainer()) : INSTANCE;
-		}
-		
-		private final Episode parseEpisodeElement(Element elEpisode, Program program) {
-			Element elLink = elEpisode.selectFirst("a");
-			
-			URI uri = Net.uri(Net.uriFix(elLink.attr("href")));
-			String title = elLink.attr("title");
-			
-			return new Episode(program, uri, title);
-		}
-		
-		public ListTask<Episode> getEpisodes(Program program, String subdomain) throws Exception {
-			return ListTask.of(PrimaCommon.handleErrors((task) -> {
-				String id = program.get("id");
-				
-				if(id == null || id.isEmpty()) {
-					return; // Cannot do anything without an ID
-				}
-				
-				// Check for movies, they do not have any episodes
-				if(program.get("type").equals("VideoNode")) {
-					// Nothing to do, just set the program information
-					Episode episode = new Episode(program, program.uri(), program.title());
+				for(Element elItem : document.select(SELECTOR_EPISODES)) {
+					Element elLink = elItem.selectFirst("a:not(.hover-zoom-img)");
+					URI uri = Net.uri(elLink.absUrl("href"));
+					String title = elLink.text().strip();
+					Episode episode = new Episode(program, uri, title);
 					
 					if(!task.add(episode)) {
 						return; // Do not continue
-					}
-				} else {
-					String callUriTemplate = Utils.format(
-						URL_API_IPRIMA,
-						"subdomain", subdomain,
-						"id", id,
-						"type", "videos" // Currently only videos are available
-					);
-					
-					// Loop through all available offsets with non-empty content
-					for(int offset = 0;;) {
-						URI callUri = Net.uri(Utils.format(callUriTemplate, "offset", offset));
-						JSONCollection response = JSON.read(request(callUri));
-						String content = response.getString("related_content");
-						Document document = HTML.parse(content);
-						
-						for(Element elEpisode : document.select(SELECTOR_EPISODE)) {
-							Episode episode = parseEpisodeElement(elEpisode, program);
-							
-							if(!task.add(episode)) {
-								return; // Do not continue
-							}
-						}
-						
-						if(response.getBoolean("hide_load_more_button")) {
-							break; // Reached the end
-						}
-						
-						offset = response.getInt("offset");
 					}
 				}
 			}));
@@ -506,108 +520,47 @@ final class IPrimaHelper {
 	
 	static final class SnippetEpisodeObtainer {
 		
-		// General
-		private static final String URL_API = "%{base_url}s/_snippet/%{type}s/%{count}d/%{offset}d/%{program_id}s";
+		private static final String URI_TEMPLATE = "https://%{host}s"
+			+ "/snippet/%{type}s/%{limit}d/%{offset}d/%{program_id}s";
 		
-		// Regex
 		private static final Regex REGEX_SNIPPETS = Regex.of(
-			"(?s)new\\s+InfiniteCarousel\\([^,]+,\\s*'/_snippet/([^/]+)/[^']+/(\\d+)',[^\\)]+\\)"
+			"(?s)new\\s+InfiniteCarousel\\([^,]+,\\s*'/snippet/episode/limit/offset/([^']+)',[^\\)]+\\)"
 		);
-		private static final Regex REGEX_NUM_SEASON = Regex.of("(?iu)S(\\d+)");
-		private static final Regex REGEX_NUM_EPISODE = Regex.of("(?iu)(?:S?\\d+\\s+)?\\((\\d+)\\)");
 		private static final Regex REGEX_EPISODE_TITLE = Regex.of("(?iu)^\\d+\\.\\s+epizoda");
 		private static final Regex REGEX_PUNCTUATION = Regex.of("(?iu)([^\\p{L}\\p{Space}])");
 		
-		// Selectors
-		private static final String SELECTOR_EPISODE = "article.w-full, article.molecule-video";
+		private static final String SELECTOR_EPISODE = "article.molecule-video";
 		
-		// Formatters
 		private static final DateTimeFormatter FORMATTER_DATETIME_CZECH
 			= DateTimeFormatter.ofPattern("d. MMMM yyyy HH:mm", Locale.forLanguageTag("cs"));
-		
-		// Other
-		private static SnippetEpisodeObtainer INSTANCE;
 		
 		private SnippetEpisodeObtainer() {
 		}
 		
-		public static final SnippetEpisodeObtainer getInstance() {
-			return INSTANCE == null ? (INSTANCE = new SnippetEpisodeObtainer()) : INSTANCE;
+		private static final String regexQuoteIgnorePunctuation(String string) {
+			return (
+				"\\Q" + REGEX_PUNCTUATION.replaceAll(string, "$1\\\\E?\\\\Q") + "\\E"
+			).replace("\\Q\\E", "");
 		}
 		
-		private final Episode normalizeEpisode(Program program, URI uri, String title, String textSeason,
-				String textEpisode) {
-			int numSeason = 0;
-			int numEpisode = 0;
-			int startTextSeason = 0;
-			int startTextEpisode = 0;
-			Matcher matcher;
-			
-			// Find information about season number in the text
-			if(textSeason != null) {
-				if((matcher = REGEX_NUM_SEASON.matcher(textSeason)).find()) {
-					startTextSeason = matcher.start(1);
-				}
-				
-				numSeason = Utils.OfString.asIntOrDefault(textSeason, 10, false, startTextSeason, textSeason.length(), 0);
-			}
-			
-			// Find information about episode number in the text
-			if(textEpisode != null) {
-				if((matcher = REGEX_NUM_EPISODE.matcher(textEpisode)).find()) {
-					startTextEpisode = matcher.start(1);
-				}
-				
-				numEpisode = Utils.OfString.asIntOrDefault(textEpisode, 10, false, startTextEpisode, textEpisode.length(), 0);
-			}
-			
-			// Clean up title, if there is only the episode number plus the "episode" text
-			if((matcher = REGEX_EPISODE_TITLE.matcher(title)).find()) {
-				title = matcher.end() == title.length() ? null : title.substring(matcher.end());
-			}
-			
-			return new Episode(program, uri, title, numEpisode, numSeason);
-		}
-		
-		private final Episode parseEpisodeElementH4(Element elEpisode, Program program) {
-			Element elLink = elEpisode.selectFirst("h4 > a");
-			
+		private static final Episode parseEpisodeItem(
+			Element elItem, Program program, Map<Integer, Integer> indexes
+		) {
+			Element elLink = elItem.selectFirst("h3 > a");
 			URI uri = Net.uri(elLink.attr("href"));
-			String title = elLink.text();
-			String textSeason = null;
-			String textEpisode = null;
+			String title = elLink.text().strip();
 			
-			Element elSubheading = elEpisode.selectFirst("h4 + span");
-			
-			if(elSubheading != null) {
-				textSeason = elSubheading.text();
-				textEpisode = elSubheading.text();
-			}
-			
-			return normalizeEpisode(program, uri, title, textSeason, textEpisode);
-		}
-		
-		private final String regexQuoteIgnorePunctuation(String string) {
-			return ("\\Q" + REGEX_PUNCTUATION.replaceAll(string, "$1\\\\E?\\\\Q") + "\\E").replace("\\Q\\E", "");
-		}
-		
-		private final Episode parseEpisodeElementH3(Element elEpisode, Program program, Map<Integer, Integer> indexes) {
-			Element elLink = elEpisode.selectFirst("h3 > a");
-			
-			URI uri = Net.uri(elLink.attr("href"));
-			String title = elLink.text();
-			int numSeason = 0;
-			int numEpisode = 0;
-			
-			Element elDate = elEpisode.selectFirst("h3 + div > span");
 			String dateString = null;
+			int numSeason = 0;
+			int numEpisode = 0;
 			
-			if(elDate != null) {
-				dateString = elDate.text();
+			// Use the episode's date year as the season number, if present
+			Element elDate;
+			if((elDate = elItem.selectFirst("h3 + div > span")) != null) {
+				dateString = elDate.text().strip();
 				numSeason = FORMATTER_DATETIME_CZECH.parse(dateString).get(ChronoField.YEAR);
 			}
 			
-			Matcher matcher;
 			String quotedProgramTitle = regexQuoteIgnorePunctuation(program.title());
 			Regex regexProgramTitle = Regex.of("(?iu)" + quotedProgramTitle + "\\s+\\((\\d+\\.?)\\)");
 			Regex regexProgramSubheading = Regex.of(
@@ -617,14 +570,16 @@ final class IPrimaHelper {
 					+ ")\\)?)?$"
 			);
 			
+			// Check whether the episode's title in in the format "{name} ({num_episode})"
+			Matcher matcher;
 			if((matcher = regexProgramTitle.matcher(title)).find()) {
 				numEpisode = Utils.OfString.asInt(matcher.group(1));
 				title = "";
 			}
 			
-			Element elSubheading = elEpisode.selectFirst("p + h3");
-			
-			if(elSubheading != null) {
+			// Also check the subheading, if present, and format the title accordingly
+			Element elSubheading;
+			if((elSubheading = elItem.selectFirst("p + h3")) != null) {
 				String prefix = elSubheading.previousElementSibling().text();
 				
 				if((matcher = regexProgramTitle.matcher(prefix)).find()) {
@@ -635,8 +590,10 @@ final class IPrimaHelper {
 			}
 			
 			if(numEpisode == 0) {
+				// Calculate the episode number from the list
 				numEpisode = indexes.compute(numSeason, (k, v) -> (v == null ? 1 : v) + 1) - 1;
 			} else if(numSeason != 0) {
+				// Update the episode number of the season
 				final int number = numEpisode;
 				indexes.compute(numSeason, (k, v) -> (v == null ? number : Math.max(number, v)) + 1);
 			}
@@ -649,53 +606,31 @@ final class IPrimaHelper {
 				title += (title.isEmpty() ? "" : " - ") + dateString;
 			}
 			
-			return normalizeEpisode(program, uri, title, String.valueOf(numSeason), String.valueOf(numEpisode));
+			// Clean up title, if there is only the episode number plus the "episode" text
+			if((matcher = REGEX_EPISODE_TITLE.matcher(title)).find()) {
+				title = matcher.end() == title.length() ? null : title.substring(matcher.end());
+			}
+			
+			return new Episode(program, uri, title, numEpisode, numSeason);
 		}
 		
-		private final URI callUri(String uriTemplate, int offset, int count) {
-			return Net.uri(Utils.format(uriTemplate, "count", count, "offset", offset));
+		private static final URI pageUri(String uriTemplate, int offset, int limit) {
+			return Net.uri(Utils.format(uriTemplate, "limit", limit, "offset", offset));
 		}
 		
-		public ListTask<Episode> getEpisodes(Program program) throws Exception {
+		public static ListTask<Episode> getEpisodes(Program program) throws Exception {
 			return ListTask.of(PrimaCommon.handleErrors((task) -> {
 				URI programUri = program.uri();
-				String response = request(programUri);
-				
-				if(response == null) {
-					return; // Do not continue
-				}
-				
-				Document document = HTML.parse(response, programUri);
-				String snippetType = null;
+				Document document = HTML.from(programUri);
+				ReusableMatcher matcher = REGEX_SNIPPETS.reusableMatcher();
 				String programId = null;
 				
-				for(Element elScript : document.select("script")) {
+				for(Element elScript : document.select("script:not([src])")) {
 					String content = elScript.html();
-					Matcher matcher = REGEX_SNIPPETS.matcher(content);
 					
-					if(!matcher.find()) {
-						continue;
-					}
-					
-					snippetType = "videos-episode";
-					programId = matcher.group(2);
-				}
-				
-				if(programId == null) {
-					for(Element elScript : document.select("script")) {
-						String content = elScript.html();
-						int index = content.indexOf("dataLayer.push");
-						
-						if(index < 0) {
-							continue;
-						}
-						
-						JSONCollection json = JSON.read(
-							Utils.bracketSubstring(content, '{', '}', false, index, content.length())
-						);
-						
-						snippetType = "programme_episodes";
-						programId = String.valueOf(json.getInt("page.content.id"));
+					if(matcher.reset(content).find()) {
+						programId = matcher.group(1);
+						break;
 					}
 				}
 				
@@ -703,228 +638,44 @@ final class IPrimaHelper {
 					return;
 				}
 				
-				final int count = 64;
+				final int limit = 64;
 				int offset = 0;
-				String baseUri = "https://" + programUri.getHost();
-				String callUriTemplate = Utils.format(
-					URL_API,
-					"base_url", baseUri,
-					"type", snippetType,
+				String uriTemplate = Utils.format(
+					URI_TEMPLATE,
+					"host", programUri.getHost(),
+					"type", "episode",
 					"program_id", programId
 				);
 				
-				// The content in this type of snippet may not have any information about
-				// the episode number or the season number. Therefore, we must first obtain
-				// the count of all the episodes and then to count down from the total,
-				// so that it is in the correct order.
-				if(snippetType.equals("videos-episode")) {
-					// Since we must first find the end of the list, use binary-like search
-					// technique. This results in lower number of requests for longer lists
-					// and the same number of requests for very short ones. 
-					int lo = offset, hi = lo + count;
+				// Since we must first find the end of the list, use binary-like search
+				// technique. This results in lower number of requests for longer lists
+				// and the same number of requests for very short ones.
+				int lo = offset, hi = lo + limit;
+				
+				// First, by doubling the limit find the highest offset where there are no items.
+				// This is the upper limit (hi). The lower limit (lo) will be the previous upper limit.
+				for(; Web.size(Request.of(pageUri(uriTemplate, hi, limit)).HEAD()) > 0L; lo = hi, hi *= 2);
+				
+				// Now we know that the actual limit is somewhere in the range <lo, hi>.
+				// We can use binary search to find the actual value.
+				while(hi - lo > limit) {
+					int mid = lo + (hi - lo) / 2;
+					URI pageUri = pageUri(uriTemplate, mid, limit);
+					if(Web.size(Request.of(pageUri).HEAD()) <= 0L) hi = mid;
+					else                                           lo = mid;
+				}
+				
+				// The lower limit (lo) is the latest offset with non-empty content.
+				offset = lo;
+				
+				for(Map<Integer, Integer> indexes = new HashMap<>(); offset >= 0; offset -= limit) {
+					document = HTML.from(pageUri(uriTemplate, offset, limit));
 					
-					// First, by doubling the limit find the highest offset where there are no items.
-					// This is the upper limit (hi). The lower limit (lo) will be the previous upper limit.
-					for(; Web.size(Request.of(callUri(callUriTemplate, hi, count)).HEAD()) > 0L; lo = hi, hi *= 2);
-					
-					// Now we know that the actual limit is somewhere in the range <lo, hi>.
-					// We can use binary search to find the actual value.
-					while(hi - lo > count) {
-						int mid = lo + (hi - lo) / 2;
-						URI callUri = callUri(callUriTemplate, mid, count);
-						if(Web.size(Request.of(callUri).HEAD()) <= 0L) hi = mid;
-						else                                           lo = mid;
-					}
-					
-					// The lower limit (lo) is the latest offset with non-empty content.
-					offset = lo;
-					
-					for(Map<Integer, Integer> indexes = new HashMap<>(); offset >= 0; offset -= count) {
-						URI callUri = callUri(callUriTemplate, offset, count);
-						response = request(callUri);
-						document = HTML.parse(response);
+					for(Element elEpisode : Utils.asReversed(document.select(SELECTOR_EPISODE))) {
+						Episode episode = parseEpisodeItem(elEpisode, program, indexes);
 						
-						for(Element elEpisode : Utils.asReversed(document.select(SELECTOR_EPISODE))) {
-							Episode episode = parseEpisodeElementH3(elEpisode, program, indexes);
-							
-							if(!task.add(episode)) {
-								return; // Do not continue
-							}
-						}
-					}
-				} else {
-					for(;; offset += count) {
-						URI callUri = callUri(callUriTemplate, offset, count);
-						response = request(callUri);
-						
-						if(response == null || response.isEmpty()) {
-							break;
-						}
-						
-						document = HTML.parse(response);
-						
-						for(Element elEpisode : document.select(SELECTOR_EPISODE)) {
-							Episode episode = parseEpisodeElementH4(elEpisode, program);
-							
-							if(!task.add(episode)) {
-								return; // Do not continue
-							}
-						}
-					}
-				}
-			}));
-		}
-	}
-	
-	static final class DefaultMediaObtainer extends DefaultMediaObtainerBase {
-		
-		// URLs
-		private static final String URL_API_PLAY;
-		
-		// Other
-		private static DefaultMediaObtainer INSTANCE;
-		
-		static {
-			URL_API_PLAY = "https://api.play-backend.iprima.cz/api/v1/products/id-%{product_id}s/play";
-		}
-		
-		private DefaultMediaObtainer() {
-		}
-		
-		public static final DefaultMediaObtainer getInstance() {
-			return INSTANCE == null ? (INSTANCE = new DefaultMediaObtainer()) : INSTANCE;
-		}
-		
-		@Override
-		protected String playURL() {
-			return URL_API_PLAY;
-		}
-	}
-	
-	static final class DefaultMediaObtainerNewURL extends DefaultMediaObtainerBase {
-		
-		// URLs
-		private static final String URL_API_PLAY;
-		
-		// Other
-		private static DefaultMediaObtainerNewURL INSTANCE;
-		
-		static {
-			URL_API_PLAY = "https://api.play-backend.iprima.cz/api/v1/products/play/ids-%{product_id}s";
-		}
-		
-		private DefaultMediaObtainerNewURL() {
-		}
-		
-		public static final DefaultMediaObtainerNewURL getInstance() {
-			return INSTANCE == null ? (INSTANCE = new DefaultMediaObtainerNewURL()) : INSTANCE;
-		}
-		
-		@Override
-		protected String playURL() {
-			return URL_API_PLAY;
-		}
-	}
-
-	static final class PlayIdMediaObtainer {
-		
-		// URLs
-		private static final String URL_API_PLAY
-			= "https://api.play-backend.iprima.cz/api/v1/products/play/ids-%{play_id}s";
-		
-		// Regex
-		private static final Regex REGEX_PLAY_IDS = Regex.of("videos\\s*=\\s*'([^']+)';");
-		private static final Regex REGEX_NUM_EPISODE = Regex.of("^.*?/([^/]+?)$");
-		
-		// Selectors
-		private static final String SELECTOR_SCRIPT = ".content > header .play-video > script";
-		
-		// Other
-		private static PlayIdMediaObtainer INSTANCE;
-		
-		private PlayIdMediaObtainer() {
-		}
-		
-		public static final PlayIdMediaObtainer getInstance() {
-			return INSTANCE == null ? (INSTANCE = new PlayIdMediaObtainer()) : INSTANCE;
-		}
-		
-		private final String mediaTitle(JSONCollection videoData) {
-			String programName = videoData.getString("productDetail.seriesTitle", "");
-			String episodeName = videoData.getString("productDetail.episodeTitle", "");
-			
-			String numSeason = videoData.getString("productDetail.seasonNumber", "0");
-			numSeason = String.format("%02d", Integer.valueOf(numSeason));
-			
-			String numEpisode = videoData.getString("productDetail.externalId", "0");
-			Matcher matcherEpisode = REGEX_NUM_EPISODE.matcher(numEpisode);
-			numEpisode = matcherEpisode.matches() ? matcherEpisode.group(1) : "0";
-			numEpisode = String.format("%02d", Integer.valueOf(numEpisode));
-			
-			return MediaUtils.mediaTitle(programName, numSeason, numEpisode, episodeName);
-		}
-		
-		public ListTask<Media> getMedia(URI uri, MediaEngine engine) throws Exception {
-			return ListTask.of(PrimaCommon.handleErrors((task) -> {
-				String response = request(uri);
-				
-				if(response == null) {
-					return; // Do not continue
-				}
-				
-				Document document = HTML.parse(response, uri);
-				Element elScript = document.selectFirst(SELECTOR_SCRIPT);
-				
-				if(elScript == null) {
-					return; // Cannot obtain the play ID
-				}
-				
-				Matcher matcher = REGEX_PLAY_IDS.matcher(elScript.html());
-				
-				if(!matcher.find()) {
-					return; // Cannot obtain the play ID
-				}
-				
-				List<URI> urls = new ArrayList<>();
-				String[] playIds = matcher.group(1).split(",");
-				
-				for(String playId : playIds) {
-					urls.add(Net.uri(Utils.format(URL_API_PLAY, "play_id", playId)));
-				}
-				
-				if(urls.isEmpty()) {
-					return; // Nothing to do
-				}
-				
-				HttpHeaders requestHeaders = authenticationRequestHeaders();
-				MediaSource source = MediaSource.of(engine);
-				
-				for(URI urlPlay : urls) {
-					String content = request(urlPlay, requestHeaders);
-					
-					if(content == null || content.isEmpty()) {
-						continue;
-					}
-					
-					JSONCollection data = JSON.read(content);
-					URI sourceURI = urlPlay;
-					
-					for(JSONCollection videoData : data.collectionsIterable()) {
-						String title = mediaTitle(videoData);
-						
-						for(JSONCollection streamInfo : videoData.getCollection("streamInfos").collectionsIterable()) {
-							URI src = Net.uri(streamInfo.getString("url"));
-							MediaLanguage language = MediaLanguage.ofCode(streamInfo.getString("lang.key"));
-							
-							List<Media> media = MediaUtils.createMedia(
-								source, src, sourceURI, title, language, MediaMetadata.empty()
-							);
-							
-							for(Media m : media) {
-								if(!task.add(m)) {
-									return; // Do not continue
-								}
-							}
+						if(!task.add(episode)) {
+							return; // Do not continue
 						}
 					}
 				}
