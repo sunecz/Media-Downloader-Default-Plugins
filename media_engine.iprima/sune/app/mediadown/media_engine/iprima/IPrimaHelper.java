@@ -223,7 +223,9 @@ final class IPrimaHelper {
 	
 	private static final class LinkedData {
 		
-		private static final Regex REGEX_EPISODE_NUMBER = Regex.of("\\s*\\((\\d+)\\)$");
+		private static final Regex REGEX_EPISODE_NUMBER = Regex.of("\\s*\\((\\d+)\\)");
+		private static final Regex REGEX_EPISODE_NAME = Regex.of("(?i)Epizoda\\s+(\\d+)");
+		private static final Regex REGEX_EPISODE_NAME_DASH = Regex.of("^\\s*-\\s*");
 		
 		private LinkedData() {
 		}
@@ -257,6 +259,18 @@ final class IPrimaHelper {
 				programName = REGEX_EPISODE_NUMBER.replaceAll(programName, "");
 			}
 			
+			// Unknown episode number, try to extract it from the episode's name
+			if(episodeNumber == 0 && episodeName != null) {
+				Matcher matcher = REGEX_EPISODE_NUMBER.matcher(episodeName);
+				
+				if(matcher.find()) {
+					episodeNumber = Integer.parseInt(matcher.group(1));
+				}
+				
+				// Remove the episode number from the program's name
+				episodeName = REGEX_EPISODE_NUMBER.replaceAll(episodeName, "");
+			}
+			
 			// Unknown season number, try to extract if from the season's name
 			if(seasonNumber == 0) {
 				String[] parts = seasonName.split(" ");
@@ -287,6 +301,30 @@ final class IPrimaHelper {
 					// Remove the program's name by its position in the normalized string from
 					// the original string. Should work fine for accented characters, since they
 					// are each a single glyph, thus occupying a single position.
+					episodeName = Utils.OfString.delete(
+						episodeName, matcher.start(0), matcher.end(0)
+					).strip();
+				}
+			}
+			
+			// Remove episode number string from the episode's name, if present
+			if(episodeName != null) {
+				Matcher matcher = REGEX_EPISODE_NAME.matcher(episodeName);
+				
+				if(matcher.find()) {
+					// Remove the matched string by its position
+					episodeName = Utils.OfString.delete(
+						episodeName, matcher.start(0), matcher.end(0)
+					).strip();
+				}
+			}
+			
+			// Clean up episode's name
+			if(episodeName != null) {
+				Matcher matcher = REGEX_EPISODE_NAME_DASH.matcher(episodeName);
+				
+				if(matcher.find()) {
+					// Remove the matched string by its position
 					episodeName = Utils.OfString.delete(
 						episodeName, matcher.start(0), matcher.end(0)
 					).strip();

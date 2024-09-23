@@ -34,6 +34,7 @@ import sune.app.mediadown.media.SubtitlesMedia;
 import sune.app.mediadown.media.VideoMedia;
 import sune.app.mediadown.media.VideoMediaContainer;
 import sune.app.mediadown.media.type.SeparatedVideoMediaContainer;
+import sune.app.mediadown.media_engine.iprima.IPrimaEngine.Features;
 import sune.app.mediadown.media_engine.iprima.IPrimaEngine.IPrima;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper.SimpleExecutor;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper.ThreadedSpawnableTaskQueue;
@@ -55,6 +56,7 @@ import sune.app.mediadown.util.Utils;
 
 final class PrimaPlus implements IPrima {
 	
+	private static final int FEATURES = Features.ALL;
 	private static final String SUBDOMAIN = "www";
 	
 	PrimaPlus() {}
@@ -78,6 +80,11 @@ final class PrimaPlus implements IPrima {
 	@Override
 	public boolean isCompatibleSubdomain(String subdomain) {
 		return subdomain.equalsIgnoreCase(SUBDOMAIN);
+	}
+	
+	@Override
+	public int features() {
+		return FEATURES;
 	}
 	
 	private static final class API {

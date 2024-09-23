@@ -34,6 +34,9 @@ public final class IPrimaEngine implements MediaEngine {
 		PrimaPlus.getInstance(),
 		ZoomIPrima.getInstance(),
 		CNNIPrima.getInstance(),
+		FreshIPrima.getInstance(),
+		ZenyIPrima.getInstance(),
+		CoolIPrima.getInstance(),
 	};
 	
 	// Allow to create an instance when registering the engine
@@ -59,7 +62,7 @@ public final class IPrimaEngine implements MediaEngine {
 		return hostParts[0];
 	}
 	
-	private static final IPrima sourceFromURL(URI uri) {
+	private static final IPrima sourceFromURL(URI uri, int feature) {
 		String subdomain;
 		if((subdomain = subdomainOrNullIfIncompatible(uri)) == null) {
 			return null;
@@ -67,6 +70,7 @@ public final class IPrimaEngine implements MediaEngine {
 		
 		return Stream.of(SUPPORTED_WEBS)
 					.filter((w) -> w.isCompatibleSubdomain(subdomain))
+					.filter((w) -> Features.supports(w.features(), feature))
 					.findFirst().orElse(null);
 	}
 	
@@ -79,6 +83,10 @@ public final class IPrimaEngine implements MediaEngine {
 	@Override
 	public ListTask<Program> getPrograms() throws Exception {
 		return ListTask.of((task) -> {
+			IPrima[] supportedWebs = Stream.of(SUPPORTED_WEBS)
+				.filter((w) -> Features.supports(w.features(), Features.PROGRAMS))
+				.toArray(IPrima[]::new);
+			
 			(new ConcurrentLoop<IPrima>() {
 				
 				@Override
@@ -87,13 +95,13 @@ public final class IPrimaEngine implements MediaEngine {
 					webTask.forwardAdd(task);
 					webTask.startAndWait();
 				}
-			}).iterate(SUPPORTED_WEBS);
+			}).iterate(supportedWebs);
 		});
 	}
 	
 	@Override
 	public ListTask<Episode> getEpisodes(Program program) throws Exception {
-		IPrima iprima = sourceFromURL(program.uri());
+		IPrima iprima = sourceFromURL(program.uri(), Features.EPISODES);
 		
 		if(iprima == null) {
 			throw new IllegalStateException("Cannot obtain source from the URL");
@@ -104,7 +112,7 @@ public final class IPrimaEngine implements MediaEngine {
 	
 	@Override
 	public ListTask<Media> getMedia(URI uri, Map<String, Object> data) throws Exception {
-		IPrima iprima = sourceFromURL(uri);
+		IPrima iprima = sourceFromURL(uri, Features.MEDIA);
 		
 		if(iprima == null) {
 			throw new IllegalStateException("Cannot obtain source from the URL");
@@ -153,16 +161,40 @@ public final class IPrimaEngine implements MediaEngine {
 		return TITLE;
 	}
 	
+	protected static final class Features {
+		
+		public static final int NONE = 0;
+		public static final int PROGRAMS = 0b1 << 0;
+		public static final int EPISODES = 0b1 << 1;
+		public static final int MEDIA = 0b1 << 2;
+		public static final int ALL = PROGRAMS | EPISODES | MEDIA;
+		
+		private Features() {
+		}
+		
+		public static final boolean supports(int flags, int feature) {
+			return (flags & feature) != 0;
+		}
+	}
+	
 	protected static interface IPrima {
 		
-		ListTask<Program> getPrograms() throws Exception;
-		ListTask<Episode> getEpisodes(Program program) throws Exception;
+		default ListTask<Program> getPrograms() throws Exception {
+			throw new UnsupportedOperationException();
+		}
+		
+		default ListTask<Episode> getEpisodes(Program program) throws Exception {
+			throw new UnsupportedOperationException();
+		}
+		
 		ListTask<Media> getMedia(IPrimaEngine engine, URI uri) throws Exception;
 		boolean isCompatibleSubdomain(String subdomain);
+		int features();
 	}
 	
 	private static final class ZoomIPrima implements IPrima {
 		
+		private static final int FEATURES = Features.ALL;
 		private static final String SUBDOMAIN = "zoom";
 		
 		private ZoomIPrima() {}
@@ -187,10 +219,16 @@ public final class IPrimaEngine implements MediaEngine {
 		public boolean isCompatibleSubdomain(String subdomain) {
 			return subdomain.equalsIgnoreCase(SUBDOMAIN);
 		}
+		
+		@Override
+		public int features() {
+			return FEATURES;
+		}
 	}
 	
 	private static final class CNNIPrima implements IPrima {
 		
+		private static final int FEATURES = Features.ALL;
 		private static final String SUBDOMAIN = "cnn";
 		private static final String URL_PROGRAMS = "https://cnn.iprima.cz/porady";
 		
@@ -215,6 +253,83 @@ public final class IPrimaEngine implements MediaEngine {
 		@Override
 		public boolean isCompatibleSubdomain(String subdomain) {
 			return subdomain.equalsIgnoreCase(SUBDOMAIN);
+		}
+		
+		@Override
+		public int features() {
+			return FEATURES;
+		}
+	}
+	
+	private static final class FreshIPrima implements IPrima {
+		
+		private static final int FEATURES = Features.MEDIA;
+		private static final String SUBDOMAIN = "fresh";
+		
+		private FreshIPrima() {}
+		public static final FreshIPrima getInstance() { return _Singleton.getInstance(); }
+		
+		@Override
+		public ListTask<Media> getMedia(IPrimaEngine engine, URI uri) throws Exception {
+			return DefaultMediaObtainer.getMedia(uri, engine);
+		}
+		
+		@Override
+		public boolean isCompatibleSubdomain(String subdomain) {
+			return subdomain.equalsIgnoreCase(SUBDOMAIN);
+		}
+		
+		@Override
+		public int features() {
+			return FEATURES;
+		}
+	}
+	
+	private static final class ZenyIPrima implements IPrima {
+		
+		private static final int FEATURES = Features.MEDIA;
+		private static final String SUBDOMAIN = "zeny";
+		
+		private ZenyIPrima() {}
+		public static final ZenyIPrima getInstance() { return _Singleton.getInstance(); }
+		
+		@Override
+		public ListTask<Media> getMedia(IPrimaEngine engine, URI uri) throws Exception {
+			return DefaultMediaObtainer.getMedia(uri, engine);
+		}
+		
+		@Override
+		public boolean isCompatibleSubdomain(String subdomain) {
+			return subdomain.equalsIgnoreCase(SUBDOMAIN);
+		}
+		
+		@Override
+		public int features() {
+			return FEATURES;
+		}
+	}
+	
+	private static final class CoolIPrima implements IPrima {
+		
+		private static final int FEATURES = Features.MEDIA;
+		private static final String SUBDOMAIN = "cool";
+		
+		private CoolIPrima() {}
+		public static final CoolIPrima getInstance() { return _Singleton.getInstance(); }
+		
+		@Override
+		public ListTask<Media> getMedia(IPrimaEngine engine, URI uri) throws Exception {
+			return DefaultMediaObtainer.getMedia(uri, engine);
+		}
+		
+		@Override
+		public boolean isCompatibleSubdomain(String subdomain) {
+			return subdomain.equalsIgnoreCase(SUBDOMAIN);
+		}
+		
+		@Override
+		public int features() {
+			return FEATURES;
 		}
 	}
 }
