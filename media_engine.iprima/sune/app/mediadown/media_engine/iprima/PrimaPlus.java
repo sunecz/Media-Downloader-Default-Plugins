@@ -4,13 +4,9 @@ import java.net.URI;
 import java.net.http.HttpHeaders;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.ListIterator;
 import java.util.Map;
-import java.util.Map.Entry;
-import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
@@ -41,6 +37,7 @@ import sune.app.mediadown.media_engine.iprima.IPrimaHelper.ThreadedSpawnableTask
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper._Singleton;
 import sune.app.mediadown.media_engine.iprima.PrimaCommon.JSONSerializable;
 import sune.app.mediadown.media_engine.iprima.PrimaCommon.MessageException;
+import sune.app.mediadown.media_engine.iprima.PrimaCommon.Nuxt;
 import sune.app.mediadown.media_engine.iprima.PrimaCommon.RPC;
 import sune.app.mediadown.net.Net;
 import sune.app.mediadown.net.Web;
@@ -49,8 +46,6 @@ import sune.app.mediadown.task.ListTask;
 import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.JSON.JSONCollection;
 import sune.app.mediadown.util.JSON.JSONNode;
-import sune.app.mediadown.util.JSON.JSONObject;
-import sune.app.mediadown.util.JSON.JSONType;
 import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
 
@@ -396,7 +391,7 @@ final class PrimaPlus implements IPrima {
 				// Always log in first to ensure the data are correct
 				HttpHeaders requestHeaders = logInHeaders();
 				
-				String html = Web.request(Request.of(uri).GET()).body();
+				String html = Web.request(Request.of(uri).headers(requestHeaders).GET()).body();
 				Nuxt nuxt = Nuxt.extract(html);
 				
 				if(nuxt == null) {
@@ -535,8 +530,8 @@ final class PrimaPlus implements IPrima {
 										.duration(video.duration()).frameRate(video.frameRate())
 										.resolution(video.resolution())
 										.media(
-										       Stream.concat(Stream.of(builder), subtitles.stream())
-										             .collect(Collectors.toList())
+											   Stream.concat(Stream.of(builder), subtitles.stream())
+													 .collect(Collectors.toList())
 										);
 									
 									// Replace the old media builder with the separated one
@@ -684,281 +679,6 @@ final class PrimaPlus implements IPrima {
 			public String title() { return title; }
 			@SuppressWarnings("unused")
 			public int number() { return number; }
-		}
-		
-		private static final class Nuxt {
-			
-			private final JSONCollection data;
-			private final boolean isPremium;
-			
-			private Nuxt(JSONCollection data, boolean isPremium) {
-				this.data = Objects.requireNonNull(data);
-				this.isPremium = isPremium;
-			}
-			
-			public static final Nuxt extract(String html) {
-				int idx;
-				if((idx = html.indexOf("id=\"__NUXT_DATA__\"")) < 0
-						|| (idx = html.indexOf("[", idx)) < 0) {
-					throw new IllegalStateException("Nuxt data do not exist");
-				}
-				
-				String content = Utils.bracketSubstring(html, '[', ']', false, idx, html.length());
-				
-				JSONCollection object = Parser.parse(content);
-				JSONCollection data = object.getCollection("data");
-				JSONCollection state = object.getCollection("state");
-				
-				String role = Utils.stream(state.collectionsIterable())
-					.filter((c) -> c.hasObject("role"))
-					.findFirst().orElseGet(JSONCollection::empty)
-					.getString("role", "").toLowerCase();
-				boolean isPremium = role.equals("premium");
-				
-				return new Nuxt(data, isPremium);
-			}
-			
-			public String get(String name, String defaultValue) {
-				JSONObject object = data.getObject(name);
-				
-				if(object == null) {
-					return defaultValue;
-				}
-				
-				return object.stringValue();
-			}
-			
-			public JSONCollection data() {
-				return data;
-			}
-			
-			@SuppressWarnings("unused")
-			public boolean isPremium() {
-				return isPremium;
-			}
-			
-			// Reference: https://dwl2jqo5jww9m.cloudfront.net/_nuxt/entry.8c888bb8.js
-			// Search __NUXT_DATA__ to see what is done with the JSON data in that element.
-			private static final class Parser {
-				
-				private static final int q2 = -1;
-				private static final int Y2 = -2;
-				private static final int ey = -3;
-				private static final int ry = -4;
-				private static final int ny = -5;
-				private static final int ay = -6;
-				
-				private static final JSONCollection T0(String json) {
-					return oy(json);
-				}
-				
-				private static final JSONCollection oy(String json) {
-					return ty(JSON.read(json));
-				}
-				
-				private static final boolean json_hotfix_isEmpty(JSONCollection collection) {
-					// JSONCollection::length() throws NPE if inner nodes collection is null,
-					// therefore use the currenly safer iterator approach.
-					return !collection.iterator().hasNext();
-				}
-				
-				private static final JSONNode checkNode(JSONNode node) {
-					return node != null ? node : JSONObject.ofNull();
-				}
-				
-				private static final JSONCollection toCollection(Set<JSONNode> set) {
-					JSONCollection c = JSONCollection.emptyArray();
-					for(JSONNode n : set) c.add(checkNode(n));
-					return c;
-				}
-				
-				private static final JSONCollection toCollection(Map<JSONNode, JSONNode> map) {
-					JSONCollection c = JSONCollection.empty();
-					for(Entry<JSONNode, JSONNode> e : map.entrySet()) {
-						c.set(((JSONObject) e.getKey()).stringValue(), checkNode(e.getValue()));
-					}
-					return c;
-				}
-				
-				/*
-					function o(t, i = !1) {
-						if (t === q2) return;
-						if (t === ey) return NaN;
-						if (t === ry) return 1 / 0;
-						if (t === ny) return -1 / 0;
-						if (t === ay) return -0;
-						if (i) throw new Error("Invalid input");
-						if (t in a) return a[t];
-						const d = n[t];
-						if (!d || typeof d != "object") a[t] = d;
-						else if (Array.isArray(d))
-							if (typeof d[0] == "string") {
-								const s = d[0],
-									l = r == null ? void 0 : r[s];
-								if (l) return a[t] = l(o(d[1]));
-								switch (s) {
-									case "Date":
-										a[t] = new Date(d[1]);
-										break;
-									case "Set":
-										const c = new Set;
-										a[t] = c;
-										for (let y = 1; y < d.length; y += 1) c.add(o(d[y]));
-										break;
-									case "Map":
-										const u = new Map;
-										a[t] = u;
-										for (let y = 1; y < d.length; y += 2) u.set(o(d[y]), o(d[y + 1]));
-										break;
-									case "RegExp":
-										a[t] = new RegExp(d[1], d[2]);
-										break;
-									case "Object":
-										a[t] = Object(d[1]);
-										break;
-									case "BigInt":
-										a[t] = BigInt(d[1]);
-										break;
-									case "null":
-										const m = Object.create(null);
-										a[t] = m;
-										for (let y = 1; y < d.length; y += 2) m[d[y]] = o(d[y + 1]);
-										break;
-									default:
-										throw new Error(`Unknown type ${s}`)
-								}
-							} else {
-								const s = new Array(d.length);
-								a[t] = s;
-								for (let l = 0; l < d.length; l += 1) {
-									const c = d[l];
-									c !== Y2 && (s[l] = o(c))
-								}
-							}
-						else {
-							const s = {};
-							a[t] = s;
-							for (const l in d) {
-								const c = d[l];
-								s[l] = o(c)
-							}
-						}
-						return a[t]
-					}
-				*/
-				private static final JSONNode o(JSONCollection n, JSONNode[] a, int t) {
-					if(t == q2) return JSONObject.ofNull();
-					if(t == ey) return JSONObject.ofDouble(Double.NaN);
-					if(t == ry) return JSONObject.ofDouble(1.0 / 0.0);
-					if(t == ny) return JSONObject.ofDouble(-1.0 / 0.0);
-					if(t == ay) return JSONObject.ofDouble(-0.0);
-					if(a[t] != null) return a[t].copy();
-					
-					JSONNode dObj = n.get(t);
-					boolean isCollection;
-					
-					if(dObj == null
-							|| !(isCollection = dObj.isCollection())
-							|| json_hotfix_isEmpty((JSONCollection) dObj)) {
-						a[t] = dObj;
-						return a[t];
-					}
-					
-					if(isCollection) {
-						JSONCollection d = (JSONCollection) dObj;
-						
-						if(d.type() == JSONType.ARRAY) {
-							JSONNode f = d.get(0);
-							
-							if(f.type() == JSONType.STRING || f.type() == JSONType.STRING_UNQUOTED) {
-								String s = ((JSONObject) f).stringValue();
-								
-								if(s.equals("Reactive")) {
-									// Simplified as opposed to the original code to always return
-									// just the object itself.
-									JSONNode obj = o(n, a, d.getInt(1));
-									a[t] = obj;
-									return obj;
-								}
-								
-								switch(s) {
-				                    case "Date":
-				                    	a[t] = d.get(1);
-				                        break;
-				                    case "Set":
-				                        Set<JSONNode> c = new HashSet<>();
-				                        for(int y = 1; y < d.length(); y += 1) c.add(o(n, a, d.getInt(y)));
-				                        a[t] = toCollection(c);
-				                        break;
-				                    case "Map":
-				                    	Map<JSONNode, JSONNode> u = new HashMap<>();
-				                        for(int y = 1; y < d.length(); y += 2) {
-				                        	u.put(o(n, a, d.getInt(y)), o(n, a, d.getInt(y + 1)));
-				                        }
-				                        a[t] = toCollection(u);
-				                        break;
-				                    case "RegExp":
-				                    	a[t] = d;
-				                        break;
-				                    case "Object":
-				                    case "BigInt":
-				                    	a[t] = d.get(1);
-				                        break;
-				                    case "null":
-				                    	a[t] = null;
-				                        break;
-				                    default:
-				                        throw new RuntimeException("Unknown type " + s);
-				                }
-							} else {
-								JSONCollection s = JSONCollection.emptyArray();
-								a[t] = s;
-								
-								for(int l = 0; l < d.length(); l += 1) {
-									int c = d.getInt(l);
-									
-									if(c != Y2) {
-										s.set(l, checkNode(o(n, a, c)));
-									}
-								}
-							}
-						} else {
-							JSONCollection s = JSONCollection.empty();
-							a[t] = s;
-							
-							for(JSONObject l : d.objectsIterable()) {
-								int c = l.intValue();
-								s.set(l.name(), checkNode(o(n, a, c)));
-							}
-						}
-					}
-					
-					return a[t];
-				}
-				
-				/*
-					function ty(e, r) {
-						if (typeof e == "number") return o(e, !0);
-						if (!Array.isArray(e) || e.length === 0) throw new Error("Invalid input");
-						const n = e,
-							a = Array(n.length);
-						return o(0)
-					}
-				*/
-				private static final JSONCollection ty(JSONCollection json) {
-					JSONNode node = o(json, new JSONNode[json.length()], 0);
-					
-					if(!node.isCollection()) {
-						throw new IllegalStateException("Not a collection");
-					}
-					
-					return (JSONCollection) node;
-				}
-				
-				public static final JSONCollection parse(String content) {
-					return T0(content);
-				}
-			}
 		}
 	}
 }

@@ -3,6 +3,8 @@ package sune.app.mediadown.media_engine.iprima;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient.Redirect;
+import java.security.InvalidKeyException;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -12,16 +14,16 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import org.jsoup.nodes.Document;
-import org.jsoup.nodes.Element;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 
 import sune.app.mediadown.authentication.CredentialsManager;
 import sune.app.mediadown.concurrent.VarLoader;
-import sune.app.mediadown.configuration.Configuration;
 import sune.app.mediadown.media_engine.iprima.IPrimaEnginePlugin.IPrimaCredentials;
 import sune.app.mediadown.media_engine.iprima.PrimaAuthenticator.Devices.Device;
 import sune.app.mediadown.media_engine.iprima.PrimaAuthenticator.Profiles.Profile;
 import sune.app.mediadown.media_engine.iprima.PrimaCommon.MessageException;
+import sune.app.mediadown.media_engine.iprima.PrimaCommon.Nuxt;
 import sune.app.mediadown.media_engine.iprima.PrimaCommon.RPC;
 import sune.app.mediadown.media_engine.iprima.PrimaCommon.TranslatableException;
 import sune.app.mediadown.net.HTML;
@@ -31,10 +33,11 @@ import sune.app.mediadown.net.Web.Request;
 import sune.app.mediadown.net.Web.Response;
 import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.JSON.JSONCollection;
+import sune.app.mediadown.util.JSON.JSONObject;
+import sune.app.mediadown.util.JavaScript;
 import sune.app.mediadown.util.Opt;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Utils.Ignore;
-import sune.util.ssdf2.SSDCollection;
 
 public final class PrimaAuthenticator {
 	
@@ -42,7 +45,6 @@ public final class PrimaAuthenticator {
 	private static final String URL_OAUTH_TOKEN;
 	private static final String URL_OAUTH_AUTHORIZE;
 	private static final String URL_USER_AUTH;
-	private static final String URL_PROFILE_SELECT;
 	private static final String URL_SUCCESSFUL_LOGIN;
 	
 	private static final VarLoader<SessionTokens> sessionTokens;
@@ -52,8 +54,7 @@ public final class PrimaAuthenticator {
 		URL_OAUTH_LOGIN = "https://auth.iprima.cz/oauth2/login";
 		URL_OAUTH_TOKEN = "https://auth.iprima.cz/oauth2/token";
 		URL_OAUTH_AUTHORIZE = "https://auth.iprima.cz/oauth2/authorize";
-		URL_USER_AUTH = "https://www.iprima.cz/sso/login?auth_token_code=%{code}s";
-		URL_PROFILE_SELECT = "https://auth.iprima.cz/user/profile-select-perform/%{profile_id}s?continueUrl=/user/login";
+		URL_USER_AUTH = "https://ucet.iprima.cz/login?auth_token_code=%{code}s";
 		URL_SUCCESSFUL_LOGIN = "https://auth.iprima.cz/sso/auth-check";
 		sessionTokens = VarLoader.ofChecked(PrimaAuthenticator::initSessionTokens);
 		sessionData = VarLoader.ofChecked(PrimaAuthenticator::initSessionData);
@@ -73,50 +74,11 @@ public final class PrimaAuthenticator {
 			throw new IncorrectAuthDataException();
 		}
 		
-		return selectConfiguredProfile(response);
+		return Net.queryDestruct(response.uri()).valueOf("code", null);
 	}
 	
 	private static final boolean isSuccessfulLoginURI(URI uri) {
 		return Utils.beforeFirst(uri.toString(), "?").equals(URL_SUCCESSFUL_LOGIN);
-	}
-	
-	private static final String selectProfile(String profileId) throws Exception {
-		URI uri = Net.uri(Utils.format(URL_PROFILE_SELECT, "profile_id", profileId));
-		
-		try(Response.OfStream response = Web.requestStream(Request.of(uri).GET())) {
-			String responseUrl = response.uri().toString();
-			return Net.queryDestruct(responseUrl).valueOf("code", null);
-		}
-	}
-	
-	private static final List<Profile> profiles(Response.OfString response) throws Exception {
-		return Profiles.isProfileSelectPage(response.uri())
-					? Profiles.extractProfiles(response.body())
-					: Profiles.list();
-	}
-	
-	private static final String selectConfiguredProfile(Response.OfString response) throws Exception {
-		List<Profile> profiles = profiles(response);
-		
-		// At least one profile should be automatically available
-		if(profiles.isEmpty()) {
-			throw new IllegalStateException("No profile exists");
-		}
-		
-		Profile profile = profiles.get(0);
-		
-		Configuration configuration = configuration();
-		String selectedProfileId = configuration.stringValue("profile");
-		
-		if(selectedProfileId != null
-				&& !selectedProfileId.isEmpty()
-				&& !selectedProfileId.equals("auto")) {
-			profile = profiles.stream()
-				.filter((p) -> p.id().equals(selectedProfileId))
-				.findFirst().orElse(profile);
-		}
-		
-		return selectProfile(profile.id());
 	}
 	
 	private static final SessionTokens sessionTokens(String code) throws Exception {
@@ -161,10 +123,6 @@ public final class PrimaAuthenticator {
 		}
 	}
 	
-	private static final Configuration configuration() {
-		return IPrimaHelper.configuration();
-	}
-	
 	private static final SessionTokens initSessionTokens() throws Exception {
 		return sessionTokens(loginOAuth(
 			AuthenticationData.email(),
@@ -182,8 +140,15 @@ public final class PrimaAuthenticator {
 		
 		String profileId = Cached.profile().id();
 		String deviceId = Cached.device().id();
+		String profileTokenSecret = Profiles.profileTokenSecret();
 		
-		return new SessionData(tokens.rawString(), tokens.accessToken(), profileId, deviceId);
+		return new SessionData(
+			tokens.rawString(),
+			tokens.accessToken(),
+			profileId,
+			deviceId,
+			profileTokenSecret
+		);
 	}
 	
 	private static final SessionTokens sessionTokens() throws Exception {
@@ -243,7 +208,9 @@ public final class PrimaAuthenticator {
 			
 			String profileId = AuthenticationData.profile();
 			
-			if(profileId == null || profileId.equalsIgnoreCase("auto")) {
+			if(profileId == null
+					|| profileId.isEmpty()
+					|| profileId.equalsIgnoreCase("auto")) {
 				return profiles.get(0);
 			}
 			
@@ -278,11 +245,24 @@ public final class PrimaAuthenticator {
 	
 	public static final class Profiles {
 		
-		private static final String URL_PROFILE_PAGE = "https://auth.iprima.cz/user/profile-select";
-		private static final String SELECTOR_PROFILE = ".profile-select";
+		private static final String URL_PROFILE_PAGE = "https://www.iprima.cz/profily";
 		
 		// Forbid anyone to create an instance of this class
 		private Profiles() {
+		}
+		
+		private static final JSONCollection findJSONCollection(
+			JSONCollection collection,
+			String name
+		) {
+			if(collection.name().equals(name)) {
+				return collection;
+			}
+			
+			return Utils.stream(collection.collectionsIterable())
+						.map((c) -> findJSONCollection(c, name))
+						.filter(Objects::nonNull)
+						.findFirst().orElse(null);
 		}
 		
 		public static final boolean isProfileSelectPage(URI uri) {
@@ -290,12 +270,18 @@ public final class PrimaAuthenticator {
 		}
 		
 		public static final List<Profile> extractProfiles(String content) throws Exception {
-			List<Profile> profiles = new ArrayList<>();
-			Document document = HTML.parse(content);
+			Nuxt nuxt = Nuxt.extract(content);
 			
-			for(Element elButton : document.select(SELECTOR_PROFILE)) {
-				String id = elButton.attr("data-identifier");
-				String name = elButton.selectFirst(".card-body").text();
+			if(nuxt == null) {
+				throw new IllegalStateException("Unable to Nuxt extract information");
+			}
+			
+			List<Profile> profiles = new ArrayList<>();
+			JSONCollection data = findJSONCollection(nuxt.state(), "profiles");
+			
+			for(JSONCollection profile : data.collectionsIterable()) {
+				String id = profile.getString("ulid");
+				String name = profile.getString("name");
 				profiles.add(new Profile(id, name));
 			}
 			
@@ -304,6 +290,25 @@ public final class PrimaAuthenticator {
 		
 		public static final List<Profile> list() throws Exception {
 			return extractProfiles(Web.request(Request.of(Net.uri(URL_PROFILE_PAGE)).GET()).body());
+		}
+		
+		public static final String profileTokenSecret() throws Exception {
+			try(Response.OfString response = Web.request(
+					Request.of(Net.uri(Profiles.URL_PROFILE_PAGE)).GET()
+			)) {
+				String body = response.body();
+				int index = body.indexOf("__NUXT__.config");
+				
+				if(index < 0) {
+					throw new IllegalStateException("Cannot obtain NUXT config");
+				}
+				
+				JSONCollection config = JavaScript.readObject(
+					Utils.bracketSubstring(body, '{', '}', false, index, body.length())
+				);
+				
+				return config.getString("public.profileTokenSecret");
+			}
 		}
 		
 		public static final class Profile {
@@ -448,10 +453,10 @@ public final class PrimaAuthenticator {
 		}
 		
 		public final String tokenDataString() {
-			SSDCollection data = SSDCollection.empty();
-			data.setDirect("access_token", accessToken);
-			data.setDirect("refresh_token", refreshToken);
-			return Utils.base64URLEncode(data.toJSON(true));
+			JSONCollection data = JSONCollection.empty();
+			data.set("access_token", accessToken);
+			data.set("refresh_token", refreshToken);
+			return Utils.base64URLEncode(data.toString(true));
 		}
 		
 		public String rawString() { return rawString; }
@@ -464,13 +469,45 @@ public final class PrimaAuthenticator {
 		private final String accessToken;
 		private final String profileId;
 		private final String deviceId;
+		private final String profileTokenSecret;
 		private Map<String, String> requestHeaders;
 		
-		protected SessionData(String rawString, String accessToken, String profileId, String deviceId) {
+		protected SessionData(
+			String rawString,
+			String accessToken,
+			String profileId,
+			String deviceId,
+			String profileTokenSecret
+		) {
 			this.rawString = rawString;
 			this.accessToken = accessToken;
 			this.profileId = profileId;
 			this.deviceId = deviceId;
+			this.profileTokenSecret = profileTokenSecret;
+		}
+		
+		// Prima+ introduced a new required argument when obtaining media sources. This argument
+		// (select token) is just a Base64-encoded information about the selected profile with
+		// a session ID (usually null) and an expiration time in Unix epoch (usually 45 minutes
+		// in the future). All is wrapped in a JWT token that is signed with HMAC SHA-256.
+		// The signature key seems to be static and is present in the NUXT config object.
+		// We can simplify the whole process to hardcode some known stuff and just find the sign
+		// key just in case, when they decide to change it or if it is actually not always static.
+		private final String profileSelectToken() {
+			final long expSeconds = 45 * 60; // 45 minutes
+			JSONCollection profileToken = JSONCollection.ofObject(
+				"profileId", JSONObject.ofString(profileId),
+				"sessionId", JSONObject.ofNull(),
+				"exp", JSONObject.ofLong(System.currentTimeMillis() / 1000L + expSeconds)
+			);
+			
+			String header = Utils.base64URLEncode("{\"alg\":\"HS256\"}");
+			String body = Utils.base64URLEncode(profileToken.toString(true));
+			String signature = Utils.base64URLEncodeRawAsString(
+				Crypto.hmac256(header + '.' + body, profileTokenSecret)
+			);
+			
+			return header + '.' + body + '.' + signature;
 		}
 		
 		public final Map<String, String> requestHeaders() {
@@ -479,7 +516,9 @@ public final class PrimaAuthenticator {
 					"X-OTT-Access-Token", accessToken,
 					"X-OTT-CDN-Url-Type", "WEB",
 					"X-OTT-Device", deviceId,
-					"X-OTT-User-SubProfile", profileId
+					"X-OTT-User-SubProfile", profileId,
+					// The new required argument must be passed in a Cookie.
+					"Cookie", "prima_profile_select_token=" + profileSelectToken()
 				);
 			}
 			
@@ -490,6 +529,25 @@ public final class PrimaAuthenticator {
 		public String accessToken() { return accessToken; }
 		public String profileId() { return profileId; }
 		public String deviceId() { return deviceId; }
+		
+		private static final class Crypto {
+			
+			private static final String HMAC_SHA256 = "HmacSHA256";
+			
+			private Crypto() {
+			}
+			
+			public static final byte[] hmac256(String data, String key) {
+				try {
+					SecretKeySpec keySpec = new SecretKeySpec(key.getBytes(), HMAC_SHA256);
+					Mac mac = Mac.getInstance(HMAC_SHA256);
+					mac.init(keySpec);
+					return mac.doFinal(data.getBytes());
+				} catch(NoSuchAlgorithmException | InvalidKeyException ex) {
+					throw new IllegalStateException("Cannot sign data", ex); // Should not happen
+				}
+			}
+		}
 	}
 	
 	public static final class AuthenticationData {
