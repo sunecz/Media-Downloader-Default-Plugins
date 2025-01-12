@@ -936,7 +936,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			
 			static {
 				ENDPOINT = Net.uri("https://api.ceskatelevize.cz/video/v1/playlist-vod/v1/");
-				PATH_EXTERNAL = "stream-data/media/external/%{idec}s";
+				PATH_EXTERNAL = "stream-data/media/external/%{idec}s?canPlayDrm=true";
 			}
 			
 			private V1() {}
