@@ -173,7 +173,7 @@ public final class PrimaCommon {
 			}
 			
 			private static final void setHeader(JSONCollection json) {
-				json.set("id", "1");
+				json.set("id", "web-1");
 				json.set("jsonrpc", "2.0");
 			}
 			
