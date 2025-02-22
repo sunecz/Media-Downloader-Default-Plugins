@@ -1,8 +1,8 @@
 package sune.app.mediadown.media_engine.iprima;
 
 import java.io.IOException;
+import java.net.HttpCookie;
 import java.net.URI;
-import java.net.http.HttpClient.Redirect;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
@@ -26,7 +26,6 @@ import sune.app.mediadown.media_engine.iprima.PrimaCommon.MessageException;
 import sune.app.mediadown.media_engine.iprima.PrimaCommon.Nuxt;
 import sune.app.mediadown.media_engine.iprima.PrimaCommon.RPC;
 import sune.app.mediadown.media_engine.iprima.PrimaCommon.TranslatableException;
-import sune.app.mediadown.net.HTML;
 import sune.app.mediadown.net.Net;
 import sune.app.mediadown.net.Web;
 import sune.app.mediadown.net.Web.Request;
@@ -41,22 +40,14 @@ import sune.app.mediadown.util.Utils.Ignore;
 
 public final class PrimaAuthenticator {
 	
-	private static final String URL_OAUTH_LOGIN;
-	private static final String URL_OAUTH_TOKEN;
-	private static final String URL_OAUTH_AUTHORIZE;
-	private static final String URL_USER_AUTH;
-	private static final String URL_SUCCESSFUL_LOGIN;
+	private static final String URL_SESSION_CREATE;
 	
-	private static final VarLoader<SessionTokens> sessionTokens;
+	private static final VarLoader<Session> session;
 	private static final VarLoader<SessionData> sessionData;
 	
 	static {
-		URL_OAUTH_LOGIN = "https://auth.iprima.cz/oauth2/login";
-		URL_OAUTH_TOKEN = "https://auth.iprima.cz/oauth2/token";
-		URL_OAUTH_AUTHORIZE = "https://auth.iprima.cz/oauth2/authorize";
-		URL_USER_AUTH = "https://ucet.iprima.cz/login?auth_token_code=%{code}s";
-		URL_SUCCESSFUL_LOGIN = "https://auth.iprima.cz/sso/auth-check";
-		sessionTokens = VarLoader.ofChecked(PrimaAuthenticator::initSessionTokens);
+		URL_SESSION_CREATE = "https://ucet.iprima.cz/api/session/create";
+		session = VarLoader.ofChecked(PrimaAuthenticator::initSession);
 		sessionData = VarLoader.ofChecked(PrimaAuthenticator::initSessionData);
 	}
 	
@@ -64,95 +55,47 @@ public final class PrimaAuthenticator {
 	private PrimaAuthenticator() {
 	}
 	
-	private static final String loginOAuth(String email, String password) throws Exception {
-		Response.OfString response = Web.request(Request.of(Net.uri(URL_OAUTH_LOGIN)).GET());
-		String csrfToken = HTML.parse(response.body()).selectFirst("input[name='_csrf_token']").val();
-		String body = Net.queryString("_email", email, "_password", password, "_csrf_token", csrfToken);
-		response = Web.request(Request.of(Net.uri(URL_OAUTH_LOGIN)).POST(body));
-		
-		if(!isSuccessfulLoginURI(response.uri())) {
-			throw new IncorrectAuthDataException();
-		}
-		
-		return Net.queryDestruct(response.uri()).valueOf("code", null);
-	}
-	
-	private static final boolean isSuccessfulLoginURI(URI uri) {
-		return Utils.beforeFirst(uri.toString(), "?").equals(URL_SUCCESSFUL_LOGIN);
-	}
-	
-	private static final SessionTokens sessionTokens(String code) throws Exception {
-		if(code == null) {
-			return null;
-		}
-		
+	private static final Session login(String email, String password) throws Exception {
 		String body = Net.queryString(
-			"scope", "openid+email+profile+phone+address+offline_access",
-			"client_id", "prima_sso",
-			"grant_type", "authorization_code",
-			"code", code,
-			"redirect_uri", "https://auth.iprima.cz/sso/auth-check"
+			"deviceName", Devices.DEFAULT_DEVICE_NAME,
+			"email", email,
+			"password", password
 		);
 		
-		try(Response.OfStream response = Web.requestStream(Request.of(Net.uri(URL_OAUTH_TOKEN)).POST(body))) {
-			return SessionTokens.parse(JSON.read(response.stream()));
+		try(Response.OfStream response = Web.requestStream(
+				Request.of(Net.uri(URL_SESSION_CREATE)).POST(body)
+		)) {
+			if(response.statusCode() != 200) {
+				throw new IncorrectAuthDataException();
+			}
+			
+			return Session.parse(JSON.read(response.stream()));
 		}
 	}
 	
-	private static final String authorize(SessionTokens tokens) throws Exception {
-		String query = Net.queryString(
-			"response_type", "token_code",
-			"client_id", "sso_token",
-			"token", tokens.tokenDataString()
-		);
-		
-		URI uri = Net.uri(URL_OAUTH_AUTHORIZE + '?' + query);
-		try(Response.OfStream response = Web.requestStream(Request.of(uri).GET())) {
-			return JSON.read(response.stream()).getString("code", null);
-		}
-	}
-	
-	private static final boolean userAuth(String code) throws Exception {
-		if(code == null) {
-			return false;
-		}
-		
-		URI uri = Net.uri(Utils.format(URL_USER_AUTH, "code", code));
-		try(Response.OfStream response = Web.requestStream(Request.of(uri).followRedirects(Redirect.NEVER).GET())) {
-			return response.statusCode() == 302;
-		}
-	}
-	
-	private static final SessionTokens initSessionTokens() throws Exception {
-		return sessionTokens(loginOAuth(
+	private static final Session initSession() throws Exception {
+		return login(
 			AuthenticationData.email(),
 			AuthenticationData.password()
-		));
+		);
 	}
 	
 	private static final SessionData initSessionData() throws Exception {
-		SessionTokens tokens = sessionTokens();
-		boolean success = userAuth(authorize(tokens));
-		
-		if(!success) {
-			throw new IllegalStateException("Unsuccessful log in");
-		}
-		
+		Session session = session();
 		String profileId = Cached.profile().id();
 		String deviceId = Cached.device().id();
 		String profileTokenSecret = Profiles.profileTokenSecret();
 		
 		return new SessionData(
-			tokens.rawString(),
-			tokens.accessToken(),
+			session,
 			profileId,
 			deviceId,
 			profileTokenSecret
 		);
 	}
 	
-	private static final SessionTokens sessionTokens() throws Exception {
-		return sessionTokens.valueChecked();
+	private static final Session session() throws Exception {
+		return session.valueChecked();
 	}
 	
 	public static final SessionData sessionData() throws Exception {
@@ -289,12 +232,17 @@ public final class PrimaAuthenticator {
 		}
 		
 		public static final List<Profile> list() throws Exception {
-			return extractProfiles(Web.request(Request.of(Net.uri(URL_PROFILE_PAGE)).GET()).body());
+			Session session = session();
+			Request request = Request.of(Net.uri(URL_PROFILE_PAGE))
+				.cookies(session.cookies()) // Must include the session cookies
+				.GET();
+			
+			return extractProfiles(Web.request(request).body());
 		}
 		
 		public static final String profileTokenSecret() throws Exception {
 			try(Response.OfString response = Web.request(
-					Request.of(Net.uri(Profiles.URL_PROFILE_PAGE)).GET()
+					Request.of(Net.uri(URL_PROFILE_PAGE)).GET()
 			)) {
 				String body = response.body();
 				int index = body.indexOf("__NUXT__.config");
@@ -328,7 +276,7 @@ public final class PrimaAuthenticator {
 	
 	public static final class Devices {
 		
-		private static final String DEFAULT_DEVICE_NAME = "Media Downloader";
+		private static final String DEFAULT_DEVICE_NAME = "Windows Chrome";
 		private static final String DEFAULT_DEVICE_TYPE = "WEB";
 		
 		// Forbid anyone to create an instance of this class
@@ -336,7 +284,7 @@ public final class PrimaAuthenticator {
 		}
 		
 		private static final String accessToken() throws Exception {
-			return sessionTokens().accessToken();
+			return session().accessToken();
 		}
 		
 		private static final Device parseDevice(JSONCollection data) {
@@ -432,55 +380,77 @@ public final class PrimaAuthenticator {
 		}
 	}
 	
-	private static final class SessionTokens {
+	private static final class Session {
 		
-		private final String rawString;
+		private final String sessionId;
+		private final String ssoToken;
 		private final String accessToken;
 		private final String refreshToken;
+		private List<HttpCookie> cookies;
 		
-		protected SessionTokens(String rawString, String accessToken, String refreshToken) {
-			this.rawString = rawString;
+		protected Session(
+			String sessionId,
+			String ssoToken,
+			String accessToken,
+			String refreshToken
+		) {
+			this.sessionId = sessionId;
+			this.ssoToken = ssoToken;
 			this.accessToken = accessToken;
 			this.refreshToken = refreshToken;
 		}
 		
-		public static final SessionTokens parse(JSONCollection json) {
-			return new SessionTokens(
-				json.toString(true),
-				json.getString("access_token"),
-				json.getString("refresh_token")
+		public static final Session parse(JSONCollection json) {
+			String sessionId = json.getString("sessionId");
+			String ssoToken = Utils.base64Encode(json.toString(true));
+			String accessToken = json.getString("accessToken.value");
+			String refreshToken = json.getString("refreshToken.valueEncrypted");
+
+			return new Session(
+				sessionId,
+				ssoToken,
+				accessToken,
+				refreshToken
 			);
 		}
 		
-		public final String tokenDataString() {
-			JSONCollection data = JSONCollection.empty();
-			data.set("access_token", accessToken);
-			data.set("refresh_token", refreshToken);
-			return Utils.base64URLEncode(data.toString(true));
+		public List<HttpCookie> cookies() {
+			if(cookies == null) {
+				cookies = List.of(
+					Web.Cookie.builder("prima_sso_token", ssoToken)
+						.path("/")
+						.maxAge(365L * 24L * 3600L) // 1 year in seconds
+						.build()
+				);
+			}
+			
+			return cookies;
 		}
 		
-		public String rawString() { return rawString; }
+		public String sessionId() { return sessionId; }
 		public String accessToken() { return accessToken; }
+		
+		@SuppressWarnings("unused")
+		public String ssoToken() { return ssoToken; }
+		@SuppressWarnings("unused")
+		public String refreshToken() { return refreshToken; }
 	}
 	
 	public static final class SessionData {
 		
-		private final String rawString;
-		private final String accessToken;
+		private final Session session;
 		private final String profileId;
 		private final String deviceId;
 		private final String profileTokenSecret;
 		private Map<String, String> requestHeaders;
 		
 		protected SessionData(
-			String rawString,
-			String accessToken,
+			Session session,
 			String profileId,
 			String deviceId,
 			String profileTokenSecret
 		) {
-			this.rawString = rawString;
-			this.accessToken = accessToken;
+			this.session = session;
 			this.profileId = profileId;
 			this.deviceId = deviceId;
 			this.profileTokenSecret = profileTokenSecret;
@@ -497,7 +467,7 @@ public final class PrimaAuthenticator {
 			final long expSeconds = 45 * 60; // 45 minutes
 			JSONCollection profileToken = JSONCollection.ofObject(
 				"profileId", JSONObject.ofString(profileId),
-				"sessionId", JSONObject.ofNull(),
+				"sessionId", JSONObject.ofString(session.sessionId()),
 				"exp", JSONObject.ofLong(System.currentTimeMillis() / 1000L + expSeconds)
 			);
 			
@@ -513,7 +483,7 @@ public final class PrimaAuthenticator {
 		public final Map<String, String> requestHeaders() {
 			if(requestHeaders == null) {
 				requestHeaders = Utils.toMap(
-					"X-OTT-Access-Token", accessToken,
+					"X-OTT-Access-Token", session.accessToken(),
 					"X-OTT-CDN-Url-Type", "WEB",
 					"X-OTT-Device", deviceId,
 					"X-OTT-User-SubProfile", profileId,
@@ -525,8 +495,7 @@ public final class PrimaAuthenticator {
 			return requestHeaders;
 		}
 		
-		public String rawString() { return rawString; }
-		public String accessToken() { return accessToken; }
+		public String accessToken() { return session.accessToken(); }
 		public String profileId() { return profileId; }
 		public String deviceId() { return deviceId; }
 		
