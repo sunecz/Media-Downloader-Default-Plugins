@@ -660,6 +660,17 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 	}
 	
 	@Override
+	public void close() throws Exception {
+		if(downloader != null) {
+			downloader.close();
+		}
+		
+		if(temporaryDownloader != null) {
+			temporaryDownloader.close();
+		}
+	}
+	
+	@Override
 	public Download download() {
 		return this;
 	}
