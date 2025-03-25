@@ -2,17 +2,19 @@
 	plugin: {
 		media_engine: {
 			novavoyo: {
-				title: "Voyo (Nova)",
-				error: {
-					media_error: {
-						title: "Chyba: %{name}s",
-						text:  "Média nelze získat z následujícího důvodů:"
+				title: "Oneplay",
+				credentials: {
+					label: {
+						email:    "Email",
+						password: "Heslo",
+						profile:  "Profil"
 					},
-					value: {
-						player_not_logged_in:       "Nejste přihlášeni. Prosím, nastavte Vaše přihlašovací údaje "
-							+ "k účtu v nastavení programu.",
-						player_logged_in_no_access: "K tomuto médiu nemáte přístup. Toto je pravděpodobně způsobeno "
-							+ "nedostatečně vysokým tarifem."
+					profile: {
+						profile_auto: "Automaticky",
+						progress: {
+							log_in:   "Přihlašování...",
+							profiles: "Získávání existujících profilů..."
+						}
 					}
 				}
 			}
