@@ -2,7 +2,7 @@
 	plugin: {
 		drm_engine: {
 			novavoyo: {
-				title: "Voyo Nova (DRM)"
+				title: "Oneplay (DRM)"
 			}
 		}
 	}

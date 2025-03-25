@@ -8,40 +8,44 @@ import sune.app.mediadown.media.Media;
 import sune.app.mediadown.net.Net;
 import sune.app.mediadown.net.Web.Request;
 
-public class NovaVoyoDRMEngine implements DRMEngine {
+public class OneplayDRMEngine implements DRMEngine {
 	
 	// Allow to create an instance when registering the engine
-	NovaVoyoDRMEngine() {
+	OneplayDRMEngine() {
 	}
 	
 	@Override
 	public DRMResolver createResolver() {
-		return new NovaVoyoDRMResolver();
+		return new OneplayDRMResolver();
 	}
 	
 	@Override
 	public boolean isCompatibleURI(URI uri) {
-		// Check the protocol
 		String protocol = uri.getScheme();
-		if(!protocol.equals("http") &&
-		   !protocol.equals("https"))
+		
+		if(!protocol.equals("http") && !protocol.equals("https")) {
 			return false;
-		// Check the host
+		}
+		
 		String host = uri.getHost();
-		if((host.startsWith("www."))) // www prefix
+		
+		if(host.startsWith("www.")) {
 			host = host.substring(4);
-		if(!host.equals("voyo.nova.cz"))
+		}
+		
+		if(!host.equals("oneplay.cz")) {
 			return false;
-		// Otherwise, it is probably compatible URL
+		}
+		
 		return true;
 	}
 	
-	private static final class NovaVoyoDRMResolver implements DRMResolver {
+	private static final class OneplayDRMResolver implements DRMResolver {
 		
 		private static final URI LICENSE_URI;
 		
 		static {
-			LICENSE_URI = Net.uri("https://drm-widevine-licensing.axprod.net/AcquireLicense");
+			LICENSE_URI = Net.uri("https://drm-proxy-widevine.cms.jyxo-tls.cz/AcquireLicense");
 		}
 		
 		@Override
@@ -49,7 +53,7 @@ public class NovaVoyoDRMEngine implements DRMEngine {
 			String token = Media.root(media).metadata().get("drmToken", "");
 			
 			return Request.of(LICENSE_URI)
-				.addHeaders("Referer", "https://media.cms.nova.cz/", "X-AxDRM-Message", token)
+				.addHeaders("Referer", "https://www.oneplay.cz/", "X-AxDRM-Message", token)
 				.POST(licenseRequest, "application/octet-stream");
 		}
 	}
