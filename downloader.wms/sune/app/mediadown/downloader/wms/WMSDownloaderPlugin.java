@@ -12,7 +12,7 @@ import sune.app.mediadown.update.Version;
 
 @Plugin(name          = "downloader.wms",
 	    title         = "plugin.downloader.wms.title",
-	    version       = "00.02.09-0009",
+	    version       = "00.02.09-0010",
 	    author        = "Sune",
 	    updateBaseURL = "https://app.sune.tech/mediadown/dat/plugin/0002/downloader/wms/",
 	    updatable     = true)
