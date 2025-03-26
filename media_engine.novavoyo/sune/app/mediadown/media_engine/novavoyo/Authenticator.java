@@ -80,8 +80,11 @@ public final class Authenticator {
 	}
 	
 	public static final boolean hasCredentials() {
-		try {
-			return CredentialsManager.instance().has(Common.credentialsName());
+		try(OneplayCredentials credentials = credentials()) {
+			return (
+				Utils.OfString.nonEmpty(credentials.email())
+					&& Utils.OfString.nonEmpty(credentials.password())
+			);
 		} catch(IOException ex) {
 			return false;
 		}
