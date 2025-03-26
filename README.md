@@ -11,7 +11,7 @@ Default plugins for Media Downloader.
 - [TV Barrandov](https://www.barrandov.tv/)
 - [Autosalon.tv](https://autosalon.tv/)
 - [Primadoma.tv](https://primadoma.tv/)
-- [Voyo (Nova)](https://voyo.nova.cz/)
+- [Oneplay](https://www.oneplay.cz/)
 - [Stream.cz](https://www.stream.cz/)
 - [Archív Markíza](https://videoarchiv.markiza.sk/)
 - [TN.cz](https://tn.nova.cz/)
