@@ -49,6 +49,9 @@ public final class OneplayEnginePlugin extends PluginBase {
 				.inGroup(group)
 				.withTransformer(Password::value, Password::new)
 				.withDefaultValue(""));
+			builder.addProperty(ConfigurationProperty.ofString("synthetic_profileId").asHidden(true));
+			builder.addProperty(ConfigurationProperty.ofString("synthetic_authToken").asHidden(true));
+			builder.addProperty(ConfigurationProperty.ofString("synthetic_deviceId").asHidden(true));
 		}
 		
 		builder.addProperty(ConfigurationProperty.ofString("token").asHidden(true));
@@ -90,8 +93,14 @@ public final class OneplayEnginePlugin extends PluginBase {
 		}
 		
 		CredentialsMigrator
-			.ofConfiguration(configuration, "authData_email", "authData_password")
-			.asCredentials(EmailCredentials.class, String.class, String.class)
+			.ofConfiguration(
+				configuration, "authData_email", "authData_password",
+				"synthetic_profileId", "synthetic_authToken", "synthetic_deviceId"
+			)
+			.asCredentials(
+				OneplayCredentials.class,
+				String.class, String.class, String.class, String.class, String.class
+			)
 			.migrate(name);
 		
 		ensureUpdatedCredentials();
