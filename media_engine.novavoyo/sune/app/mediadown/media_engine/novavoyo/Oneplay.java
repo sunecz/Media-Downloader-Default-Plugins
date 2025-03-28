@@ -24,6 +24,7 @@ import sune.app.mediadown.media.MediaMetadata;
 import sune.app.mediadown.media.MediaSource;
 import sune.app.mediadown.media.MediaUtils;
 import sune.app.mediadown.media_engine.novavoyo.Authenticator.AuthenticationData;
+import sune.app.mediadown.media_engine.novavoyo.Common.TranslatableException;
 import sune.app.mediadown.media_engine.novavoyo.Connection.Response;
 import sune.app.mediadown.net.Net;
 import sune.app.mediadown.task.ListTask;
@@ -224,6 +225,10 @@ public final class Oneplay {
 			return; // Nothing to do
 		}
 		
+		if(!Authenticator.hasCredentials()) {
+			throw new TranslatableException("error.incorrect_auth_data");
+		}
+		
 		AuthenticationData authData = openConnection((connection) -> {
 			return Authenticator.login(connection);
 		});
@@ -310,11 +315,11 @@ public final class Oneplay {
 	}
 	
 	public ListTask<Program> getPrograms() throws Exception {
-		return ListTask.of((task) -> strategy().getPrograms(task));
+		return ListTask.of(Common.handleErrors((task) -> strategy().getPrograms(task)));
 	}
 	
 	public ListTask<Episode> getEpisodes(Program program) throws Exception {
-		return ListTask.of((task) -> strategy().getEpisodes(task, program));
+		return ListTask.of(Common.handleErrors((task) -> strategy().getEpisodes(task, program)));
 	}
 	
 	public ListTask<Media> getMedia(
@@ -322,7 +327,7 @@ public final class Oneplay {
 		URI uri,
 		Map<String, Object> data
 	) throws Exception {
-		return ListTask.of((task) -> strategy().getMedia(task, engine, uri));
+		return ListTask.of(Common.handleErrors((task) -> strategy().getMedia(task, engine, uri)));
 	}
 	
 	public List<Profile> profiles() throws Exception {

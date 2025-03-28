@@ -16,6 +16,12 @@
 							profiles: "Získávání existujících profilů..."
 						}
 					}
+				},
+				error: {
+					incorrect_auth_data: {
+						title: "Chyba",
+						text:  "Nelze se přihlásit, zkontrolujte prosím své přihlašovací údaje."
+					}
 				}
 			}
 		}

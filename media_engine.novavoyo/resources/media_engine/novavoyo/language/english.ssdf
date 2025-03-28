@@ -16,6 +16,12 @@
 							profiles: "Obtaining existing profiles..."
 						}
 					}
+				},
+				error: {
+					incorrect_auth_data: {
+						title: "Error",
+						text:  "Unable to log in, please check your login credentials."
+					}
 				}
 			}
 		}
