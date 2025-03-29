@@ -32,6 +32,42 @@ public final class Authenticator {
 		);
 	}
 	
+	private static final String selectAccount(JSONCollection accounts) {
+		return Utils.stream(accounts.collectionsIterator())
+					.filter((a) -> "eBox".equals(a.getString("accountProvider")))
+					.map((a) -> a.getString("accountId"))
+					.findFirst().orElse(null);
+	}
+	
+	private static final String doSelectAccount(Connection connection, JSONCollection data)
+			throws Exception {
+		String accountId = selectAccount(data.getCollection("step.accounts"));
+		String authCode = data.getString("step.authToken");
+		
+		JSONCollection args = JSONCollection.ofObject(
+			"accountId", JSONObject.ofString(accountId),
+			"authCode", JSONObject.ofString(authCode)
+		);
+		
+		Response response = connection.command(
+			"user.login.step",
+			"LoginWithAccountCommand",
+			args
+		);
+		
+		String authToken;
+		
+		if(!response.isSuccess()
+				|| (authToken = response.data().getString("step.bearerToken")) == null) {
+			throw new MessageException(String.format(
+				"Failed to log in (account step). Reason: %s",
+				response.data().getString("message", "Unknown reason")
+			));
+		}
+		
+		return authToken;
+	}
+	
 	private static final String doLogin(Connection connection, OneplayCredentials credentials)
 			throws Exception {
 		JSONCollection args = JSONCollection.ofObject(
@@ -45,14 +81,20 @@ public final class Authenticator {
 			args
 		);
 		
+		JSONCollection data = response.data();
+		String schema = data.getString("step.schema");
 		String authToken;
 		
-		if(!response.isSuccess()
-				|| (authToken = response.data().getString("step.bearerToken")) == null) {
-			throw new MessageException(String.format(
-				"Failed to log in. Reason: %s",
-				response.data().getString("message", "Unknown reason")
-			));
+		if("ShowAccountChooserStep".equals(schema)) {
+			authToken = doSelectAccount(connection, data);
+		} else {
+			if(!response.isSuccess()
+					|| (authToken = response.data().getString("step.bearerToken")) == null) {
+				throw new MessageException(String.format(
+					"Failed to log in. Reason: %s",
+					response.data().getString("message", "Unknown reason")
+				));
+			}
 		}
 		
 		return authToken;

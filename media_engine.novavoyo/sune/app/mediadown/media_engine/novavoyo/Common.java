@@ -136,12 +136,12 @@ public final class Common {
 		protected final String message;
 		
 		public MessageException(String message) {
-			super();
+			super(message);
 			this.message = Objects.requireNonNull(message);
 		}
 		
 		public MessageException(String message, Throwable cause) {
-			super(cause);
+			super(message, cause);
 			this.message = Objects.requireNonNull(message);
 		}
 		
