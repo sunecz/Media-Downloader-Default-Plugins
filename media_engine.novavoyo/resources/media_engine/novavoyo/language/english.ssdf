@@ -21,6 +21,9 @@
 					incorrect_auth_data: {
 						title: "Error",
 						text:  "Unable to log in, please check your login credentials."
+					},
+					message_error: {
+						title: "Error"
 					}
 				}
 			}

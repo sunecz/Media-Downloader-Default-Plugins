@@ -12,6 +12,7 @@ import sune.app.mediadown.plugin.PluginConfiguration;
 import sune.app.mediadown.task.ListTask;
 import sune.app.mediadown.util.CheckedConsumer;
 import sune.app.mediadown.util.CheckedRunnable;
+import sune.app.mediadown.util.CheckedSupplier;
 import sune.app.mediadown.util.JSON.JSONCollection;
 import sune.app.mediadown.util.Utils;
 
@@ -71,6 +72,16 @@ public final class Common {
 		});
 	}
 	
+	public static final <T> T handleErrors(CheckedSupplier<T> action) throws Exception {
+		try {
+			return action.get();
+		} catch(Exception ex) {
+			// More user-friendly error messages
+			error(ex);
+			throw ex;
+		}
+	}
+	
 	public static final void error(Throwable throwable) {
 		if(throwable == null) {
 			return;
@@ -83,6 +94,14 @@ public final class Common {
 			TranslatableException tex = (TranslatableException) th;
 			Translation tr = translation().getTranslation(tex.translationPath());
 			Dialog.showError(tr.getSingle("title"), tr.getSingle("text"));
+			return; // Do not continue
+		}
+		
+		if((th = throwable) instanceof MessageException
+				|| (th = throwable.getCause()) instanceof MessageException) {
+			MessageException mex = (MessageException) th;
+			Translation tr = translation().getTranslation("error.message_error");
+			Dialog.showError(tr.getSingle("title"), mex.message());
 			return; // Do not continue
 		}
 		
@@ -107,6 +126,27 @@ public final class Common {
 		
 		public String translationPath() {
 			return translationPath;
+		}
+	}
+	
+	public static class MessageException extends Exception {
+		
+		private static final long serialVersionUID = -6400459834129159399L;
+		
+		protected final String message;
+		
+		public MessageException(String message) {
+			super();
+			this.message = Objects.requireNonNull(message);
+		}
+		
+		public MessageException(String message, Throwable cause) {
+			super(cause);
+			this.message = Objects.requireNonNull(message);
+		}
+		
+		public String message() {
+			return message;
 		}
 	}
 }

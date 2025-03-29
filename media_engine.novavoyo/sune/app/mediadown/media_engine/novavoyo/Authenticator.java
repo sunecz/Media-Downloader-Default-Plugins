@@ -6,6 +6,7 @@ import java.util.Objects;
 import java.util.stream.Collectors;
 
 import sune.app.mediadown.authentication.CredentialsManager;
+import sune.app.mediadown.media_engine.novavoyo.Common.MessageException;
 import sune.app.mediadown.media_engine.novavoyo.Connection.Response;
 import sune.app.mediadown.util.JSON.JSONCollection;
 import sune.app.mediadown.util.JSON.JSONObject;
@@ -44,11 +45,17 @@ public final class Authenticator {
 			args
 		);
 		
-		return (
-			response.isSuccess()
-				? response.data().getString("step.bearerToken")
-				: null
-		);
+		String authToken;
+		
+		if(!response.isSuccess()
+				|| (authToken = response.data().getString("step.bearerToken")) == null) {
+			throw new MessageException(String.format(
+				"Failed to log in. Reason: %s",
+				response.data().getString("message", "Unknown reason")
+			));
+		}
+		
+		return authToken;
 	}
 	
 	private static final String currentDeviceId(Connection connection) throws Exception {
@@ -141,10 +148,7 @@ public final class Authenticator {
 				connection.authenticate(null); // Reset the authentication token
 			}
 			
-			if((authToken = doLogin(connection, credentials)) == null) {
-				throw new IllegalStateException("Failed to log in");
-			}
-			
+			authToken = doLogin(connection, credentials);
 			connection.authenticate(authToken);
 			selectedProfileId = credentials.profileId();
 		}
@@ -195,14 +199,16 @@ public final class Authenticator {
 		}
 		
 		public static final List<Profile> all(Connection connection) throws Exception {
-			Response response = connection.request("user.profiles.display");
-			JSONCollection profiles = response.data().getCollection("availableProfiles.profiles");
-			
-			return (
-				Utils.stream(profiles.collectionsIterable())
-					.map(Profiles::parseProfile)
-					.collect(Collectors.toList())
-			);
+			return Common.handleErrors(() -> {
+				Response response = connection.request("user.profiles.display");
+				JSONCollection profiles = response.data().getCollection("availableProfiles.profiles");
+				
+				return (
+					Utils.stream(profiles.collectionsIterable())
+						.map(Profiles::parseProfile)
+						.collect(Collectors.toList())
+				);
+			});
 		}
 	}
 	

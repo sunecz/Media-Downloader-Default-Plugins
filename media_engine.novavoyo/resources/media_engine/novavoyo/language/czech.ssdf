@@ -21,6 +21,9 @@
 					incorrect_auth_data: {
 						title: "Chyba",
 						text:  "Nelze se přihlásit, zkontrolujte prosím své přihlašovací údaje."
+					},
+					message_error: {
+						title: "Chyba"
 					}
 				}
 			}
