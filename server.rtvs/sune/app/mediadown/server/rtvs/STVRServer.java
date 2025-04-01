@@ -31,7 +31,7 @@ import sune.app.mediadown.util.JSON.JSONCollection;
 import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
 
-public class RTVSServer implements Server {
+public class STVRServer implements Server {
 	
 	private static final PluginBase PLUGIN = PluginLoaderContext.getContext().getInstance();
 	
@@ -42,11 +42,11 @@ public class RTVSServer implements Server {
 	public static final Image  ICON    = PLUGIN.getIcon();
 	
 	private static final Regex REGEX_URI = Regex.of(
-		"https?://(?:www\\.)?rtvs\\.sk/(radio|televizia)/archiv/\\d+/\\d+/?"
+		"https?://(?:www\\.)?stvr\\.sk/(radio|televizia)/archiv/\\d+/\\d+/?"
 	);
 	
 	// Allow to create an instance when registering the server
-	RTVSServer() {
+	STVRServer() {
 	}
 	
 	@Override
@@ -84,7 +84,7 @@ public class RTVSServer implements Server {
 			
 			int id = Integer.valueOf(Utils.afterLast(iframe.attr("id"), "_"));
 			String playlistUrl = Utils.format(
-				"https://www.rtvs.sk/json/%{endpoint}s.json?id=%{id}d&=&b=chrome&p=win&f=0&d=1",
+				"https://www.stvr.sk/json/%{endpoint}s.json?id=%{id}d&=&b=chrome&p=win&f=0&d=1",
 				"endpoint", endpoint,
 				"id", id
 			);
@@ -163,7 +163,7 @@ public class RTVSServer implements Server {
 		String host = uri.getHost();
 		if(host.startsWith("www.")) // www prefix
 			host = host.substring(4);
-		if(!host.equals("rtvs.sk"))
+		if(!host.equals("stvr.sk"))
 			return false;
 		// Otherwise, it is probably compatible URL
 		return true;
