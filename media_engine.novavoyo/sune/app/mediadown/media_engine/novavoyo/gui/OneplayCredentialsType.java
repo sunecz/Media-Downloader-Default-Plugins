@@ -11,12 +11,12 @@ import javafx.scene.layout.GridPane;
 import javafx.scene.layout.Pane;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
-import sune.app.mediadown.MediaDownloader;
 import sune.app.mediadown.concurrent.Threads;
 import sune.app.mediadown.gui.GUI.CredentialsRegistry.CredentialsType;
 import sune.app.mediadown.gui.control.PasswordFieldPane;
 import sune.app.mediadown.language.Translation;
 import sune.app.mediadown.media_engine.novavoyo.Authenticator;
+import sune.app.mediadown.media_engine.novavoyo.Common;
 import sune.app.mediadown.media_engine.novavoyo.Oneplay;
 import sune.app.mediadown.media_engine.novavoyo.OneplayCredentials;
 import sune.app.mediadown.media_engine.novavoyo.Profile;
@@ -160,7 +160,7 @@ public class OneplayCredentialsType extends CredentialsType<OneplayCredentials> 
 						enableSelect(true);
 					}
 				} catch(Exception ex) {
-					MediaDownloader.error(ex);
+					Common.error(ex);
 				} finally {
 					progressText(null);
 					itemsLoaded = true;
