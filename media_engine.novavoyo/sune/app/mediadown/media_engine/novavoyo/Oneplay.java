@@ -18,11 +18,13 @@ import sune.app.mediadown.entity.Episode;
 import sune.app.mediadown.entity.MediaEngine;
 import sune.app.mediadown.entity.Program;
 import sune.app.mediadown.media.Media;
+import sune.app.mediadown.media.MediaContainer;
 import sune.app.mediadown.media.MediaFormat;
 import sune.app.mediadown.media.MediaLanguage;
 import sune.app.mediadown.media.MediaMetadata;
 import sune.app.mediadown.media.MediaSource;
 import sune.app.mediadown.media.MediaUtils;
+import sune.app.mediadown.media.SubtitlesMedia;
 import sune.app.mediadown.media_engine.novavoyo.Authenticator.AuthenticationData;
 import sune.app.mediadown.media_engine.novavoyo.Common.TranslatableException;
 import sune.app.mediadown.media_engine.novavoyo.Connection.Response;
@@ -510,11 +512,35 @@ public final class Oneplay {
 					}
 				}
 				
-				List<Media> media = MediaUtils.createMedia(
+				List<Media.Builder<?, ?>> media = MediaUtils.createMediaBuilders(
 					source, videoUri, sourceUri, title, language, metadata
 				);
 				
-				for(Media s : media) {
+				if(stream.hasCollection("subtitles")) {
+					JSONCollection subtitlesArray = stream.getCollection("subtitles");
+					
+					for(JSONCollection subtitlesInfo : subtitlesArray.collectionsIterable()) {
+						String schema = subtitlesInfo.getString("location.schema");
+						
+						if(!"ExternalTrackLocation".equals(schema)) {
+							continue; // Support only external subtitles for now
+						}
+						
+						URI subtitlesUri = Net.uri(subtitlesInfo.getString("location.url"));
+						MediaLanguage subtitlesLanguage = MediaLanguage.ofCode(subtitlesInfo.getString("language.code"));
+						MediaFormat subtitlesFormat = MediaFormat.ofName(subtitlesInfo.getString("format"));
+						
+						SubtitlesMedia.Builder<?, ?> subtitles = SubtitlesMedia.simple()
+							.source(source)
+							.uri(subtitlesUri)
+							.format(subtitlesFormat)
+							.language(subtitlesLanguage);
+						
+						media.forEach((m) -> ((MediaContainer.Builder<?, ?>) m).addMedia(subtitles));
+					}
+				}
+				
+				for(Media s : Utils.iterable(media.stream().map(Media.Builder::build).iterator())) {
 					if(!task.add(s)) {
 						return; // Do not continue
 					}
