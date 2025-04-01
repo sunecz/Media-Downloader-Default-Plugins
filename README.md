@@ -18,7 +18,7 @@ Default plugins for Media Downloader.
 - [Voyo (Markíza)](https://voyo.markiza.sk/)
 - [JOJ Play](https://play.joj.sk/)
 - [SledovaniTV (Nahrávky)](https://sledovanitv.cz/)
-- [RTVS](https://www.rtvs.sk/)
+- [STVR](https://www.stvr.sk/)
 
 ## Legal disclaimer
 These plugins are for educational purposes only. Downloading copyrighted materials from streaming services may violate their Terms of Service. **Use at your own risk.**
