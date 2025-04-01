@@ -26,6 +26,7 @@ import sune.app.mediadown.media.MediaSource;
 import sune.app.mediadown.media.MediaUtils;
 import sune.app.mediadown.media.SubtitlesMedia;
 import sune.app.mediadown.media_engine.novavoyo.Authenticator.AuthenticationData;
+import sune.app.mediadown.media_engine.novavoyo.Common.MessageException;
 import sune.app.mediadown.media_engine.novavoyo.Common.TranslatableException;
 import sune.app.mediadown.media_engine.novavoyo.Connection.Response;
 import sune.app.mediadown.net.Net;
@@ -110,9 +111,9 @@ public final class Oneplay {
 		);
 	}
 	
-	private final void handleErrors(JSONCollection data) {
+	private final void handleErrors(JSONCollection data) throws MessageException {
 		if("Error".equals(data.getString("result.status"))) {
-			throw new IllegalStateException(data.getString("result.message"));
+			throw new MessageException(data.getString("result.message"));
 		}
 	}
 	
@@ -475,6 +476,10 @@ public final class Oneplay {
 				return connection
 					.request("content.play", payload, null, playbackCapabilities()).data();
 			});
+			
+			if("Error".equals(data.getString("status"))) {
+				throw new MessageException(data.getString("message"));
+			}
 			
 			MediaSource source = MediaSource.of(engine);
 			URI sourceUri = uri;
