@@ -171,26 +171,13 @@ final class IPrimaHelper {
 	
 	private static final class PlayIdExtractor {
 		
-		private static final Regex REGEX_PLAYER_INIT = Regex.of("function initPlayer\\d+");
-		private static final Regex REGEX_PLAYER_OPTIONS = Regex.of("(?ms)playerOptions\\s*=\\s*(\\{.*?\\});");
-		private static final Regex REGEX_PLAYER_TYPE = Regex.of("playerType:\\s*\"([^\"]+)\"");
-		private static final Regex REGEX_PLAY_IDS = Regex.of("videos\\s*=\\s*'([^']+)';");
+		private static final Regex REGEX_PLAYER_INIT = Regex.of(
+			"(?s)['\"]DOMContentLoaded['\"],[^\\{]+\\{"
+			+ "(?:(?!initPlayerLauncher)[^\\}])+"
+			+ "initPlayerLauncher\\(\\d+,\\s*['\"]([^'\"]+)['\"]"
+		);
 		
 		private PlayIdExtractor() {
-		}
-		
-		private static final boolean isMainPlayer(String content) {
-			Matcher matcher;
-			return (matcher = REGEX_PLAYER_OPTIONS.matcher(content)).find()
-						&& (matcher = REGEX_PLAYER_TYPE.matcher(matcher.group(1))).find()
-						&& "player".equals(matcher.group(1));
-		}
-		
-		private static final List<String> extractPlayIds(String content) {
-			Matcher matcher;
-			return (matcher = REGEX_PLAY_IDS.matcher(content)).find()
-						? List.of(matcher.group(1).split(","))
-						: null;
 		}
 		
 		public static final List<String> extract(Document document) throws Exception {
@@ -203,18 +190,7 @@ final class IPrimaHelper {
 					continue;
 				}
 				
-				content = Utils.bracketSubstring(
-					content, '{', '}', false, matcher.start(0), content.length()
-				);
-				
-				if(!isMainPlayer(content)) {
-					continue;
-				}
-				
-				List<String> playIds;
-				if((playIds = extractPlayIds(content)) != null) {
-					return playIds;
-				}
+				return List.of(matcher.group(1).split(","));
 			}
 			
 			return List.of(); // No play ID found
