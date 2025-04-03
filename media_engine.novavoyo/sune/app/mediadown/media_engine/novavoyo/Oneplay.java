@@ -170,6 +170,32 @@ public final class Oneplay {
 		);
 	}
 	
+	private final String getEPGContentId(Connection connection, String contentId) throws Exception {
+		JSONCollection payload = JSONCollection.ofObject(
+			"contentId", JSONObject.ofString(contentId)
+		);
+		
+		JSONCollection customData = JSONCollection.ofObject(
+			"shouldBeInModal", JSONObject.ofBoolean(true)
+		);
+		
+		Response response = connection.request(
+			"page.content.display",
+			payload,
+			customData,
+			playbackCapabilities()
+		);
+		
+		JSONCollection blocks = response.data().getCollection("layout.blocks");
+		
+		return Utils.stream(blocks.collectionsIterable())
+			.map((c) -> c.getCollection("mainAction.action"))
+			.filter(Objects::nonNull)
+			.filter((c) -> "content.play".equals(c.getString("call")))
+			.map((c) -> c.getString("params.payload.criteria.contentId"))
+			.findFirst().orElse(null);
+	}
+	
 	private final ProgramInfo getProgramInfo(Connection connection, URI uri) throws Exception {
 		JSONCollection payload = JSONCollection.ofObject(
 			"reason", JSONObject.ofString("start"),
@@ -465,20 +491,46 @@ public final class Oneplay {
 				throw new IllegalStateException("Failed to obtain the content ID");
 			}
 			
-			JSONCollection payload = JSONCollection.ofObject(
-				"criteria", JSONCollection.ofObject(
-					"schema", JSONObject.ofString("ContentCriteria"),
-					"contentId", JSONObject.ofString(contentId)
-				)
-			);
-			
 			JSONCollection data = openConnection((connection) -> {
-				return connection
-					.request("content.play", payload, null, playbackCapabilities()).data();
+				JSONCollection payload = JSONCollection.ofObject(
+					"criteria", JSONCollection.ofObject(
+						"schema", JSONObject.ofString("ContentCriteria"),
+						"contentId", JSONObject.ofString(contentId)
+					)
+				);
+				
+				return connection.request(
+					"content.play",
+					payload,
+					null,
+					playbackCapabilities()
+				).data();
 			});
 			
 			if("Error".equals(data.getString("status"))) {
-				throw new MessageException(data.getString("message"));
+				if(!"4099".equals(data.getString("code"))) {
+					throw new MessageException(data.getString("message"));
+				}
+				
+				String epgContentId = openConnection((connection) -> {
+					return getEPGContentId(connection, contentId);
+				});
+				
+				data = openConnection((connection) -> {
+					JSONCollection payload = JSONCollection.ofObject(
+						"criteria", JSONCollection.ofObject(
+							"schema", JSONObject.ofString("ContentCriteria"),
+							"contentId", JSONObject.ofString(epgContentId)
+						)
+					);
+					
+					return connection.request(
+						"content.play",
+						payload,
+						null,
+						playbackCapabilities()
+					).data();
+				});
 			}
 			
 			MediaSource source = MediaSource.of(engine);
