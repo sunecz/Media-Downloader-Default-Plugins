@@ -62,7 +62,6 @@ import sune.app.mediadown.util.JSON.JSONCollection;
 import sune.app.mediadown.util.JSON.JSONObject;
 import sune.app.mediadown.util.JavaScript;
 import sune.app.mediadown.util.Opt;
-import sune.app.mediadown.util.Reflection;
 import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Utils.Ignore;
@@ -1302,9 +1301,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			try {
 				@SuppressWarnings("unchecked")
 				Constructor<T> ctor = (Constructor<T>) clazz.getDeclaredConstructor();
-				Reflection.setAccessible(ctor, true);
 				T instance = ctor.newInstance();
-				Reflection.setAccessible(ctor, false);
 				return instance;
 			} catch(Exception ex) {
 				// Assume, the class is instantiable

@@ -55,7 +55,6 @@ import sune.app.mediadown.util.CheckedRunnable;
 import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.JSON.JSONCollection;
 import sune.app.mediadown.util.JSON.JSONType;
-import sune.app.mediadown.util.Reflection;
 import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Regex.ReusableMatcher;
 import sune.app.mediadown.util.Utils;
@@ -946,9 +945,7 @@ final class IPrimaHelper {
 			try {
 				@SuppressWarnings("unchecked")
 				Constructor<T> ctor = (Constructor<T>) clazz.getDeclaredConstructor();
-				Reflection.setAccessible(ctor, true);
 				T instance = ctor.newInstance();
-				Reflection.setAccessible(ctor, false);
 				return instance;
 			} catch(Exception ex) {
 				// Assume, the class is instantiable

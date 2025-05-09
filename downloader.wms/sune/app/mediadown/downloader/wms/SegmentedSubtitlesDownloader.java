@@ -8,6 +8,7 @@ import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
+import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.util.HashMap;
 import java.util.List;
@@ -26,7 +27,6 @@ import sune.app.mediadown.media.MediaMetadata;
 import sune.app.mediadown.media.MediaMimeType;
 import sune.app.mediadown.util.Pair;
 import sune.app.mediadown.util.Ref;
-import sune.app.mediadown.util.Reflection3;
 import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
 
@@ -133,9 +133,9 @@ public final class SegmentedSubtitlesDownloader extends FileDownloader {
 			
 			private final Object newInstance(Class<?> clazz) {
 				try {
-					return Reflection3.newInstance(clazz);
+					Constructor<?> ctor = clazz.getDeclaredConstructor();
+					return ctor.newInstance();
 				} catch(NoSuchMethodException
-							| NoSuchFieldException
 							| IllegalArgumentException
 							| IllegalAccessException
 							| InstantiationException
