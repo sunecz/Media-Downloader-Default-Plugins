@@ -14,13 +14,13 @@ import javafx.scene.layout.VBox;
 import sune.app.mediadown.concurrent.Threads;
 import sune.app.mediadown.gui.GUI.CredentialsRegistry.CredentialsType;
 import sune.app.mediadown.gui.control.PasswordFieldPane;
+import sune.app.mediadown.gui.util.FXUtils;
 import sune.app.mediadown.language.Translation;
 import sune.app.mediadown.media_engine.novavoyo.Authenticator;
 import sune.app.mediadown.media_engine.novavoyo.Common;
 import sune.app.mediadown.media_engine.novavoyo.Oneplay;
 import sune.app.mediadown.media_engine.novavoyo.OneplayCredentials;
 import sune.app.mediadown.media_engine.novavoyo.Profile;
-import sune.app.mediadown.util.FXUtils;
 
 public class OneplayCredentialsType extends CredentialsType<OneplayCredentials> {
 	
