@@ -4,7 +4,6 @@ import java.io.IOException;
 import java.net.http.HttpHeaders;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -19,11 +18,12 @@ import sune.app.mediadown.TaskStates;
 import sune.app.mediadown.concurrent.SyncObject;
 import sune.app.mediadown.concurrent.Worker;
 import sune.app.mediadown.conversion.ConversionMedia;
-import sune.app.mediadown.download.AcceleratedFileDownloader;
 import sune.app.mediadown.download.Download;
 import sune.app.mediadown.download.DownloadConfiguration;
 import sune.app.mediadown.download.DownloadContext;
 import sune.app.mediadown.download.DownloadResult;
+import sune.app.mediadown.download.DownloadState;
+import sune.app.mediadown.download.FileDownloader;
 import sune.app.mediadown.download.InternalDownloader;
 import sune.app.mediadown.download.MediaDownloadConfiguration;
 import sune.app.mediadown.event.DownloadEvent;
@@ -48,6 +48,7 @@ import sune.app.mediadown.pipeline.DownloadPipelineResult;
 import sune.app.mediadown.util.NIO;
 import sune.app.mediadown.util.Opt;
 import sune.app.mediadown.util.Pair;
+import sune.app.mediadown.util.Range;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Utils.Ignore;
 
@@ -66,6 +67,9 @@ public final class SimpleDownloader implements Download, DownloadResult {
 	private final InternalState state = new InternalState();
 	private final SyncObject lockPause = new SyncObject();
 	
+	private final ChunkedDownloadInitialState initialState;
+	private final ChunkedDownloadState downloadState = new ChunkedDownloadState();
+	
 	private Worker worker;
 	private long size = MediaConstants.UNKNOWN_SIZE;
 	private DownloadPipelineResult pipelineResult;
@@ -73,10 +77,16 @@ public final class SimpleDownloader implements Download, DownloadResult {
 	private DownloadTracker downloadTracker;
 	private Exception exception;
 	
-	SimpleDownloader(Media media, Path dest, MediaDownloadConfiguration configuration) {
+	SimpleDownloader(
+		Media media,
+		Path dest,
+		MediaDownloadConfiguration configuration,
+		ChunkedDownloadInitialState initialState
+	) {
 		this.media         = Objects.requireNonNull(media);
 		this.dest          = Objects.requireNonNull(dest);
 		this.configuration = Objects.requireNonNull(configuration);
+		this.initialState  = Objects.requireNonNull(initialState);
 		trackerManager.tracker(new WaitTracker());
 	}
 	
@@ -84,14 +94,25 @@ public final class SimpleDownloader implements Download, DownloadResult {
 		int cmp; return (cmp = Integer.compare(b.length(), a.length())) == 0 ? 1 : cmp;
 	}
 	
-	private static final InternalDownloader createDownloader(TrackerManager manager) {
-		return new AcceleratedFileDownloader(manager);
+	private final InternalDownloader createDownloader(TrackerManager manager) {
+		// return new AcceleratedFileDownloader(manager); // FIXME: Enable accelerated downloader back
+		FileDownloader downloader = new FileDownloader(manager);
+		
+		downloader.addEventListener(DownloadEvent.UPDATE, (c) -> {
+			DownloadTracker tracker = (DownloadTracker) c.trackerManager().tracker();
+			downloadState.beginChunk(tracker.current(), downloader.writtenBytes());
+		});
+		
+		return downloader;
 	}
 	
 	private final boolean checkState() {
-		// Check if paused
-		if(isPaused()) lockPause.await();
-		// Check if running
+		// Wait for resume, if paused
+		if(isPaused()) {
+			lockPause.await();
+		}
+		
+		// If already not running, do not continue
 		return state.is(TaskStates.RUNNING);
 	}
 	
@@ -164,19 +185,38 @@ public final class SimpleDownloader implements Download, DownloadResult {
 		
 		for(int i = 0; i < count; ++i) {
 			Path tempFile = dest.getParent().resolve(fileName + "." + i + ".part");
-			Ignore.callVoid(() -> NIO.deleteFile(tempFile));
+			
+			if(i > initialState.resourceIndex
+					|| (i == initialState.resourceIndex && initialState.srcPosition == 0L)) {
+				Ignore.callVoid(() -> NIO.deleteFile(tempFile));
+			}
+			
 			tempFiles.add(tempFile);
 		}
 		
 		return tempFiles;
 	}
 	
-	private final boolean doDownload(MediaHolder mediaHolder, Path output) throws Exception {
+	private final boolean doDownload(
+		MediaHolder mediaHolder,
+		Path output,
+		long srcPosition,
+		long dstPosition
+	) throws Exception {
+		if(!checkState()) {
+			return false;
+		}
+		
 		downloader.start(
 			Request.of(mediaHolder.media().uri()).headers(HEADERS).GET(),
 			output,
-			DownloadConfiguration.ofTotalBytes(mediaHolder.size())
+			DownloadConfiguration.ofRanges(
+				new Range<>(dstPosition, -1L),
+				new Range<>(srcPosition, -1L),
+				mediaHolder.size()
+			)
 		);
+		
 		return true;
 	}
 	
@@ -193,16 +233,34 @@ public final class SimpleDownloader implements Download, DownloadResult {
 		));
 	}
 	
-	private final boolean download(List<MediaHolder> mediaHolders, List<Path> outputs) throws Exception {
-		Iterator<Path> output = outputs.iterator();
-		
-		for(MediaHolder mediaHolder : mediaHolders) {
-			if(!checkState() || !doDownload(mediaHolder, output.next())) {
-				return false;
-			}
+	private final boolean download(
+		List<MediaHolder> mediaHolders,
+		List<Path> outputs,
+		ChunkedDownloadInitialState initialState
+	) throws Exception {
+		if(mediaHolders.size() != outputs.size()) {
+			throw new IllegalArgumentException("Inputs and outputs must be of the same size");
 		}
 		
-		return true;
+		long srcPosition = initialState.srcPosition;
+		long dstPosition = initialState.dstPosition;
+		
+		for(int idx = initialState.resourceIndex, len = mediaHolders.size(); idx < len; ++idx) {
+			MediaHolder mediaHolder = mediaHolders.get(idx);
+			Path output = outputs.get(idx);
+			
+			downloadState.beginResource(idx, srcPosition, dstPosition);
+			
+			if(!doDownload(mediaHolder, output, srcPosition, dstPosition)) {
+				return false;
+			}
+			
+			// Only the first one should have the start state
+			srcPosition = 0L;
+			dstPosition = 0L;
+		}
+		
+		return checkState();
 	}
 	
 	private final boolean downloadSubtitles(List<MediaHolder> subtitles, Path destination) throws Exception {
@@ -219,9 +277,34 @@ public final class SimpleDownloader implements Download, DownloadResult {
 			SubtitlesMedia media = (SubtitlesMedia) subtitle.media();
 			Path path = subtitlesPath(media, baseName, directory);
 			
-			if(!doDownload(subtitle, path)) {
+			if(!doDownload(subtitle, path, 0L, 0L)) {
 				return false;
 			}
+		}
+		
+		return true;
+	}
+	
+	private final void stopTotalSizeComputation() throws Exception {
+		if(worker != null) {
+			worker.stop();
+		}
+	}
+	
+	private final boolean convert(
+		List<MediaHolder> mediaHolders,
+		List<Path> outputs
+	) throws Exception {
+		ResolvedMedia output = new ResolvedMedia(media, dest, configuration);
+		List<ConversionMedia> inputs = Utils.zip(mediaHolders.stream(), outputs.stream(), Pair::new)
+			.map((p) -> new ConversionMedia(p.a.media(), p.b, Double.NaN))
+			.collect(Collectors.toList());
+		
+		if(mediaHolders.size() == 1
+				&& mediaHolders.get(0).media().format().is(configuration.outputFormat())) {
+			noConversion(inputs.get(0), output);
+		} else {
+			doConversion(inputs, output);
 		}
 		
 		return true;
@@ -240,7 +323,6 @@ public final class SimpleDownloader implements Download, DownloadResult {
 		
 		downloader = createDownloader(new TrackerManager());
 		downloader.setTracker(new DownloadTracker());
-		Ignore.callVoid(() -> NIO.createFile(dest));
 		
 		List<MediaHolder> mediaHolders = MediaUtils.solids(media).stream()
 			.filter((m) -> m.type().is(MediaType.VIDEO) || m.type().is(MediaType.AUDIO))
@@ -257,32 +339,31 @@ public final class SimpleDownloader implements Download, DownloadResult {
 		computeTotalSize(mediaHolders, subtitles);
 		if(!checkState()) return;
 		
-		downloadTracker = new DownloadTracker(size);
+		long startBytes = 0L;
+		// When we don't know the total size, it will be obtained from the response.
+		// For a chunked content the size will then be set to the size of the rest
+		// of the content, i.e. not the acutal total size, but `total - start`.
+		if(size >= 0L) {
+			startBytes = initialState.srcPosition;
+		}
+		
+		downloadTracker = new DownloadTracker(startBytes, size);
 		trackerManager.tracker(downloadTracker);
+		
+		DownloadEventHandler handler = new DownloadEventHandler(downloadTracker);
+		downloader.addEventListener(DownloadEvent.UPDATE, handler::onUpdate);
+		downloader.addEventListener(DownloadEvent.ERROR, handler::onError);
 		
 		try {
 			List<Path> tempFiles = temporaryFiles(mediaHolders.size());
-			
-			DownloadEventHandler handler = new DownloadEventHandler(downloadTracker);
-			downloader.addEventListener(DownloadEvent.UPDATE, handler::onUpdate);
-			downloader.addEventListener(DownloadEvent.ERROR, handler::onError);
-			
-			download(mediaHolders, tempFiles);
-			downloadSubtitles(subtitles, dest);
-
-			if(!checkState()) return;
-			ResolvedMedia output = new ResolvedMedia(media, dest, configuration);
-			List<ConversionMedia> inputs = Utils.zip(mediaHolders.stream(), tempFiles.stream(), Pair::new)
-				.map((p) -> new ConversionMedia(p.a.media(), p.b, Double.NaN))
-				.collect(Collectors.toList());
-			
-			if(mediaHolders.size() == 1
-					&& mediaHolders.get(0).media().format().is(configuration.outputFormat())) {
-				noConversion(inputs.get(0), output);
-			} else {
-				doConversion(inputs, output);
-			}
-			
+			NIO.createFile(dest);
+			if(!download(mediaHolders, tempFiles, initialState)) return;
+			// We could pass the initial state to the downloadSubtitles method and decide whether
+			// to skip downloading them or not. However, since they are often handled quickly and
+			// it would introduce unnecessary complexity, just download them again if we must.
+			if(!downloadSubtitles(subtitles, dest)) return;
+			stopTotalSizeComputation();
+			if(!convert(mediaHolders, tempFiles)) return;
 			state.set(TaskStates.DONE);
 		} catch(Exception ex) {
 			exception = ex;
@@ -449,6 +530,11 @@ public final class SimpleDownloader implements Download, DownloadResult {
 	@Override
 	public long totalBytes() {
 		return size;
+	}
+	
+	@Override
+	public DownloadState state() {
+		return downloadState;
 	}
 	
 	private final class DownloadEventHandler {

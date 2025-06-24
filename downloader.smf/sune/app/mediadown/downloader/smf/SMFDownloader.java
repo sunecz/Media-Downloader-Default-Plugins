@@ -2,6 +2,7 @@ package sune.app.mediadown.downloader.smf;
 
 import java.nio.file.Path;
 
+import sune.app.mediadown.download.DownloadInitialState;
 import sune.app.mediadown.download.DownloadResult;
 import sune.app.mediadown.download.MediaDownloadConfiguration;
 import sune.app.mediadown.entity.Downloader;
@@ -23,9 +24,14 @@ public final class SMFDownloader implements Downloader {
 	}
 	
 	@Override
-	public DownloadResult download(Media media, Path destination, MediaDownloadConfiguration configuration)
-			throws Exception {
-		return new SimpleDownloader(media, destination, configuration);
+	public DownloadResult download(
+		Media media,
+		Path destination,
+		MediaDownloadConfiguration configuration,
+		DownloadInitialState state
+	) throws Exception {
+		ChunkedDownloadInitialState initialState = ChunkedDownloadInitialState.checkOrDefault(state);
+		return new SimpleDownloader(media, destination, configuration, initialState);
 	}
 	
 	@Override
