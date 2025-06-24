@@ -2,6 +2,7 @@ package sune.app.mediadown.downloader.wms;
 
 import java.nio.file.Path;
 
+import sune.app.mediadown.download.DownloadInitialState;
 import sune.app.mediadown.download.DownloadResult;
 import sune.app.mediadown.download.MediaDownloadConfiguration;
 import sune.app.mediadown.entity.Downloader;
@@ -24,14 +25,20 @@ public final class WMSDownloader implements Downloader {
 	}
 	
 	@Override
-	public DownloadResult download(Media media, Path destination, MediaDownloadConfiguration configuration)
-			throws Exception {
+	public DownloadResult download(
+		Media media,
+		Path destination,
+		MediaDownloadConfiguration configuration,
+		DownloadInitialState state
+	) throws Exception {
 		PluginConfiguration pluginConfiguration = PLUGIN.getContext().getConfiguration();
+		SegmentedDownloadInitialState initialState = SegmentedDownloadInitialState.checkOrDefault(state);
 		
 		return new SegmentsDownloader(
 			media, destination, configuration,
 			pluginConfiguration.intValue("maxRetryAttempts"),
-			pluginConfiguration.intValue("waitOnRetryMs")
+			pluginConfiguration.intValue("waitOnRetryMs"),
+			initialState
 		);
 	}
 	

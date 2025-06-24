@@ -4,6 +4,8 @@ import sune.app.mediadown.MediaDownloader;
 import sune.app.mediadown.configuration.ApplicationConfigurationAccessor;
 import sune.app.mediadown.configuration.Configuration.ConfigurationProperty;
 import sune.app.mediadown.entity.Downloaders;
+import sune.app.mediadown.pipeline.state.MetricsComparator;
+import sune.app.mediadown.pipeline.state.PipelineStates;
 import sune.app.mediadown.plugin.Plugin;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginConfiguration;
@@ -64,12 +66,18 @@ public final class WMSDownloaderPlugin extends PluginBase {
 		);
 	}
 	
+	private final void initDownload() {
+		MetricsComparator.Registry.register(SegmentedDownloadState.metricsComparator());
+		PipelineStates.register("download", new SegmentedDownloadStateDeserializator());
+	}
+	
 	@Override
 	public void init() throws Exception {
 		translatedTitle = MediaDownloader.translation().getSingle(super.getTitle());
 		Downloaders.add(NAME, WMSDownloader.class);
 		initConfiguration();
 		initUpdateTriggers();
+		initDownload();
 	}
 	
 	@Override

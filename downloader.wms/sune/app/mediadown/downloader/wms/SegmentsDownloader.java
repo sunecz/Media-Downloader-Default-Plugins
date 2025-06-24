@@ -5,7 +5,6 @@ import java.net.http.HttpClient.Version;
 import java.net.http.HttpHeaders;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
@@ -27,6 +26,7 @@ import sune.app.mediadown.download.Download;
 import sune.app.mediadown.download.DownloadConfiguration;
 import sune.app.mediadown.download.DownloadContext;
 import sune.app.mediadown.download.DownloadResult;
+import sune.app.mediadown.download.DownloadState;
 import sune.app.mediadown.download.FileDownloader;
 import sune.app.mediadown.download.InternalDownloader;
 import sune.app.mediadown.download.MediaDownloadConfiguration;
@@ -86,6 +86,9 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 	private final InternalState state = new InternalState();
 	private final SyncObject lockPause = new SyncObject();
 	
+	private final SegmentedDownloadInitialState initialState;
+	private final SegmentedDownloadState downloadState = new SegmentedDownloadState();
+	
 	private TotalSizeComputer totalSizeComputer;
 	private final AtomicLong size = new AtomicLong(MediaConstants.UNKNOWN_SIZE);
 	private DownloadPipelineResult pipelineResult;
@@ -97,13 +100,19 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 	private DownloadEventHandler handler;
 	
 	SegmentsDownloader(
-			Media media, Path dest, MediaDownloadConfiguration configuration, int maxRetryAttempts, int waitOnRetryMs
+		Media media,
+		Path dest,
+		MediaDownloadConfiguration configuration,
+		int maxRetryAttempts,
+		int waitOnRetryMs,
+		SegmentedDownloadInitialState initialState
 	) {
 		this.media            = Objects.requireNonNull(media);
 		this.dest             = Objects.requireNonNull(dest);
 		this.configuration    = Objects.requireNonNull(configuration);
 		this.maxRetryAttempts = checkMaxRetryAttempts(maxRetryAttempts);
 		this.waitOnRetryMs    = checkMilliseconds(waitOnRetryMs);
+		this.initialState     = Objects.requireNonNull(initialState);
 	}
 	
 	private static final int checkMaxRetryAttempts(int maxRetryAttempts) {
@@ -132,8 +141,8 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 	}
 	
 	private static final Pair<Boolean, Long> sizeOrEstimatedSize(
-			List<? extends RemoteFile> segments,
-			List<? extends RemoteFile> subtitles
+		List<? extends RemoteFile> segments,
+		List<? extends RemoteFile> subtitles
 	) {
 		boolean allHaveSize = stream(segments, subtitles).allMatch((s) -> s.size() > 0L);
 		ToLongFunction<? super RemoteFile> mapper = allHaveSize ? RemoteFile::size : RemoteFile::estimatedSize;
@@ -239,9 +248,12 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 	}
 	
 	private final boolean computeTotalSize(
-			List<List<? extends RemoteFile>> segments, List<? extends RemoteFile> subtitles
+		List<List<? extends RemoteFile>> segments,
+		List<? extends RemoteFile> subtitles
 	) throws Exception {
-		List<? extends RemoteFile> flattenSegments = segments.stream()
+		final int startIndex = initialState.resourceIndex;
+		List<? extends RemoteFile> flattenSegments = IntStream.range(startIndex, segments.size())
+			.mapToObj(segments::get)
 			.flatMap(List::stream)
 			.collect(Collectors.toList());
 		
@@ -282,20 +294,33 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		
 		for(int i = 0; i < count; ++i) {
 			Path tempFile = dest.getParent().resolve(fileName + "." + i + ".part");
-			Ignore.callVoid(() -> NIO.deleteFile(tempFile));
+			
+			if(i > initialState.resourceIndex
+					|| (i == initialState.resourceIndex && initialState.srcPosition == 0L)) {
+				Ignore.callVoid(() -> NIO.deleteFile(tempFile));
+			}
+			
 			tempFiles.add(tempFile);
 		}
 		
 		return tempFiles;
 	}
 	
-	private final boolean doDownload(InternalDownloader downloader, List<? extends RemoteFile> segments, Path output)
-			throws Exception {
+	private final boolean doDownload(
+		InternalDownloader downloader,
+		List<? extends RemoteFile> segments,
+		Path output,
+		int segmentIndex,
+		long srcPosition, // Currently unused
+		long dstPosition
+	) throws Exception {
 		Tracker previousTracker = null;
 		RetryDownloadSimpleTracker retryTracker = null;
-		long written = 0L, bytes;
+		long written = dstPosition, bytes;
 		
-		for(RemoteFile segment : segments) {
+		for(int idx = segmentIndex, len = segments.size(); idx < len; ++idx) {
+			RemoteFile segment = segments.get(idx);
+			
 			if(!checkState()) return false;
 			
 			Request request = Request.of(segment.uri()).headers(HEADERS).GET();
@@ -303,6 +328,8 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 			boolean error = false;
 			Exception exception = null;
 			long downloadedBytes = 0L;
+			
+			downloadState.beginSegment(idx, written, written);
 			
 			for(int i = 0; (error || downloadedBytes <= 0L) && i <= maxRetryAttempts; ++i) {
 				if(!checkState()) return false;
@@ -415,9 +442,14 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		return true;
 	}
 	
-	private final boolean doDownload(InternalDownloader downloader, Media media, Path output) throws Exception {
+	private final boolean doDownloadSubtitles(
+		InternalDownloader downloader,
+		SubtitlesMedia media,
+		Path output
+	) throws Exception {
+		// Downloading subtitles does not support loading from a state
 		return media.isSegmented()
-			? doDownload(downloader, listSegments((SegmentedMedia) media), output)
+			? doDownload(downloader, listSegments((SegmentedMedia) media), output, 0, 0L, 0L)
 			: doDownload(downloader, Request.of(media.uri()).headers(HEADERS).GET(), output);
 	}
 	
@@ -434,16 +466,36 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		));
 	}
 	
-	private final boolean download(List<List<? extends RemoteFile>> segments, List<Path> outputs) throws Exception {
-		Iterator<Path> output = outputs.iterator();
-		
-		for(List<? extends RemoteFile> list : segments) {
-			if(!doDownload(downloader, list, output.next())) {
-				return false;
-			}
+	private final boolean download(
+		List<List<? extends RemoteFile>> segments,
+		List<Path> outputs,
+		SegmentedDownloadInitialState initialState
+	) throws Exception {
+		if(segments.size() != outputs.size()) {
+			throw new IllegalArgumentException("Inputs and outputs must be of the same size");
 		}
 		
-		return true;
+		int segmentIndex = initialState.segmentIndex;
+		long srcPosition = initialState.srcPosition;
+		long dstPosition = initialState.dstPosition;
+		
+		for(int idx = initialState.resourceIndex, len = segments.size(); idx < len; ++idx) {
+			List<? extends RemoteFile> list = segments.get(idx);
+			Path output = outputs.get(idx);
+			
+			downloadState.beginResource(idx, segmentIndex, srcPosition, dstPosition);
+			
+			if(!doDownload(downloader, list, output, segmentIndex, srcPosition, dstPosition)) {
+				return false;
+			}
+			
+			// Only the first one should have the start state
+			segmentIndex = 0;
+			srcPosition = 0L;
+			dstPosition = 0L;
+		}
+		
+		return checkState();
 	}
 	
 	private final boolean downloadSubtitles(List<RemoteMedia> subtitles, Path destination) throws Exception {
@@ -470,7 +522,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 				downloader = temporaryDownloader;
 			}
 			
-			if(!doDownload(downloader, media, path)) {
+			if(!doDownloadSubtitles(downloader, media, path)) {
 				return false;
 			}
 			
@@ -548,7 +600,7 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		computeTotalSize(segments, subtitles);
 		if(!checkState()) return;
 		
-		downloadTracker = new DownloadTracker(size.get());
+		downloadTracker = new DownloadTracker(initialState.srcPosition, size.get());
 		trackerManager.tracker(downloadTracker);
 		
 		if(handler == null) {
@@ -568,7 +620,10 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 		try {
 			List<Path> tempFiles = temporaryFiles(segments.size());
 			NIO.createFile(dest);
-			if(!download(segments, tempFiles)) return;
+			if(!download(segments, tempFiles, initialState)) return;
+			// We could pass the initial state to the downloadSubtitles method and decide whether
+			// to skip downloading them or not. However, since they are often handled quickly and
+			// it would introduce unnecessary complexity, just download them again if we must.
 			if(!downloadSubtitles(subtitles, dest)) return;
 			stopTotalSizeComputation();
 			if(!convert(mediaSingles, segmentsHolders, tempFiles)) return;
@@ -756,6 +811,11 @@ public final class SegmentsDownloader implements Download, DownloadResult {
 	@Override
 	public long totalBytes() {
 		return size.get();
+	}
+	
+	@Override
+	public DownloadState state() {
+		return downloadState;
 	}
 	
 	private final class DownloadEventHandler {
