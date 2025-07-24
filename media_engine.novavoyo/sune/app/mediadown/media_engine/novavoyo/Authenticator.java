@@ -8,6 +8,7 @@ import java.util.stream.Collectors;
 import sune.app.mediadown.authentication.CredentialsManager;
 import sune.app.mediadown.media_engine.novavoyo.Common.MessageException;
 import sune.app.mediadown.media_engine.novavoyo.Connection.Response;
+import sune.app.mediadown.media_engine.novavoyo.util.Logging;
 import sune.app.mediadown.util.JSON.JSONCollection;
 import sune.app.mediadown.util.JSON.JSONObject;
 import sune.app.mediadown.util.Utils;
@@ -41,8 +42,17 @@ public final class Authenticator {
 	
 	private static final String doSelectAccount(Connection connection, JSONCollection data)
 			throws Exception {
-		String accountId = selectAccount(data.getCollection("step.accounts"));
+		JSONCollection accounts = data.getCollection("step.accounts");
+		String accountId = selectAccount(accounts);
 		String authCode = data.getString("step.authToken");
+		
+		if(accountId == null) {
+			Logging.logDebug("Available accounts: %s", accounts.toString());
+			
+			throw new MessageException(
+				"Failed to log in (account step). Cannot find any suitable account."
+			);
+		}
 		
 		JSONCollection args = JSONCollection.ofObject(
 			"accountId", JSONObject.ofString(accountId),
@@ -59,6 +69,9 @@ public final class Authenticator {
 		
 		if(!response.isSuccess()
 				|| (authToken = response.data().getString("step.bearerToken")) == null) {
+			Logging.logDebug("Available accounts: %s", accounts.toString());
+			Logging.logDebug("Erroneous response: %s", response.data());
+			
 			throw new MessageException(String.format(
 				"Failed to log in (account step). Reason: %s",
 				response.data().getString("message", "Unknown reason")
@@ -90,6 +103,8 @@ public final class Authenticator {
 		} else {
 			if(!response.isSuccess()
 					|| (authToken = response.data().getString("step.bearerToken")) == null) {
+				Logging.logDebug("Erroneous response: %s", response.data());
+				
 				throw new MessageException(String.format(
 					"Failed to log in. Reason: %s",
 					response.data().getString("message", "Unknown reason")

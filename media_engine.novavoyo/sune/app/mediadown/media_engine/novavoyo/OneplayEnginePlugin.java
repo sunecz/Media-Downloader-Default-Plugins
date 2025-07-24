@@ -1,6 +1,7 @@
 package sune.app.mediadown.media_engine.novavoyo;
 
 import java.io.IOException;
+import java.util.logging.Level;
 
 import sune.app.mediadown.MediaDownloader;
 import sune.app.mediadown.authentication.CredentialsManager;
@@ -12,6 +13,7 @@ import sune.app.mediadown.gui.GUI.CredentialsRegistry;
 import sune.app.mediadown.gui.GUI.CredentialsRegistry.CredentialsEntry;
 import sune.app.mediadown.language.Translation;
 import sune.app.mediadown.media_engine.novavoyo.gui.OneplayCredentialsType;
+import sune.app.mediadown.media_engine.novavoyo.util.Logging;
 import sune.app.mediadown.plugin.Plugin;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginConfiguration;
@@ -32,6 +34,9 @@ import sune.app.mediadown.util.Password;
 public final class OneplayEnginePlugin extends PluginBase {
 	
 	private static final String NAME = "oneplay";
+	
+	// Default values of configuration properties
+	private static final boolean DEFAULT_ENABLE_LOGGING = false;
 	
 	private String translatedTitle;
 	private PluginConfiguration.Builder configuration;
@@ -55,6 +60,11 @@ public final class OneplayEnginePlugin extends PluginBase {
 		}
 		
 		builder.addProperty(ConfigurationProperty.ofString("token").asHidden(true));
+		builder.addProperty(ConfigurationProperty.ofBoolean("enableLogging")
+			.inGroup(group)
+			.withDefaultValue(DEFAULT_ENABLE_LOGGING)
+			.withOrder(100));
+		
 		configuration = builder;
 	}
 	
@@ -127,6 +137,10 @@ public final class OneplayEnginePlugin extends PluginBase {
 			PluginConfiguration configuration = getContext().getConfiguration();
 			NIO.save(configuration.path(), configuration.data().toString());
 		}
+		
+		PluginConfiguration configuration = getContext().getConfiguration();
+		boolean loggingEnabled = configuration.booleanValue("enableLogging");
+		Logging.initialize(loggingEnabled ? Level.ALL : Level.OFF);
 	}
 	
 	@Override

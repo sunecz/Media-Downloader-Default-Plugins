@@ -25,6 +25,14 @@
 					message_error: {
 						title: "Error"
 					}
+				},
+				configuration: {
+					group: {
+						general: "Oneplay"
+					},
+					fields: {
+						enableLogging: "Enable logging"
+					}
 				}
 			}
 		}
