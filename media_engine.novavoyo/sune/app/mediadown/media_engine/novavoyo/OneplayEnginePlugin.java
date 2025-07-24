@@ -59,7 +59,6 @@ public final class OneplayEnginePlugin extends PluginBase {
 			builder.addProperty(ConfigurationProperty.ofString("synthetic_deviceId").asHidden(true));
 		}
 		
-		builder.addProperty(ConfigurationProperty.ofString("token").asHidden(true));
 		builder.addProperty(ConfigurationProperty.ofBoolean("enableLogging")
 			.inGroup(group)
 			.withDefaultValue(DEFAULT_ENABLE_LOGGING)
