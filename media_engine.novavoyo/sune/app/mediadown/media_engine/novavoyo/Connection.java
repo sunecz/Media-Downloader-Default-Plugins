@@ -9,6 +9,7 @@ import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
+import sune.app.mediadown.media_engine.novavoyo.Authenticator.AuthenticationToken;
 import sune.app.mediadown.net.Net;
 import sune.app.mediadown.net.Web;
 import sune.app.mediadown.util.JSON;
@@ -24,8 +25,8 @@ public final class Connection implements AutoCloseable {
 	private final String clientId;
 	private final Device device;
 	private WS ws;
-	private Context context;
-	private String authToken;
+	private volatile Context context;
+	private AuthenticationToken authToken;
 	private volatile boolean isOpen;
 	
 	private final Map<String, Response> responses = new ConcurrentHashMap<>();
@@ -56,6 +57,11 @@ public final class Connection implements AutoCloseable {
 			data.set("playbackCapabilities", playbackCapabilities);
 		}
 		
+		JSONCollection authorization;
+		if((authorization = request.authorization()) != null) {
+			data.set("authorization", authorization);
+		}
+		
 		return data;
 	}
 	
@@ -66,7 +72,7 @@ public final class Connection implements AutoCloseable {
 		Web.Request.Builder request = Web.Request.of(URI_HTTP_BASE.resolve(path));
 		
 		if(authToken != null) {
-			request.header("Authorization", "Bearer " + authToken);
+			request.header("Authorization", "Bearer " + authToken.value());
 		}
 		
 		try(Web.Response.OfStream httpResponse = Web.requestStream(request.POST(body))) {
@@ -180,7 +186,7 @@ public final class Connection implements AutoCloseable {
 		}
 	}
 	
-	public void authenticate(String authToken) {
+	public void authenticate(AuthenticationToken authToken) {
 		this.authToken = authToken;
 	}
 	
@@ -197,21 +203,21 @@ public final class Connection implements AutoCloseable {
 	}
 	
 	public Response request(String path) throws Exception {
-		return request(path, new Request(null, null, null));
+		return request(path, new Request(null, null, null, null));
 	}
 	
 	public Response request(String path, JSONCollection payload) throws Exception {
-		return request(path, new Request(payload, null, null));
+		return request(path, new Request(payload, null, null, null));
 	}
 	
 	public Response request(String path, JSONCollection payload,
 			JSONCollection customData) throws Exception {
-		return request(path, new Request(payload, customData, null));
+		return request(path, new Request(payload, customData, null, null));
 	}
 	
 	public Response request(String path, JSONCollection payload,
 			JSONCollection customData, JSONCollection playbackCapabilities) throws Exception {
-		return request(path, new Request(payload, customData, playbackCapabilities));
+		return request(path, new Request(payload, customData, playbackCapabilities, null));
 	}
 	
 	public Response request(String path, Request request) throws Exception {
@@ -270,12 +276,18 @@ public final class Connection implements AutoCloseable {
 		private final JSONCollection payload;
 		private final JSONCollection customData;
 		private final JSONCollection playbackCapabilities;
+		private final JSONCollection authorization;
 		
-		public Request(JSONCollection payload, JSONCollection customData,
-				JSONCollection playbackCapabilities) {
+		public Request(
+			JSONCollection payload,
+			JSONCollection customData,
+			JSONCollection playbackCapabilities,
+			JSONCollection authorization
+		) {
 			this.payload = payload;
 			this.customData = customData;
 			this.playbackCapabilities = playbackCapabilities;
+			this.authorization = authorization;
 		}
 		
 		public JSONCollection payload() {
@@ -288,6 +300,10 @@ public final class Connection implements AutoCloseable {
 		
 		public JSONCollection playbackCapabilities() {
 			return playbackCapabilities;
+		}
+		
+		public JSONCollection authorization() {
+			return authorization;
 		}
 	}
 	

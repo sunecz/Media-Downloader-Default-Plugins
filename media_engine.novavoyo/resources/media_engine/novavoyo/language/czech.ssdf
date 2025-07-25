@@ -5,9 +5,10 @@
 				title: "Oneplay",
 				credentials: {
 					label: {
-						email:    "Email",
-						password: "Heslo",
-						profile:  "Profil"
+						email:       "Email",
+						password:    "Heslo",
+						profile:     "Profil",
+						profile_pin: "Profilový PIN"
 					},
 					profile: {
 						profile_auto: "Automaticky",
@@ -21,6 +22,10 @@
 					incorrect_auth_data: {
 						title: "Chyba",
 						text:  "Nelze se přihlásit, zkontrolujte prosím své přihlašovací údaje."
+					},
+					invalid_profile_pin: {
+						title: "Chyba",
+						text:  "Je vyžadován profilový pin, je ale neplatný. PIN musí mít 4 číslice."
 					},
 					message_error: {
 						title: "Chyba"

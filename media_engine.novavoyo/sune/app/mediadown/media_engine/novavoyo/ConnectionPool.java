@@ -11,6 +11,8 @@ import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
+import sune.app.mediadown.media_engine.novavoyo.Authenticator.AuthenticationToken;
+
 public final class ConnectionPool implements AutoCloseable {
 	
 	private static final long AUTOCLOSE_ITEM_AFTER_MS = 20000L;
@@ -23,7 +25,7 @@ public final class ConnectionPool implements AutoCloseable {
 	private final ScheduledExecutorService scheduler;
 	private final ScheduledFuture<?>[] scheduleFutures;
 	private volatile boolean isActive = true;
-	private String authToken;
+	private AuthenticationToken authToken;
 	
 	public ConnectionPool(int capacity, Device device) {
 		this.device = Objects.requireNonNull(device);
@@ -139,7 +141,7 @@ public final class ConnectionPool implements AutoCloseable {
 		}
 	}
 	
-	public void authenticate(String authToken) {
+	public void authenticate(AuthenticationToken authToken) {
 		this.authToken = authToken;
 		
 		lock.lock();

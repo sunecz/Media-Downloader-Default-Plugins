@@ -2,11 +2,14 @@ package sune.app.mediadown.media_engine.novavoyo.gui;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.function.UnaryOperator;
 
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.TextField;
+import javafx.scene.control.TextFormatter;
+import javafx.scene.control.TextFormatter.Change;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.Pane;
 import javafx.scene.layout.Priority;
@@ -21,6 +24,7 @@ import sune.app.mediadown.media_engine.novavoyo.Oneplay;
 import sune.app.mediadown.media_engine.novavoyo.OneplayCredentials;
 import sune.app.mediadown.media_engine.novavoyo.Profile;
 import sune.app.mediadown.util.FXUtils;
+import sune.app.mediadown.util.Regex;
 
 public class OneplayCredentialsType extends CredentialsType<OneplayCredentials> {
 	
@@ -46,10 +50,16 @@ public class OneplayCredentialsType extends CredentialsType<OneplayCredentials> 
 		Label lblProfile = new Label(tr.getSingle("profile"));
 		ProfileSelect cmbProfile = new ProfileSelect(translation.getTranslation("profile"));
 		cmbProfile.getStyleClass().add("field-profile");
+		Label lblProfilePin = new Label(tr.getSingle("profile_pin"));
+		PasswordFieldPane txtProfilePin = new PasswordFieldPane();
+		txtProfilePin.textControl().setTextFormatter(AllowMax4DigitsFilters.create());
+		txtProfilePin.passwordControl().setTextFormatter(AllowMax4DigitsFilters.create());
+		txtProfilePin.getStyleClass().add("field-profile-pin");
 		grid.getChildren().addAll(
 			lblEmail, txtEmail,
 			lblPassword, txtPassword,
-			lblProfile, cmbProfile
+			lblProfile, cmbProfile,
+			lblProfilePin, txtProfilePin
 		);
 		GridPane.setConstraints(lblEmail, 0, 0);
 		GridPane.setConstraints(txtEmail, 1, 0);
@@ -57,9 +67,12 @@ public class OneplayCredentialsType extends CredentialsType<OneplayCredentials> 
 		GridPane.setConstraints(txtPassword, 1, 1);
 		GridPane.setConstraints(lblProfile, 0, 2);
 		GridPane.setConstraints(cmbProfile, 1, 2);
+		GridPane.setConstraints(lblProfilePin, 0, 3);
+		GridPane.setConstraints(txtProfilePin, 1, 3);
 		GridPane.setHgrow(txtEmail, Priority.ALWAYS);
 		GridPane.setHgrow(txtPassword, Priority.ALWAYS);
 		GridPane.setHgrow(cmbProfile, Priority.ALWAYS);
+		GridPane.setHgrow(txtProfilePin, Priority.ALWAYS);
 		return grid;
 	}
 	
@@ -69,9 +82,11 @@ public class OneplayCredentialsType extends CredentialsType<OneplayCredentials> 
 		TextField txtEmail = (TextField) grid.lookup(".field-email");
 		PasswordFieldPane txtPassword = (PasswordFieldPane) grid.lookup(".field-password");
 		ProfileSelect cmbProfile = (ProfileSelect) grid.lookup(".field-profile");
+		PasswordFieldPane txtProfilePin = (PasswordFieldPane) grid.lookup(".field-profile-pin");
 		txtEmail.setText(credentials.email());
 		txtPassword.setText(credentials.password());
 		cmbProfile.value(credentials.profileId());
+		txtProfilePin.setText(credentials.profilePin());
 	}
 	
 	@Override
@@ -80,12 +95,29 @@ public class OneplayCredentialsType extends CredentialsType<OneplayCredentials> 
 		TextField txtEmail = (TextField) grid.lookup(".field-email");
 		PasswordFieldPane txtPassword = (PasswordFieldPane) grid.lookup(".field-password");
 		ProfileSelect cmbProfile = (ProfileSelect) grid.lookup(".field-profile");
+		PasswordFieldPane txtProfilePin = (PasswordFieldPane) grid.lookup(".field-profile-pin");
 		String email = txtEmail.getText();
 		String password = txtPassword.getText();
 		String profile = cmbProfile.value();
+		String profilePin = txtProfilePin.getText();
 		String authToken = ""; // Empty due to possible login and profile data change
 		String deviceId = ""; // Empty due to possible login and profile data change
-		return new OneplayCredentials(email, password, profile, authToken, deviceId);
+		return new OneplayCredentials(email, password, profile, profilePin, authToken, deviceId);
+	}
+	
+	private static final class AllowMax4DigitsFilters
+			implements UnaryOperator<TextFormatter.Change> {
+		
+		private static final Regex REGEX = Regex.of("\\d{0,4}");
+		
+		public static final TextFormatter<String> create() {
+			return new TextFormatter<>(new AllowMax4DigitsFilters());
+		}
+		
+		@Override
+		public Change apply(Change change) {
+			return REGEX.matches(change.getControlNewText()) ? change : null;
+		}
 	}
 	
 	private final class ProfileSelect extends VBox {

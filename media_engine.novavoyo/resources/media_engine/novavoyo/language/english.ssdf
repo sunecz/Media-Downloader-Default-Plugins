@@ -5,9 +5,10 @@
 				title: "Oneplay",
 				credentials: {
 					label: {
-						email:    "Email",
-						password: "Password",
-						profile:  "Profile"
+						email:       "Email",
+						password:    "Password",
+						profile:     "Profile",
+						profile_pin: "Profile PIN"
 					},
 					profile: {
 						profile_auto: "Automatically",
@@ -21,6 +22,10 @@
 					incorrect_auth_data: {
 						title: "Error",
 						text:  "Unable to log in, please check your login credentials."
+					},
+					invalid_profile_pin: {
+						title: "Error",
+						text:  "Profile PIN is required but is invalid. PIN must have 4 digits."
 					},
 					message_error: {
 						title: "Error"

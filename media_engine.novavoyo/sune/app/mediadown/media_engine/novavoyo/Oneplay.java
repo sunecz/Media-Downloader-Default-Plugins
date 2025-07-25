@@ -50,6 +50,7 @@ public final class Oneplay {
 	
 	private final int parallelism;
 	private final ConnectionPool connectionPool;
+	private volatile boolean wasProfileSelect;
 	
 	public Oneplay(int parallelism) {
 		this.parallelism = parallelism;
@@ -249,8 +250,11 @@ public final class Oneplay {
 		return new MediaInfo(programName, numSeason, numEpisode, title);
 	}
 	
-	private final void ensureAuthenticated() throws Exception {
-		if(connectionPool.isAuthenticated()) {
+	private final void ensureAuthenticated(boolean doProfileSelect) throws Exception {
+		// Only do the authentication process if the connection pool is not authenticated
+		// or if it's required to be fully authenticated but the full authentication process
+		// hasn't taken place yet.
+		if(connectionPool.isAuthenticated() && (wasProfileSelect || !doProfileSelect)) {
 			return; // Nothing to do
 		}
 		
@@ -259,11 +263,12 @@ public final class Oneplay {
 		}
 		
 		AuthenticationData authData = openConnection((connection) -> {
-			return Authenticator.login(connection);
+			return Authenticator.login(connection, doProfileSelect);
 		});
 		
 		connectionPool.authenticate(authData.authToken());
 		Authenticator.rememberAuthenticationData(authData);
+		wasProfileSelect = doProfileSelect;
 	}
 	
 	// This method is used to find carousels in the responses for shows returned from WebSocket.
@@ -360,7 +365,7 @@ public final class Oneplay {
 	}
 	
 	public List<Profile> profiles() throws Exception {
-		ensureAuthenticated();
+		ensureAuthenticated(false);
 		return openConnection((connection) -> Authenticator.Profiles.all(connection));
 	}
 	
@@ -452,7 +457,7 @@ public final class Oneplay {
 		
 		@Override
 		public void getEpisodes(ListTask<Episode> task, Program program) throws Exception {
-			ensureAuthenticated();
+			ensureAuthenticated(true);
 			
 			ProgramInfo programInfo = openConnection((connection) -> {
 				return getProgramInfo(connection, program.uri());
@@ -481,7 +486,7 @@ public final class Oneplay {
 		
 		@Override
 		public void getMedia(ListTask<Media> task, MediaEngine engine, URI uri) throws Exception {
-			ensureAuthenticated();
+			ensureAuthenticated(true);
 			
 			String contentId = openConnection((connection) -> {
 				return getContentId(connection, uri);

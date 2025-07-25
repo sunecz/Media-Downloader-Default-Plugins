@@ -8,27 +8,42 @@ public final class OneplayCredentials extends EmailCredentials {
 	public OneplayCredentials() {
 		defineFields(
 			"profileId", "auto",
+			"profilePin", "",
 			"authToken", "",
 			"deviceId", ""
 		);
 	}
 	
-	public OneplayCredentials(byte[] email, byte[] password, byte[] profileId, byte[] authToken,
-			byte[] deviceId) {
+	public OneplayCredentials(
+		byte[] email,
+		byte[] password,
+		byte[] profileId,
+		byte[] profilePin,
+		byte[] authToken,
+		byte[] deviceId
+	) {
 		super(email, password);
 		defineFields(
 			"profileId", profileId,
+			"profilePin", profilePin,
 			"authToken", authToken,
 			"deviceId", deviceId
 		);
 	}
 	
-	public OneplayCredentials(String email, String password, String profileId, String authToken,
-			String deviceId) {
+	public OneplayCredentials(
+		String email,
+		String password,
+		String profileId,
+		String profilePin,
+		String authToken,
+		String deviceId
+	) {
 		this(
 			CredentialsUtils.bytes(email),
 			CredentialsUtils.bytes(password),
 			CredentialsUtils.bytes(profileId),
+			CredentialsUtils.bytes(profilePin),
 			CredentialsUtils.bytes(authToken),
 			CredentialsUtils.bytes(deviceId)
 		);
@@ -36,6 +51,10 @@ public final class OneplayCredentials extends EmailCredentials {
 	
 	public String profileId() {
 		return isInitialized() ? CredentialsUtils.string(get("profileId")) : null;
+	}
+	
+	public String profilePin() {
+		return isInitialized() ? CredentialsUtils.string(get("profilePin")) : null;
 	}
 	
 	public String authToken() {

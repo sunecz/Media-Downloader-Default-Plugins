@@ -7,6 +7,7 @@ import java.util.stream.Collectors;
 
 import sune.app.mediadown.authentication.CredentialsManager;
 import sune.app.mediadown.media_engine.novavoyo.Common.MessageException;
+import sune.app.mediadown.media_engine.novavoyo.Common.TranslatableException;
 import sune.app.mediadown.media_engine.novavoyo.Connection.Response;
 import sune.app.mediadown.media_engine.novavoyo.util.Logging;
 import sune.app.mediadown.util.JSON.JSONCollection;
@@ -25,12 +26,50 @@ public final class Authenticator {
 		);
 		
 		Response response = connection.request("user.profile.select", payload);
+		String authToken;
 		
-		return (
-			response.isSuccess()
-				? response.data().getString("bearerToken")
-				: null
-		);
+		if(!response.isSuccess()) {
+			// Check whether it is something else than the PIN lock error, and if so, exit early.
+			if(!"4080".equals(response.data().getString("code"))) {
+				Logging.logDebug("Erroneous response: %s", response.data());
+				
+				throw new MessageException(String.format(
+					"Failed to log in (select profile). Reason: %s",
+					response.data().getString("message", "Unknown reason")
+				));
+			}
+			
+			String profilePin;
+			try(OneplayCredentials credentials = credentials()) {
+				profilePin = credentials.profilePin();
+			}
+			
+			if(profilePin == null || profilePin.length() != 4) {
+				throw new TranslatableException("error.invalid_profile_pin");
+			}
+			
+			JSONCollection authorization = JSONCollection.ofObject(
+				"schema", JSONObject.ofString("PinRequestAuthorization"),
+				"pin", JSONObject.ofString(profilePin),
+				"type", JSONObject.ofString("profile")
+			);
+			
+			response = connection.request("user.profile.select", new Connection.Request(
+				payload, null, null, JSONCollection.ofArray(authorization)
+			));
+		}
+		
+		if(!response.isSuccess()
+				|| (authToken = response.data().getString("bearerToken")) == null) {
+			Logging.logDebug("Erroneous response: %s", response.data());
+			
+			throw new MessageException(String.format(
+				"Failed to log in (select profile). Reason: %s",
+				response.data().getString("message", "Unknown reason")
+			));
+		}
+		
+		return authToken;
 	}
 	
 	private static final String selectAccount(JSONCollection accounts) {
@@ -121,13 +160,26 @@ public final class Authenticator {
 		);
 		
 		Response response = connection.request("app.init", payload);
-		return response.data().getString("user.currentDevice.id");
+		String deviceId;
+		
+		if(!response.isSuccess()
+				|| (deviceId = response.data().getString("user.currentDevice.id")) == null) {
+			Logging.logDebug("Erroneous response: %s", response.data());
+			
+			throw new MessageException(String.format(
+				"Failed to obtain device ID. Reason: %s",
+				response.data().getString("message", "Unknown reason")
+			));
+		}
+		
+		return deviceId;
 	}
 	
 	private static final AuthenticationData credentialsToAuthData(OneplayCredentials credentials) {
 		return new AuthenticationData(
 			credentials.profileId(),
-			credentials.authToken(),
+			// Assume that the credentials always have the full authentication token
+			new AuthenticationToken(AuthenticationToken.Type.FULL, credentials.authToken()),
 			credentials.deviceId()
 		);
 	}
@@ -189,13 +241,17 @@ public final class Authenticator {
 		);
 	}
 	
-	public static final AuthenticationData login(Connection connection) throws Exception {
-		String authToken, selectedProfileId;
+	public static final AuthenticationData login(Connection connection, boolean doProfileSelect)
+			throws Exception {
+		String authTokenValue, selectedProfileId;
+		AuthenticationToken.Type authTokenType = AuthenticationToken.Type.NO_PROFILE;
+		AuthenticationToken authToken = null;
 		
 		try(OneplayCredentials credentials = credentials()) {
-			authToken = credentials.authToken();
+			authTokenValue = credentials.authToken();
 			
-			if(authToken != null && !authToken.isEmpty()) {
+			if(authTokenValue != null && !authTokenValue.isEmpty()) {
+				authToken = new AuthenticationToken(authTokenType, authTokenValue);
 				connection.authenticate(authToken); // Try to use the saved authentication token
 				
 				if(isAuthenticated(connection)) {
@@ -205,21 +261,40 @@ public final class Authenticator {
 				connection.authenticate(null); // Reset the authentication token
 			}
 			
-			authToken = doLogin(connection, credentials);
-			connection.authenticate(authToken);
+			if(!isAuthenticated(connection)) {
+				authTokenValue = doLogin(connection, credentials);
+				authToken = new AuthenticationToken(authTokenType, authTokenValue);
+				connection.authenticate(authToken);
+			}
+			
 			selectedProfileId = credentials.profileId();
 		}
 		
 		Profile profile = selectProfile(connection, selectedProfileId);
-		authToken = doSelectProfile(connection, profile);
 		String profileId = profile.id();
-		String deviceId = currentDeviceId(connection);
+		String deviceId = ""; // Must be non-null
+		
+		// Allow skipping the profile selection process. This is needed in the case when
+		// a profile list is being queried but the automatically selected profile has a PIN lock.
+		// If this was not allowed, the user would be unable to select another profile without
+		// knowing the actual PIN.
+		if(doProfileSelect) {
+			authTokenValue = doSelectProfile(connection, profile);
+			deviceId = currentDeviceId(connection);
+			authTokenType = AuthenticationToken.Type.FULL;
+			authToken = new AuthenticationToken(authTokenType, authTokenValue);
+		}
 		
 		return new AuthenticationData(profileId, authToken, deviceId);
 	}
 	
 	public static final void rememberAuthenticationData(AuthenticationData data)
 			throws IOException {
+		// Remember only the fully authenticated token
+		if(data.authToken().type() != AuthenticationToken.Type.FULL) {
+			return; // Do not save
+		}
+		
 		OneplayCredentials newCredentials = null;
 		
 		try {
@@ -233,7 +308,8 @@ public final class Authenticator {
 					oldCredentials.email(),
 					oldCredentials.password(),
 					data.profileId(),
-					data.authToken(),
+					oldCredentials.profilePin(),
+					data.authToken().value(),
 					data.deviceId()
 				);
 			}
@@ -269,20 +345,53 @@ public final class Authenticator {
 		}
 	}
 	
+	public static final class AuthenticationToken {
+		
+		public static enum Type { NO_PROFILE, FULL; }
+		
+		private final Type type;
+		private final String value;
+		
+		public AuthenticationToken(Type type, String value) {
+			this.type = Objects.requireNonNull(type);
+			this.value = Objects.requireNonNull(value);
+		}
+		
+		public Type type() { return type; }
+		public String value() { return value; }
+		
+		@Override
+		public int hashCode() {
+			return Objects.hash(type, value);
+		}
+		
+		@Override
+		public boolean equals(Object obj) {
+			if(this == obj)
+				return true;
+			if(obj == null)
+				return false;
+			if(getClass() != obj.getClass())
+				return false;
+			AuthenticationToken other = (AuthenticationToken) obj;
+			return type == other.type && Objects.equals(value, other.value);
+		}
+	}
+	
 	public static final class AuthenticationData {
 		
 		private final String profileId;
-		private final String authToken;
+		private final AuthenticationToken authToken;
 		private final String deviceId;
 		
-		public AuthenticationData(String profileId, String authToken, String deviceId) {
+		public AuthenticationData(String profileId, AuthenticationToken authToken, String deviceId) {
 			this.profileId = profileId;
 			this.authToken = authToken;
 			this.deviceId = deviceId;
 		}
 		
 		public String profileId() { return profileId; }
-		public String authToken() { return authToken; }
+		public AuthenticationToken authToken() { return authToken; }
 		public String deviceId() { return deviceId; }
 		
 		@Override
