@@ -334,7 +334,17 @@ public final class Authenticator {
 		public static final List<Profile> all(Connection connection) throws Exception {
 			return Common.handleErrors(() -> {
 				Response response = connection.request("user.profiles.display");
-				JSONCollection profiles = response.data().getCollection("availableProfiles.profiles");
+				JSONCollection profiles;
+				
+				if(!response.isSuccess()
+						|| (profiles = response.data().getCollection("availableProfiles.profiles")) == null) {
+					Logging.logDebug("Erroneous response: %s", response.data());
+					
+					throw new MessageException(String.format(
+						"Failed to get profiles. Reason: %s",
+						response.data().getString("message", "Unknown reason")
+					));
+				}
 				
 				return (
 					Utils.stream(profiles.collectionsIterable())

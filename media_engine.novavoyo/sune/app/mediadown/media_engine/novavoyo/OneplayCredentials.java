@@ -7,10 +7,10 @@ public final class OneplayCredentials extends EmailCredentials {
 	
 	public OneplayCredentials() {
 		defineFields(
-			"profileId", "auto",
-			"profilePin", "",
-			"authToken", "",
-			"deviceId", ""
+			"profileId", CredentialsUtils.bytes("auto"),
+			"profilePin", CredentialsUtils.bytes(""),
+			"authToken", CredentialsUtils.bytes(""),
+			"deviceId", CredentialsUtils.bytes("")
 		);
 	}
 	
