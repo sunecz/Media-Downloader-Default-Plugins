@@ -42,7 +42,7 @@ public class STVRServer implements Server {
 	public static final Image  ICON    = PLUGIN.getIcon();
 	
 	private static final Regex REGEX_URI = Regex.of(
-		"https?://(?:www\\.)?stvr\\.sk/(radio|televizia)/archiv/\\d+/\\d+/?"
+		"https?://(?:www\\.)?stvr\\.sk/((?:radio|televizia)/archiv|deti/(?:rozhlas|televizia))/\\d+/\\d+/?"
 	);
 	
 	// Allow to create an instance when registering the server
@@ -61,18 +61,22 @@ public class STVRServer implements Server {
 			
 			String mediaType, endpoint, property;
 			switch(matcher.group(1)) {
-				case "televizia": {
+				case "televizia/archiv":
+				case "deti/televizia": {
 					mediaType = "video";
 					endpoint = "archive5f";
 					property = "clip";
 					break;
 				}
-				case "radio":
-				default: {
+				case "radio/archiv":
+				case "deti/rozhlas": {
 					mediaType = "audio";
 					endpoint = "audio5f";
 					property = "playlist.0";
 					break;
+				}
+				default: {
+					throw new IllegalStateException("Unsupported URL");
 				}
 			}
 			
