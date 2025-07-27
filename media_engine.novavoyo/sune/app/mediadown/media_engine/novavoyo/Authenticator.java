@@ -25,13 +25,14 @@ public final class Authenticator {
 			"profileId", JSONObject.ofString(profile.id())
 		);
 		
+		Logging.logDebug("[Auth] Selecting profile: %s", profile.id());
 		Response response = connection.request("user.profile.select", payload);
 		String authToken;
 		
 		if(!response.isSuccess()) {
 			// Check whether it is something else than the PIN lock error, and if so, exit early.
 			if(!"4080".equals(response.data().getString("code"))) {
-				Logging.logDebug("Erroneous response: %s", response.data());
+				Logging.logDebug("[Auth] Erroneous response: %s", response.data());
 				
 				throw new MessageException(String.format(
 					"Failed to log in (select profile). Reason: %s",
@@ -39,14 +40,19 @@ public final class Authenticator {
 				));
 			}
 			
+			Logging.logDebug("[Auth] Profile PIN requested, continuing...");
+			
 			String profilePin;
 			try(OneplayCredentials credentials = credentials()) {
 				profilePin = credentials.profilePin();
 			}
 			
 			if(profilePin == null || profilePin.length() != 4) {
+				Logging.logDebug("[Auth] Invalid profile PIN, exiting.");
 				throw new TranslatableException("error.invalid_profile_pin");
 			}
+			
+			Logging.logDebug("[Auth] Authorizing using the profile PIN...");
 			
 			JSONCollection authorization = JSONCollection.ofObject(
 				"schema", JSONObject.ofString("PinRequestAuthorization"),
@@ -61,7 +67,7 @@ public final class Authenticator {
 		
 		if(!response.isSuccess()
 				|| (authToken = response.data().getString("bearerToken")) == null) {
-			Logging.logDebug("Erroneous response: %s", response.data());
+			Logging.logDebug("[Auth] Erroneous response: %s", response.data());
 			
 			throw new MessageException(String.format(
 				"Failed to log in (select profile). Reason: %s",
@@ -69,6 +75,7 @@ public final class Authenticator {
 			));
 		}
 		
+		Logging.logDebug("[Auth] Profile access token acquired.");
 		return authToken;
 	}
 	
@@ -82,15 +89,19 @@ public final class Authenticator {
 	private static final String doSelectAccount(Connection connection, JSONCollection data)
 			throws Exception {
 		JSONCollection accounts = data.getCollection("step.accounts");
+		Logging.logDebug("[Auth] Available accounts: %s", accounts);
+		
 		String accountId = selectAccount(accounts);
 		String authCode = data.getString("step.authToken");
 		
 		if(accountId == null) {
-			Logging.logDebug("Available accounts: %s", accounts.toString());
+			Logging.logDebug("[Auth] No suitable account found, exiting.");
 			
 			throw new MessageException(
 				"Failed to log in (account step). Cannot find any suitable account."
 			);
+		} else {
+			Logging.logDebug("[Auth] Account selected: %s", accountId);
 		}
 		
 		JSONCollection args = JSONCollection.ofObject(
@@ -108,8 +119,7 @@ public final class Authenticator {
 		
 		if(!response.isSuccess()
 				|| (authToken = response.data().getString("step.bearerToken")) == null) {
-			Logging.logDebug("Available accounts: %s", accounts.toString());
-			Logging.logDebug("Erroneous response: %s", response.data());
+			Logging.logDebug("[Auth] Erroneous response: %s", response.data());
 			
 			throw new MessageException(String.format(
 				"Failed to log in (account step). Reason: %s",
@@ -142,7 +152,7 @@ public final class Authenticator {
 		} else {
 			if(!response.isSuccess()
 					|| (authToken = response.data().getString("step.bearerToken")) == null) {
-				Logging.logDebug("Erroneous response: %s", response.data());
+				Logging.logDebug("[Auth] Erroneous response: %s", response.data());
 				
 				throw new MessageException(String.format(
 					"Failed to log in. Reason: %s",
@@ -164,7 +174,7 @@ public final class Authenticator {
 		
 		if(!response.isSuccess()
 				|| (deviceId = response.data().getString("user.currentDevice.id")) == null) {
-			Logging.logDebug("Erroneous response: %s", response.data());
+			Logging.logDebug("[Auth] Erroneous response: %s", response.data());
 			
 			throw new MessageException(String.format(
 				"Failed to obtain device ID. Reason: %s",
@@ -253,18 +263,26 @@ public final class Authenticator {
 			if(authTokenValue != null && !authTokenValue.isEmpty()) {
 				authToken = new AuthenticationToken(authTokenType, authTokenValue);
 				connection.authenticate(authToken); // Try to use the saved authentication token
+				Logging.logDebug("[Auth] Trying the saved access token...");
 				
 				if(isAuthenticated(connection)) {
+					Logging.logDebug("[Auth] The saved access token is valid.");
 					return credentialsToAuthData(credentials); // Valid saved credentials
 				}
 				
+				Logging.logDebug("[Auth] Access token is invalid, continuing...");
 				connection.authenticate(null); // Reset the authentication token
+			} else {
+				Logging.logDebug("[Auth] No access token saved, continuing...");
 			}
 			
 			if(!isAuthenticated(connection)) {
+				Logging.logDebug("[Auth] Connection not authenticated, doing the login process...");
 				authTokenValue = doLogin(connection, credentials);
 				authToken = new AuthenticationToken(authTokenType, authTokenValue);
 				connection.authenticate(authToken);
+			} else {
+				Logging.logDebug("[Auth] Connection already authenticated, skipping the login process...");
 			}
 			
 			selectedProfileId = credentials.profileId();
@@ -279,12 +297,16 @@ public final class Authenticator {
 		// If this was not allowed, the user would be unable to select another profile without
 		// knowing the actual PIN.
 		if(doProfileSelect) {
+			Logging.logDebug("[Auth] Profile selection requested, doing the profile selection process...");
 			authTokenValue = doSelectProfile(connection, profile);
 			deviceId = currentDeviceId(connection);
 			authTokenType = AuthenticationToken.Type.FULL;
 			authToken = new AuthenticationToken(authTokenType, authTokenValue);
+		} else {
+			Logging.logDebug("[Auth] Profile selection not requested, skipping...");
 		}
 		
+		Logging.logDebug("[Auth] Authentication process is done (type=%s).", authToken.type());
 		return new AuthenticationData(profileId, authToken, deviceId);
 	}
 	
@@ -338,7 +360,7 @@ public final class Authenticator {
 				
 				if(!response.isSuccess()
 						|| (profiles = response.data().getCollection("availableProfiles.profiles")) == null) {
-					Logging.logDebug("Erroneous response: %s", response.data());
+					Logging.logDebug("[Auth] Erroneous response: %s", response.data());
 					
 					throw new MessageException(String.format(
 						"Failed to get profiles. Reason: %s",
