@@ -7,8 +7,20 @@
 					label: {
 						email:       "Email",
 						password:    "Password",
+						account:     "Account",
 						profile:     "Profile",
 						profile_pin: "Profile PIN"
+					},
+					account: {
+						account_auto: "Automatically",
+						progress: {
+							log_in:   "Logging in...",
+							accounts: "Obtaining existing accounts..."
+						},
+						state: {
+							active:   "Active",
+							inactive: "Inactive"
+						}
 					},
 					profile: {
 						profile_auto: "Automatically",

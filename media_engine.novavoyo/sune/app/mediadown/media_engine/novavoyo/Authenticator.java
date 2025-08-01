@@ -1,15 +1,18 @@
 package sune.app.mediadown.media_engine.novavoyo;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
 import sune.app.mediadown.authentication.CredentialsManager;
+import sune.app.mediadown.media_engine.novavoyo.Account.Provider;
 import sune.app.mediadown.media_engine.novavoyo.Common.MessageException;
 import sune.app.mediadown.media_engine.novavoyo.Common.TranslatableException;
 import sune.app.mediadown.media_engine.novavoyo.Connection.Response;
 import sune.app.mediadown.media_engine.novavoyo.util.Logging;
+import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.JSON.JSONCollection;
 import sune.app.mediadown.util.JSON.JSONObject;
 import sune.app.mediadown.util.Utils;
@@ -79,20 +82,12 @@ public final class Authenticator {
 		return authToken;
 	}
 	
-	private static final String selectAccount(JSONCollection accounts) {
-		return Utils.stream(accounts.collectionsIterator())
-					.filter((a) -> "eBox".equals(a.getString("accountProvider")))
-					.map((a) -> a.getString("accountId"))
-					.findFirst().orElse(null);
-	}
-	
-	private static final String doSelectAccount(Connection connection, JSONCollection data)
-			throws Exception {
-		JSONCollection accounts = data.getCollection("step.accounts");
-		Logging.logDebug("[Auth] Available accounts: %s", accounts);
-		
-		String accountId = selectAccount(accounts);
-		String authCode = data.getString("step.authToken");
+	private static final SelectedAccount doSelectAccount(
+		Connection connection,
+		Account account,
+		String authCode
+	) throws Exception {
+		String accountId = account.id();
 		
 		if(accountId == null) {
 			Logging.logDebug("[Auth] No suitable account found, exiting.");
@@ -127,10 +122,10 @@ public final class Authenticator {
 			));
 		}
 		
-		return authToken;
+		return new SelectedAccount(accountId, authToken);
 	}
 	
-	private static final String doLogin(Connection connection, OneplayCredentials credentials)
+	private static final LoginResult doLogin(Connection connection, OneplayCredentials credentials)
 			throws Exception {
 		JSONCollection args = JSONCollection.ofObject(
 			"email", JSONObject.ofString(credentials.email()),
@@ -145,11 +140,20 @@ public final class Authenticator {
 		
 		JSONCollection data = response.data();
 		String schema = data.getString("step.schema");
-		String authToken;
+		LoginResult result;
 		
 		if("ShowAccountChooserStep".equals(schema)) {
-			authToken = doSelectAccount(connection, data);
+			JSONCollection rawAccounts = data.getCollection("step.accounts");
+			Logging.logDebug("[Auth] Available accounts: %s", rawAccounts);
+			
+			List<Account> accounts = Accounts.setAccounts(rawAccounts);
+			Account account = selectAccount(accounts, credentials.accountId());
+			String authCode = data.getString("step.authToken");
+			SelectedAccount selected = doSelectAccount(connection, account, authCode);
+			result = new LoginResult(selected, accounts);
 		} else {
+			String authToken;
+			
 			if(!response.isSuccess()
 					|| (authToken = response.data().getString("step.bearerToken")) == null) {
 				Logging.logDebug("[Auth] Erroneous response: %s", response.data());
@@ -159,9 +163,12 @@ public final class Authenticator {
 					response.data().getString("message", "Unknown reason")
 				));
 			}
+			
+			Accounts.setAccounts((JSONCollection) null);
+			result = new LoginResult(new SelectedAccount("", authToken), List.of());
 		}
 		
-		return authToken;
+		return result;
 	}
 	
 	private static final String currentDeviceId(Connection connection) throws Exception {
@@ -187,10 +194,12 @@ public final class Authenticator {
 	
 	private static final AuthenticationData credentialsToAuthData(OneplayCredentials credentials) {
 		return new AuthenticationData(
+			credentials.accountId(),
 			credentials.profileId(),
 			// Assume that the credentials always have the full authentication token
 			new AuthenticationToken(AuthenticationToken.Type.FULL, credentials.authToken()),
-			credentials.deviceId()
+			credentials.deviceId(),
+			Accounts.parseCredentialsAccounts(credentials.accounts())
 		);
 	}
 	
@@ -201,25 +210,37 @@ public final class Authenticator {
 		return credentialsToAuthData(credentials).equals(data);
 	}
 	
-	public static final OneplayCredentials credentials() throws IOException {
-		return (OneplayCredentials) CredentialsManager.instance().get(Common.credentialsName());
-	}
-	
-	public static final boolean hasCredentials() {
-		try(OneplayCredentials credentials = credentials()) {
-			return (
-				Utils.OfString.nonEmpty(credentials.email())
-					&& Utils.OfString.nonEmpty(credentials.password())
-			);
-		} catch(IOException ex) {
-			return false;
-		}
-	}
-	
-	public static final Profile selectProfile(Connection connection, String profileId)
+	private static final Account selectAccount(List<Account> accounts, String accountId)
 			throws Exception {
-		List<Profile> profiles = Profiles.all(connection);
+		if(accounts.isEmpty()) {
+			throw new IllegalStateException("No accounts");
+		}
 		
+		Account firstActive = (
+			accounts.stream()
+				.filter(Account::isActive)
+				.findFirst()
+				.orElse(null)
+		);
+		
+		if(firstActive == null) {
+			throw new IllegalStateException("No active account");
+		}
+		
+		if(accountId == null || accountId.isEmpty()) {
+			return firstActive;
+		}
+		
+		return (
+			accounts.stream()
+				.filter((a) -> a.isActive() && accountId.equals(a.id()))
+				.findFirst()
+				.orElse(firstActive)
+		);
+	}
+	
+	private static final Profile selectProfile(List<Profile> profiles, String profileId)
+			throws Exception {
 		if(profiles.isEmpty()) {
 			throw new IllegalStateException("No profiles");
 		}
@@ -238,6 +259,21 @@ public final class Authenticator {
 		);
 	}
 	
+	public static final OneplayCredentials credentials() throws IOException {
+		return (OneplayCredentials) CredentialsManager.instance().get(Common.credentialsName());
+	}
+	
+	public static final boolean hasCredentials() {
+		try(OneplayCredentials credentials = credentials()) {
+			return (
+				Utils.OfString.nonEmpty(credentials.email())
+					&& Utils.OfString.nonEmpty(credentials.password())
+			);
+		} catch(IOException ex) {
+			return false;
+		}
+	}
+	
 	public static final boolean isAuthenticated(Connection connection) throws Exception {
 		JSONCollection payload = JSONCollection.ofObject(
 			"screen", JSONObject.ofString("account")
@@ -253,12 +289,15 @@ public final class Authenticator {
 	
 	public static final AuthenticationData login(Connection connection, boolean doProfileSelect)
 			throws Exception {
-		String authTokenValue, selectedProfileId;
+		String authTokenValue, selectedAccountId, selectedProfileId;
+		List<Account> accounts;
 		AuthenticationToken.Type authTokenType = AuthenticationToken.Type.NO_PROFILE;
 		AuthenticationToken authToken = null;
 		
 		try(OneplayCredentials credentials = credentials()) {
 			authTokenValue = credentials.authToken();
+			selectedAccountId = credentials.accountId();
+			accounts = List.of();
 			
 			if(authTokenValue != null && !authTokenValue.isEmpty()) {
 				authToken = new AuthenticationToken(authTokenType, authTokenValue);
@@ -267,6 +306,7 @@ public final class Authenticator {
 				
 				if(isAuthenticated(connection)) {
 					Logging.logDebug("[Auth] The saved access token is valid.");
+					Accounts.setAccounts(credentials.accounts());
 					return credentialsToAuthData(credentials); // Valid saved credentials
 				}
 				
@@ -278,7 +318,11 @@ public final class Authenticator {
 			
 			if(!isAuthenticated(connection)) {
 				Logging.logDebug("[Auth] Connection not authenticated, doing the login process...");
-				authTokenValue = doLogin(connection, credentials);
+				LoginResult result = doLogin(connection, credentials);
+				SelectedAccount selectedAccount = result.selectedAccount();
+				accounts = result.accounts();
+				selectedAccountId = selectedAccount.accountId();
+				authTokenValue = selectedAccount.authToken();
 				authToken = new AuthenticationToken(authTokenType, authTokenValue);
 				connection.authenticate(authToken);
 			} else {
@@ -288,9 +332,12 @@ public final class Authenticator {
 			selectedProfileId = credentials.profileId();
 		}
 		
-		Profile profile = selectProfile(connection, selectedProfileId);
-		String profileId = profile.id();
+		List<Profile> profiles = Profiles.all(connection);
+		Profile profile = selectProfile(profiles, selectedProfileId);
+		
+		String accountId = selectedAccountId;
 		String deviceId = ""; // Must be non-null
+		String profileId = profile.id();
 		
 		// Allow skipping the profile selection process. This is needed in the case when
 		// a profile list is being queried but the automatically selected profile has a PIN lock.
@@ -307,7 +354,7 @@ public final class Authenticator {
 		}
 		
 		Logging.logDebug("[Auth] Authentication process is done (type=%s).", authToken.type());
-		return new AuthenticationData(profileId, authToken, deviceId);
+		return new AuthenticationData(accountId, profileId, authToken, deviceId, accounts);
 	}
 	
 	public static final void rememberAuthenticationData(AuthenticationData data)
@@ -329,10 +376,12 @@ public final class Authenticator {
 				newCredentials = new OneplayCredentials(
 					oldCredentials.email(),
 					oldCredentials.password(),
+					data.accountId(),
 					data.profileId(),
 					oldCredentials.profilePin(),
 					data.authToken().value(),
-					data.deviceId()
+					data.deviceId(),
+					Accounts.serializeCredentialsAccounts(data.accounts())
 				);
 			}
 			
@@ -341,6 +390,127 @@ public final class Authenticator {
 			if(newCredentials != null) {
 				newCredentials.close();
 			}
+		}
+	}
+	
+	private static final class SelectedAccount {
+		
+		private final String accountId;
+		private final String authToken;
+		
+		public SelectedAccount(String accountId, String authToken) {
+			this.accountId = accountId;
+			this.authToken = authToken;
+		}
+		
+		public String accountId() { return accountId; }
+		public String authToken() { return authToken; }
+	}
+	
+	private static final class LoginResult {
+		
+		private final SelectedAccount selectedAccount;
+		private final List<Account> accounts;
+		
+		public LoginResult(SelectedAccount selectedAccount, List<Account> accounts) {
+			this.selectedAccount = selectedAccount;
+			this.accounts = accounts;
+		}
+		
+		public SelectedAccount selectedAccount() { return selectedAccount; }
+		public List<Account> accounts() { return accounts; }
+	}
+	
+	public static final class Accounts {
+		
+		private static final List<Account> cached = new ArrayList<>();
+		
+		private Accounts() {
+		}
+		
+		private static final Account parseAccount(JSONCollection json) {
+			String id = json.getString("accountId");
+			Account.Provider provider = Account.Provider.of(json.getString("accountProvider"));
+			String name = json.getString("name");
+			boolean isActive = json.getBoolean("isActive");
+			return new Account(id, provider, name, isActive);
+		}
+		
+		private static final List<Account> parseCredentialsAccounts(String accounts) {
+			List<Account> list = new ArrayList<>();
+			
+			if(accounts == null || accounts.isEmpty()) {
+				return list;
+			}
+			
+			JSONCollection array = JSON.read(accounts);
+			
+			for(JSONCollection item : array.collectionsIterable()) {
+				list.add(new Account(
+					item.getString("id"),
+					Account.Provider.of(item.getString("provider")),
+					item.getString("name"),
+					item.getBoolean("isActive")
+				));
+			}
+			
+			return list;
+		}
+		
+		private static final String serializeCredentialsAccounts(List<Account> accounts) {
+			JSONCollection array = JSONCollection.emptyArray();
+			
+			for(Account account : accounts) {
+				// Do not include synthetic accounts created by us
+				if(account.id().isEmpty() || "auto".equals(account.id())) {
+					continue;
+				}
+				
+				array.add(account.toJSON());
+			}
+			
+			return array.toString(true);
+		}
+		
+		private static final List<Account> setAccounts(String accounts) {
+			if(accounts == null || accounts.isEmpty()) {
+				return setAccounts((JSONCollection) null);
+			}
+			
+			return setAccounts(JSON.read(accounts));
+		}
+		
+		private static final List<Account> setAccounts(JSONCollection accounts) {
+			cached.clear();
+			
+			if(accounts == null || accounts.isEmpty()) {
+				Account defaultAccount = new Account(
+					"", // Don't use null
+					Provider.EBOX, // No other accounts are present, thus this is a direct Oneplay account
+					"Oneplay", // Default name as used by Oneplay itself
+					true // The only available account should be active
+				);
+				
+				cached.add(defaultAccount);
+				return cached;
+			}
+			
+			Utils.stream(accounts.collectionsIterator())
+				.map(Accounts::parseAccount)
+				.forEachOrdered(cached::add);
+			
+			return cached;
+		}
+		
+		public static final List<Account> all(Connection connection) throws Exception {
+			// Since I don't have access to an account with multiple accounts, I can only
+			// extrapolate from the minified source code available on the Oneplay website.
+			// It seems that the list of accounts is only available during the login process,
+			// i.e. there is no separate page for selecting a different account as is for
+			// profiles, thus we can only obtain them there. The strategy is to do the login
+			// process and during the initial account selection, save the list and then reuse
+			// it everywhere else.
+			return cached;
 		}
 	}
 	
@@ -412,23 +582,39 @@ public final class Authenticator {
 	
 	public static final class AuthenticationData {
 		
+		private final String accountId;
 		private final String profileId;
 		private final AuthenticationToken authToken;
 		private final String deviceId;
+		private final List<Account> accounts;
 		
-		public AuthenticationData(String profileId, AuthenticationToken authToken, String deviceId) {
+		public AuthenticationData(
+			String accountId,
+			String profileId,
+			AuthenticationToken authToken,
+			String deviceId,
+			List<Account> accounts
+		) {
+			this.accountId = accountId;
 			this.profileId = profileId;
 			this.authToken = authToken;
 			this.deviceId = deviceId;
+			this.accounts = accounts;
 		}
 		
+		public String accountId() { return accountId; }
 		public String profileId() { return profileId; }
 		public AuthenticationToken authToken() { return authToken; }
 		public String deviceId() { return deviceId; }
+		public List<Account> accounts() { return accounts; }
+		
+		// Note: Don't use `accounts` in `hashCode` and `equals` methods.
+		//       The data are still valid since the account ID must be from the list of accounts.
+		//       Different lists should not cause the data to be different themselves.
 		
 		@Override
 		public int hashCode() {
-			return Objects.hash(authToken, deviceId, profileId);
+			return Objects.hash(accountId, authToken, deviceId, profileId);
 		}
 		
 		@Override
@@ -440,7 +626,8 @@ public final class Authenticator {
 			if(getClass() != obj.getClass())
 				return false;
 			AuthenticationData other = (AuthenticationData) obj;
-			return Objects.equals(authToken, other.authToken)
+			return Objects.equals(accountId, other.accountId)
+				&& Objects.equals(authToken, other.authToken)
 				&& Objects.equals(deviceId, other.deviceId)
 				&& Objects.equals(profileId, other.profileId);
 		}

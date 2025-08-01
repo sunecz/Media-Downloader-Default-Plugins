@@ -8,6 +8,8 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -50,6 +52,7 @@ public final class Oneplay {
 	
 	private final int parallelism;
 	private final ConnectionPool connectionPool;
+	private final Lock lockAuth = new ReentrantLock();
 	private volatile boolean wasProfileSelect;
 	
 	public Oneplay(int parallelism) {
@@ -258,17 +261,49 @@ public final class Oneplay {
 			return; // Nothing to do
 		}
 		
-		if(!Authenticator.hasCredentials()) {
-			throw new TranslatableException("error.incorrect_auth_data");
+		lockAuth.lock();
+		
+		try {
+			// Check the state again in the exclusive context so that we really authenticate
+			// only once with the required authentication level.
+			if(connectionPool.isAuthenticated() && (wasProfileSelect || !doProfileSelect)) {
+				return; // Nothing to do
+			}
+			
+			if(!Authenticator.hasCredentials()) {
+				throw new TranslatableException("error.incorrect_auth_data");
+			}
+			
+			AuthenticationData authData = openConnection((connection) -> {
+				return Authenticator.login(connection, doProfileSelect);
+			});
+			
+			connectionPool.authenticate(authData.authToken());
+			Authenticator.rememberAuthenticationData(authData);
+			wasProfileSelect = doProfileSelect;
+		} finally {
+			lockAuth.unlock();
+		}
+	}
+	
+	private final void ensureUnauthenticated() {
+		if(!connectionPool.isAuthenticated()) {
+			return; // Nothing to do
 		}
 		
-		AuthenticationData authData = openConnection((connection) -> {
-			return Authenticator.login(connection, doProfileSelect);
-		});
+		lockAuth.lock();
 		
-		connectionPool.authenticate(authData.authToken());
-		Authenticator.rememberAuthenticationData(authData);
-		wasProfileSelect = doProfileSelect;
+		try {
+			// Check again in the exclusive context to make sure
+			if(!connectionPool.isAuthenticated()) {
+				return; // Nothing to do
+			}
+			
+			connectionPool.authenticate(null);
+			wasProfileSelect = false;
+		} finally {
+			lockAuth.unlock();
+		}
 	}
 	
 	// This method is used to find carousels in the responses for shows returned from WebSocket.
@@ -364,9 +399,18 @@ public final class Oneplay {
 		return ListTask.of(Common.handleErrors((task) -> strategy().getMedia(task, engine, uri)));
 	}
 	
+	public List<Account> accounts() throws Exception {
+		ensureAuthenticated(false);
+		return openConnection((connection) -> Authenticator.Accounts.all(connection));
+	}
+	
 	public List<Profile> profiles() throws Exception {
 		ensureAuthenticated(false);
 		return openConnection((connection) -> Authenticator.Profiles.all(connection));
+	}
+	
+	public void deauthenticate() {
+		ensureUnauthenticated();
 	}
 	
 	public void dispose() throws Exception {

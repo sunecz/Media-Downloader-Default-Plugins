@@ -25,7 +25,7 @@ public final class ConnectionPool implements AutoCloseable {
 	private final ScheduledExecutorService scheduler;
 	private final ScheduledFuture<?>[] scheduleFutures;
 	private volatile boolean isActive = true;
-	private AuthenticationToken authToken;
+	private volatile AuthenticationToken authToken;
 	
 	public ConnectionPool(int capacity, Device device) {
 		this.device = Objects.requireNonNull(device);

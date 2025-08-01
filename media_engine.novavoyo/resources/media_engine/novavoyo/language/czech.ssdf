@@ -7,8 +7,20 @@
 					label: {
 						email:       "Email",
 						password:    "Heslo",
+						account:     "Účet",
 						profile:     "Profil",
 						profile_pin: "Profilový PIN"
+					},
+					account: {
+						account_auto: "Automaticky",
+						progress: {
+							log_in:   "Přihlašování...",
+							accounts: "Získávání existujících účtů..."
+						},
+						state: {
+							active:   "Aktivní",
+							inactive: "Neaktivní"
+						}
 					},
 					profile: {
 						profile_auto: "Automaticky",
