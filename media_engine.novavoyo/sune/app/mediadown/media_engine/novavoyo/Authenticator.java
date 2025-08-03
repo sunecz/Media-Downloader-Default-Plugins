@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.regex.Matcher;
 import java.util.stream.Collectors;
 
 import sune.app.mediadown.authentication.CredentialsManager;
@@ -15,6 +16,7 @@ import sune.app.mediadown.media_engine.novavoyo.util.Logging;
 import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.JSON.JSONCollection;
 import sune.app.mediadown.util.JSON.JSONObject;
+import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
 
 public final class Authenticator {
@@ -125,8 +127,11 @@ public final class Authenticator {
 		return new SelectedAccount(accountId, authToken);
 	}
 	
-	private static final LoginResult doLogin(Connection connection, OneplayCredentials credentials)
-			throws Exception {
+	private static final LoginResult doLogin(
+		Connection connection,
+		OneplayCredentials credentials,
+		String requiredAccountId
+	) throws Exception {
 		JSONCollection args = JSONCollection.ofObject(
 			"email", JSONObject.ofString(credentials.email()),
 			"password", JSONObject.ofString(credentials.password())
@@ -146,8 +151,13 @@ public final class Authenticator {
 			JSONCollection rawAccounts = data.getCollection("step.accounts");
 			Logging.logDebug("[Auth] Available accounts: %s", rawAccounts);
 			
+			// Allow account selection override
+			String selectedAccountId = (
+				requiredAccountId != null ? requiredAccountId : credentials.accountId()
+			);
+			
 			List<Account> accounts = Accounts.setAccounts(rawAccounts);
-			Account account = selectAccount(accounts, credentials.accountId());
+			Account account = selectAccount(accounts, selectedAccountId);
 			String authCode = data.getString("step.authToken");
 			SelectedAccount selected = doSelectAccount(connection, account, authCode);
 			result = new LoginResult(selected, accounts);
@@ -196,8 +206,7 @@ public final class Authenticator {
 		return new AuthenticationData(
 			credentials.accountId(),
 			credentials.profileId(),
-			// Assume that the credentials always have the full authentication token
-			new AuthenticationToken(AuthenticationToken.Type.FULL, credentials.authToken()),
+			CredentialsUtils.parseAuthToken(credentials.authToken()),
 			credentials.deviceId(),
 			Accounts.parseCredentialsAccounts(credentials.accounts())
 		);
@@ -287,8 +296,11 @@ public final class Authenticator {
 		);
 	}
 	
-	public static final AuthenticationData login(Connection connection, boolean doProfileSelect)
-			throws Exception {
+	public static final AuthenticationData login(
+		Connection connection,
+		String requiredAccountId, // `null` = the selected account in the credentials
+		boolean doProfileSelect
+	) throws Exception {
 		String authTokenValue, selectedAccountId, selectedProfileId;
 		List<Account> accounts;
 		AuthenticationToken.Type authTokenType = AuthenticationToken.Type.NO_PROFILE;
@@ -296,34 +308,45 @@ public final class Authenticator {
 		
 		try(OneplayCredentials credentials = credentials()) {
 			authTokenValue = credentials.authToken();
-			selectedAccountId = credentials.accountId();
 			accounts = List.of();
+			selectedAccountId = (
+				requiredAccountId != null ? requiredAccountId : credentials.accountId()
+			);
 			
 			if(authTokenValue != null && !authTokenValue.isEmpty()) {
-				authToken = new AuthenticationToken(authTokenType, authTokenValue);
-				connection.authenticate(authToken); // Try to use the saved authentication token
-				Logging.logDebug("[Auth] Trying the saved access token...");
+				authToken = CredentialsUtils.parseAuthToken(authTokenValue);
+				Logging.logDebug("[Auth] Checking account of the saved access token...");
 				
-				if(isAuthenticated(connection)) {
-					Logging.logDebug("[Auth] The saved access token is valid.");
-					Accounts.setAccounts(credentials.accounts());
-					return credentialsToAuthData(credentials); // Valid saved credentials
+				if(authToken != null && authToken.accountId().equals(selectedAccountId)) {
+					Logging.logDebug("[Auth] Account matches, continuing...");
+					connection.authenticate(authToken); // Try to use the saved authentication token
+					Logging.logDebug("[Auth] Trying the saved access token...");
+					
+					if(isAuthenticated(connection)) {
+						Logging.logDebug("[Auth] The saved access token is valid.");
+						Accounts.setAccounts(credentials.accounts());
+						return credentialsToAuthData(credentials); // Valid saved credentials
+					}
+					
+					Logging.logDebug("[Auth] Access token is invalid, continuing...");
+					connection.authenticate(null); // Reset the authentication token
+				} else {
+					Logging.logDebug("[Auth] Account does not match, skipping...");
 				}
 				
-				Logging.logDebug("[Auth] Access token is invalid, continuing...");
-				connection.authenticate(null); // Reset the authentication token
+				authToken = null; // Reset
 			} else {
 				Logging.logDebug("[Auth] No access token saved, continuing...");
 			}
 			
 			if(!isAuthenticated(connection)) {
 				Logging.logDebug("[Auth] Connection not authenticated, doing the login process...");
-				LoginResult result = doLogin(connection, credentials);
+				LoginResult result = doLogin(connection, credentials, requiredAccountId);
 				SelectedAccount selectedAccount = result.selectedAccount();
 				accounts = result.accounts();
 				selectedAccountId = selectedAccount.accountId();
 				authTokenValue = selectedAccount.authToken();
-				authToken = new AuthenticationToken(authTokenType, authTokenValue);
+				authToken = new AuthenticationToken(selectedAccountId, authTokenType, authTokenValue);
 				connection.authenticate(authToken);
 			} else {
 				Logging.logDebug("[Auth] Connection already authenticated, skipping the login process...");
@@ -348,7 +371,7 @@ public final class Authenticator {
 			authTokenValue = doSelectProfile(connection, profile);
 			deviceId = currentDeviceId(connection);
 			authTokenType = AuthenticationToken.Type.FULL;
-			authToken = new AuthenticationToken(authTokenType, authTokenValue);
+			authToken = new AuthenticationToken(selectedAccountId, authTokenType, authTokenValue);
 		} else {
 			Logging.logDebug("[Auth] Profile selection not requested, skipping...");
 		}
@@ -379,7 +402,7 @@ public final class Authenticator {
 					data.accountId(),
 					data.profileId(),
 					oldCredentials.profilePin(),
-					data.authToken().value(),
+					CredentialsUtils.serializeAuthToken(data.authToken()),
 					data.deviceId(),
 					Accounts.serializeCredentialsAccounts(data.accounts())
 				);
@@ -419,6 +442,57 @@ public final class Authenticator {
 		
 		public SelectedAccount selectedAccount() { return selectedAccount; }
 		public List<Account> accounts() { return accounts; }
+	}
+	
+	private static final class CredentialsUtils {
+		
+		// Auth token format (in regex-like syntax):
+		//   ^(ACCOUNT_ID;AUTH_TOKEN_TYPE;)?AUTH_TOKEN_VALUE$
+		// 
+		// where:
+		//   - `ACCOUNT_ID`       is a non-empty string of an account ID,
+		//   - `AUTH_TOKEN_TYPE`  is always the string "FULL",
+		//   - `AUTH_TOKEN_VALUE` is the auth token actual value.
+		// 
+		// Account ID and type are both optional due to compatibility reasons.
+		// If they are not present, the auth token should be treated as invalid.
+		
+		private static final Regex REGEX_AUTH_TOKEN = Regex.of(
+			"^(?:(?<account>[^;]+);(?<type>[^;]+);)?(?<value>.*)$"
+		);
+		
+		private CredentialsUtils() {}
+		
+		public static final AuthenticationToken parseAuthToken(String authToken) {
+			AuthenticationToken.Type type = AuthenticationToken.Type.FULL;
+			Matcher matcher;
+			
+			if(authToken == null || authToken.isEmpty()
+					|| !(matcher = REGEX_AUTH_TOKEN.matcher(authToken)).matches()
+					|| !type.name().equals(matcher.group("type"))) {
+				return new AuthenticationToken("", type, ""); // Graceful fallback
+			}
+			
+			String strAccount = matcher.group("account");
+			String strValue = matcher.group("value");
+			
+			if(strAccount == null) strAccount = ""; // Assume nothing, this should invalidate the token
+			if(strValue   == null) strValue   = ""; // Normalize the value
+			
+			return new AuthenticationToken(strAccount, type, strValue);
+		}
+		
+		public static final String serializeAuthToken(AuthenticationToken authToken) {
+			if(authToken == null) {
+				throw new IllegalArgumentException("Invalid authentication token");
+			}
+			
+			String account = authToken.accountId();
+			String type = authToken.type().name();
+			String value = authToken.value();
+			
+			return String.join(";", account, type, value);
+		}
 	}
 	
 	public static final class Accounts {
@@ -551,20 +625,23 @@ public final class Authenticator {
 		
 		public static enum Type { NO_PROFILE, FULL; }
 		
+		private final String accountId;
 		private final Type type;
 		private final String value;
 		
-		public AuthenticationToken(Type type, String value) {
+		public AuthenticationToken(String accountId, Type type, String value) {
+			this.accountId = Objects.requireNonNull(accountId);
 			this.type = Objects.requireNonNull(type);
 			this.value = Objects.requireNonNull(value);
 		}
 		
+		public String accountId() { return accountId; }
 		public Type type() { return type; }
 		public String value() { return value; }
 		
 		@Override
 		public int hashCode() {
-			return Objects.hash(type, value);
+			return Objects.hash(accountId, type, value);
 		}
 		
 		@Override
@@ -576,7 +653,8 @@ public final class Authenticator {
 			if(getClass() != obj.getClass())
 				return false;
 			AuthenticationToken other = (AuthenticationToken) obj;
-			return type == other.type && Objects.equals(value, other.value);
+			return Objects.equals(accountId, other.accountId) && type == other.type
+				&& Objects.equals(value, other.value);
 		}
 	}
 	

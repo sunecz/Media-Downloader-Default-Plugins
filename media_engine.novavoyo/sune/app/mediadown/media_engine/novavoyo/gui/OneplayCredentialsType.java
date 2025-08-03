@@ -64,8 +64,13 @@ public class OneplayCredentialsType extends CredentialsType<OneplayCredentials> 
 		
 		// Each account has its separate profiles, thus on every account change we have to
 		// clear the profile select.
-		cmbAccount.control.getSelectionModel().selectedIndexProperty().addListener((o, ov, nv) -> {
+		cmbAccount.control.getSelectionModel().selectedItemProperty().addListener((o, ov, nv) -> {
+			if(cmbAccount.isFirstLoad()) {
+				return; // Items loaded for the first time, do not trigger the deauthentication
+			}
+			
 			Oneplay.instance().deauthenticate();
+			cmbProfile.requiredAccountId(nv.id());
 			cmbProfile.reload();
 		});
 		
@@ -233,6 +238,8 @@ public class OneplayCredentialsType extends CredentialsType<OneplayCredentials> 
 	
 	private static final class AccountSelect extends GenericSelect<Account> {
 		
+		private boolean firstLoad = true;
+		
 		public AccountSelect(Translation translation) {
 			super(translation);
 		}
@@ -277,6 +284,10 @@ public class OneplayCredentialsType extends CredentialsType<OneplayCredentials> 
 			return account.id();
 		}
 		
+		public boolean isFirstLoad() {
+			return firstLoad && !(firstLoad = false);
+		}
+		
 		private final class Cell extends ListCell<Account> {
 			
 			@Override
@@ -308,12 +319,14 @@ public class OneplayCredentialsType extends CredentialsType<OneplayCredentials> 
 	
 	private static final class ProfileSelect extends GenericSelect<Profile> {
 		
+		private String requiredAccountId;
+		
 		public ProfileSelect(Translation translation) {
 			super(translation);
 		}
 		
 		private final List<Profile> profiles() throws Exception {
-			return Oneplay.instance().profiles();
+			return Oneplay.instance().profiles(requiredAccountId);
 		}
 		
 		private final Profile automaticProfile() {
@@ -350,6 +363,10 @@ public class OneplayCredentialsType extends CredentialsType<OneplayCredentials> 
 			}
 			
 			return profile.id();
+		}
+		
+		public void requiredAccountId(String requiredAccountId) {
+			this.requiredAccountId = requiredAccountId;
 		}
 		
 		private final class Cell extends ListCell<Profile> {
