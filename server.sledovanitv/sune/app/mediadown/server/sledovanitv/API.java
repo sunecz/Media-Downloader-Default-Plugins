@@ -16,7 +16,7 @@ import sune.app.mediadown.util.Utils;
 
 public final class API {
 	
-	private static final URI URI_BASE = Net.uri("https://sledovanitv.cz/api/");
+	private static final URI URI_BASE = Net.uri("https://sledovanitv.cz/");
 	private static final String USER_AGENT = "okhttp/4.12.0";
 	private static final String APP_LANG = "cs";
 	private static final String APP_VERSION = "2.81.147";
@@ -110,7 +110,7 @@ public final class API {
 			"checkLimit", "1"
 		);
 		
-		API.Response response = request("create-pairing", query, null);
+		API.Response response = request("api/create-pairing", query, null);
 		JSONCollection data = response.data();
 		
 		if(!response.isSuccess()) {
@@ -132,7 +132,7 @@ public final class API {
 			"capabilities", APP_CAPABILITIES
 		);
 		
-		API.Response response = request("device-login", query, null);
+		API.Response response = request("api/device-login", query, null);
 		JSONCollection data = response.data();
 		
 		if(!response.isSuccess()) {
@@ -160,7 +160,7 @@ public final class API {
 			"PHPSESSID", sessionId
 		);
 		
-		API.Response response = request("record-timeshift", query, sessionId);
+		API.Response response = request("api/record-timeshift", query, sessionId);
 		JSONCollection data = response.data();
 		
 		if(!response.isSuccess()) {
@@ -187,11 +187,58 @@ public final class API {
 			"PHPSESSID", sessionId
 		);
 		
-		API.Response response = request("event-timeshift", query, sessionId);
+		API.Response response = request("api/event-timeshift", query, sessionId);
 		JSONCollection data = response.data();
 		
 		if(!response.isSuccess()) {
 			throw error("Failed to fetch media source data: %s", data);
+		}
+		
+		return data;
+	}
+	
+	public JSONCollection entryMediaSource(Session session, String eventId) throws Exception {
+		String sessionId;
+		if(session == null || (sessionId = session.sessionId()) == null) {
+			throw new AuthenticationException("Invalid session");
+		}
+		
+		String query = Net.queryString(
+			"format", "m3u8",
+			"eventId", eventId,
+			"drm", "1",
+			"capabilities", APP_CAPABILITIES,
+			"quality", QUALITY,
+			"PHPSESSID", sessionId
+		);
+		
+		API.Response response = request("vod-api/get-event-stream", query, sessionId);
+		JSONCollection data = response.data();
+		
+		if(!response.isSuccess()) {
+			throw error("Failed to fetch media source data: %s", data);
+		}
+		
+		return data;
+	}
+	
+	public JSONCollection entryData(Session session, String entryId) throws Exception {
+		String sessionId;
+		if(session == null || (sessionId = session.sessionId()) == null) {
+			throw new AuthenticationException("Invalid session");
+		}
+		
+		String query = Net.queryString(
+			"entryId", entryId,
+			"detail", "events",
+			"PHPSESSID", sessionId
+		);
+		
+		API.Response response = request("vod-api/get-entry", query, sessionId);
+		JSONCollection data = response.data();
+		
+		if(!response.isSuccess()) {
+			throw error("Failed to fetch entry data: %s", data);
 		}
 		
 		return data;

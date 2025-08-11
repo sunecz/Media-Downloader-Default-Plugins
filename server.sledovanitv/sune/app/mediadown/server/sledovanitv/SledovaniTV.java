@@ -34,10 +34,15 @@ public final class SledovaniTV {
 	private static VarLoader<SledovaniTV> instance = VarLoader.of(SledovaniTV::new);
 	
 	private static final Regex REGEX_URI = Regex.of(
-		"^https?://sledovanitv\\.(cz|sk)/home#(?:"
+		"^https?://sledovanitv\\.(cz|sk)/(?:"
 			+ String.join("|",
-				"record(?:%3A|:)(?<recordId>\\d+)",
-				"event(?:%3A|:)(?<eventId>[^%:]+(?:%3A|:).+)"
+				"home#(?:"
+					+ String.join("|",
+						"record(?:%3A|:)(?<recordId>\\d+)",
+						"event(?:%3A|:)(?<eventId>[^%:]+(?:%3A|:).+)"
+					)
+					+ ")",
+				"vod/play\\?entryId=(?<entryId>\\d+)"
 			)
 			+ ")$"
 	);
@@ -86,6 +91,11 @@ public final class SledovaniTV {
 			return (task) -> getEventMedia(source, task, uri, Net.decodeURL(eventId));
 		}
 		
+		String entryId;
+		if((entryId = matcher.group("entryId")) != null) {
+			return (task) -> getEntryMedia(source, task, uri, Net.decodeURL(entryId));
+		}
+		
 		return null; // Not supported
 	}
 	
@@ -103,6 +113,11 @@ public final class SledovaniTV {
 		}
 		
 		return builder.toString();
+	}
+	
+	private final String getEntryTitle(JSONCollection entryData) {
+		String title = entryData.getString("name");
+		return title; // Return simple name for now
 	}
 	
 	private final Iterable<SegmentedMedia.Builder<?, ?>> segmentedVTTSubtitles(
@@ -126,11 +141,9 @@ public final class SledovaniTV {
 	private final List<Media.Builder<?, ?>> getMediaBuilders(
 		MediaSource source,
 		URI sourceUri,
-		JSONCollection data
+		String title,
+		URI uri
 	) throws Exception {
-		URI uri = Net.uri(data.getString("url"));
-		String title = getTitle(data.getCollection("event"));
-		
 		List<Media.Builder<?, ?>> builders = MediaUtils.createMediaBuilders(
 			source, uri, sourceUri, title, MediaLanguage.UNKNOWN, MediaMetadata.empty()
 		);
@@ -193,7 +206,9 @@ public final class SledovaniTV {
 		String recordId
 	) throws Exception {
 		JSONCollection data = api.recordMediaSource(session, recordId);
-		List<Media.Builder<?, ?>> builders = getMediaBuilders(source, sourceUri, data);
+		String title = getTitle(data.getCollection("event"));
+		URI uri = Net.uri(data.getString("url"));
+		List<Media.Builder<?, ?>> builders = getMediaBuilders(source, sourceUri, title, uri);
 		
 		for(Media.Builder<?, ?> m : builders) {
 			if(!task.add(m.build())) {
@@ -209,7 +224,40 @@ public final class SledovaniTV {
 		String eventId
 	) throws Exception {
 		JSONCollection data = api.eventMediaSource(session, eventId);
-		List<Media.Builder<?, ?>> builders = getMediaBuilders(source, sourceUri, data);
+		String title = getTitle(data.getCollection("event"));
+		URI uri = Net.uri(data.getString("url"));
+		List<Media.Builder<?, ?>> builders = getMediaBuilders(source, sourceUri, title, uri);
+		
+		for(Media.Builder<?, ?> m : builders) {
+			if(!task.add(m.build())) {
+				return; // Do not continue
+			}
+		}
+	}
+	
+	private final void getEntryMedia(
+		MediaSource source,
+		ListTask<Media> task,
+		URI sourceUri,
+		String entryId
+	) throws Exception {
+		JSONCollection entryData = api.entryData(session, entryId);
+		String title = getEntryTitle(entryData.getCollection("entry"));
+		JSONCollection events = entryData.getCollection("events");
+		
+		if(events.isEmpty()) {
+			throw new IllegalStateException("No entry events");
+		}
+		
+		String eventId = String.valueOf(events.getLong("0.id", 0L));
+		
+		if("0".equals(eventId)) {
+			throw new IllegalStateException("Invalid event ID");
+		}
+		
+		JSONCollection data = api.entryMediaSource(session, eventId);
+		URI uri = Net.uri(data.getString("stream.url"));
+		List<Media.Builder<?, ?>> builders = getMediaBuilders(source, sourceUri, title, uri);
 		
 		for(Media.Builder<?, ?> m : builders) {
 			if(!task.add(m.build())) {
