@@ -3,23 +3,17 @@
 		server: {
 			sledovanitv: {
 				title: "SledovaniTV",
-				configuration: {
-					group: {
-						general: "SledovaniTV"
-					},
-					fields: {
-						authData_email:    "Email",
-						authData_password: "Heslo"
+				credentials: {
+					label: {
+						username: "Uživatelské jméno",
+						password: "Heslo"
 					}
 				},
 				error: {
-					media_error: {
-						title: "Chyba",
-						text:  "Média nelze získat z následujícího důvodů:"
-					},
-					value: {
-						not_logged_in: "Nejste přihlášeni. Prosím, nastavte Vaše přihlašovací údaje k účtu "
-							+ "v nastavení programu."
+					authentication: {
+						title: "Chyba autentikace",
+						text:  "Nejste přihlášeni. Prosím, nastavte Vaše přihlašovací údaje k účtu "
+									+ "v nastavení programu."
 					}
 				}
 			}
