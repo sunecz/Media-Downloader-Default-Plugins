@@ -10,6 +10,9 @@
 					}
 				},
 				error: {
+					general: {
+						title: "Error"
+					},
 					authentication: {
 						title: "Authentication error",
 						text:  "You are not logged in. Please, set your account credentials "

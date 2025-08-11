@@ -10,6 +10,9 @@
 					}
 				},
 				error: {
+					general: {
+						title: "Chyba"
+					},
 					authentication: {
 						title: "Chyba autentikace",
 						text:  "Nejste přihlášeni. Prosím, nastavte Vaše přihlašovací údaje k účtu "

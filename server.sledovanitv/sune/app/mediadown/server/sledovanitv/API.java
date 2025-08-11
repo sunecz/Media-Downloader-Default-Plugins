@@ -176,8 +176,6 @@ public final class API {
 			throw new AuthenticationException("Invalid session");
 		}
 		
-		sessionId = "";
-		
 		String query = Net.queryString(
 			"format", "m3u8",
 			"radioFormat", "m3u8",

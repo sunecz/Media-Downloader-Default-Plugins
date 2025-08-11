@@ -44,7 +44,7 @@ public final class Common {
 			return; // Do not continue
 		}
 		
-		Translation tr = translation().getTranslation("error.message_error");
+		Translation tr = translation().getTranslation("error.general");
 		Dialog.showError(tr.getSingle("title"), throwable.getMessage());
 	}
 	
