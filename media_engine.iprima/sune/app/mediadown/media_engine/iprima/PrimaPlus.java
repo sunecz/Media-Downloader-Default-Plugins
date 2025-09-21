@@ -3,13 +3,9 @@ package sune.app.mediadown.media_engine.iprima;
 import java.net.URI;
 import java.net.http.HttpHeaders;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.ListIterator;
 import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -32,16 +28,14 @@ import sune.app.mediadown.media.VideoMediaContainer;
 import sune.app.mediadown.media.type.SeparatedVideoMediaContainer;
 import sune.app.mediadown.media_engine.iprima.IPrimaEngine.Features;
 import sune.app.mediadown.media_engine.iprima.IPrimaEngine.IPrima;
-import sune.app.mediadown.media_engine.iprima.IPrimaHelper.SimpleExecutor;
-import sune.app.mediadown.media_engine.iprima.IPrimaHelper.ThreadedSpawnableTaskQueue;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper._Singleton;
-import sune.app.mediadown.media_engine.iprima.PrimaCommon.JSONSerializable;
 import sune.app.mediadown.media_engine.iprima.PrimaCommon.MessageException;
 import sune.app.mediadown.media_engine.iprima.PrimaCommon.Nuxt;
 import sune.app.mediadown.media_engine.iprima.PrimaCommon.RPC;
 import sune.app.mediadown.net.Net;
 import sune.app.mediadown.net.Web;
 import sune.app.mediadown.net.Web.Request;
+import sune.app.mediadown.net.Web.Response;
 import sune.app.mediadown.task.ListTask;
 import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.JSON.JSONCollection;
@@ -82,97 +76,51 @@ final class PrimaPlus implements IPrima {
 		return FEATURES;
 	}
 	
+	private static final class MDI {
+		
+		private static final String URL_API = "https://s0.api.mdi.sune.app";
+		
+		private MDI() {
+		}
+		
+		public static final void getPrograms(ListTask<Program> task) throws Exception {
+			String uriTemplate = URL_API + "/websites/iprima/programs?cursor=%{cursor}s&size=100";
+			String cursor = Net.encodeURL(Utils.base64URLEncode("{}"));
+			
+			do {
+				URI reqUri = Net.uri(Utils.format(uriTemplate, "cursor", cursor));
+				
+				try(Response.OfStream response = Web.requestStream(Request.of(reqUri).GET())) {
+					if(response.statusCode() != 200) {
+						return; // Fast-fail
+					}
+					
+					JSONCollection data = JSON.read(response.stream());
+					JSONCollection programs = data.getCollection("programs");
+					
+					for(JSONCollection item : programs.collectionsIterable()) {
+						URI uri = Net.uri(item.getString("uri"));
+						String title = item.getString("title");
+						String type = item.getString("type");
+						Program program = new Program(uri, title, "type", type);
+						
+						if(!task.add(program)) {
+							return; // Do not continue
+						}
+					}
+					
+					cursor = data.getString("pagination.next_cursor");
+				}
+			} while(cursor != null);
+		}
+	}
+	
 	private static final class API {
 		
 		private static final String URL_API_PLAY = "https://api.play-backend.iprima.cz/api/v1/products/play/ids-%{play_id}s";
-		private static final String URL_BASE_MOVIE = "https://www.iprima.cz/filmy/";
-		private static final String URL_BASE_SERIES = "https://www.iprima.cz/serialy/";
-		
-		private static final int EXIT_CALLBACK = -1;
-		private static final int EXIT_SUCCESS = 0;
-		
-		private static final int MAX_OFFSET = 1000;
-		
 		private static final VarLoader<HttpHeaders> sessionHeaders = VarLoader.ofChecked(API::initSessionHeaders);
 		
 		private API() {
-		}
-		
-		private static final List<String> listGenres() throws Exception {
-			final String method = "vdm.frontend.genre.list";
-			
-			List<String> genres = new ArrayList<>();
-			JSONCollection result = RPC.request(method);
-			
-			if(RPC.isError(result)) {
-				throw new MessageException(result.getString("error.message"));
-			}
-			
-			for(JSONCollection genre : result.getCollection("data").collectionsIterable()) {
-				String type = genre.getString("type");
-				
-				if(!type.equals("static")) {
-					continue;
-				}
-				
-				genres.add(genre.getString("title"));
-			}
-			
-			return genres;
-		}
-		
-		private static final JSONCollection listNextItems(String stripId, String recommId, int offset, int limit)
-				throws Exception {
-			final String method = "strip.strip.nextItems.vdm";
-			final String deviceType = "WEB";
-			
-			JSONCollection result = RPC.request(
-				method,
-				"deviceType", deviceType,
-				"stripId", stripId,
-				"recommId", recommId,
-				"limit", limit,
-				"offset", offset
-			);
-			
-			if(RPC.isError(result)) {
-				throw new MessageException(result.getString("error.message"));
-			}
-			
-			return result.getCollection("data");
-		}
-		
-		private static final <T> int parseItems(ListTask<T> task, JSONCollection items,
-				Set<T> existing, Function<JSONCollection, T> transformer) throws Exception {
-			for(JSONCollection item : items.collectionsIterable()) {
-				T value = transformer.apply(item);
-				
-				if(existing.add(value) && !task.add(value)) {
-					return EXIT_CALLBACK; // Do not continue
-				}
-			}
-			
-			return EXIT_SUCCESS;
-		}
-		
-		private static final Program stripItemToProgram(JSONCollection item) {
-			String id = item.getString("id");
-			String title = item.getString("title");
-			String type = item.getString("type");
-			String uri = item.getString("additionals.webUrl", null);
-			
-			// URI can be null when a non-premium user encounters premium
-			// tv show or movie.
-			if(uri == null) {
-				String slug = item.getString("slug");
-				
-				switch(type) {
-					case "movie":  uri = URL_BASE_MOVIE  + slug; break;
-					case "series": uri = URL_BASE_SERIES + slug; break;
-				}
-			}
-			
-			return new Program(Net.uri(uri), title, "id", id, "type", type);
 		}
 		
 		private static final List<Season> listSeasons(String programId) throws Exception {
@@ -282,73 +230,7 @@ final class PrimaPlus implements IPrima {
 		}
 		
 		public static final ListTask<Program> getPrograms() throws Exception {
-			return ListTask.of(PrimaCommon.handleErrors((task) -> {
-				// Note: Obtaining the list of programs is not stable using this method.
-				//       Since there is no currently known other method how to obtain
-				//       a stable list of programs, at least for me, we are stuck with
-				//       this method.
-				Set<Program> existing = Collections.newSetFromMap(new ConcurrentHashMap<>());
-				
-				final List<String> strips = List.of(
-					"8ab51da8-1890-4e78-8770-cbee59a3976a", // Seriály
-					"1d0e2451-bcfa-4ecc-a9d7-5d062ad9bf1c", // Seriály (Nejnovější)
-					"82bee2e2-32ef-4323-ab1e-5f973bf5f0a6", // Pořady z TV
-					"8138baa8-c933-4015-b7ea-17ac7a679da4", // Filmy (Doporučené)
-					"3a2c25d8-4384-4945-ba37-ead972fb216d", // Filmy (Nejnovější)
-					"7d92a9fa-a958-4d62-9ae9-2e2726c5a348"  // Filmy (Nejsledovanější)
-				);
-				
-				List<StripGroup> stripGroups = new ArrayList<>();
-				stripGroups.add(new StripGroup(strips, List.of()));
-				
-				// Must also obtain the strips filtered by a genre, since some programs
-				// are not always visible in the non-filtered list.
-				for(String genre : listGenres()) {
-					stripGroups.add(new StripGroup(strips, List.of(new Filter("genre", genre))));
-				}
-				
-				final String method = "strip.strip.bulkItems.vdm";
-				final String deviceType = "WEB";
-				final int perPage = 100;
-				final int numMaxThreads = Math.max(1, Runtime.getRuntime().availableProcessors() / 2);
-				final int numMaxFixed = Math.min(stripGroups.size(), numMaxThreads);
-				
-				try(
-					ThreadedSpawnableTaskQueue<NextItemsTaskArgs, Integer> queue = new ProgramTasks(
-						numMaxThreads, task, existing, perPage
-					);
-					SimpleExecutor<Void> executor = SimpleExecutor.ofFixed(numMaxFixed);
-				) {
-					for(StripGroup stripGroup : stripGroups) {
-						executor.addTask(() -> {
-							JSONCollection result = RPC.request(
-								method,
-								"deviceType", deviceType,
-								"stripIds", stripGroup.stripIds(),
-								"limit", perPage,
-								"filter", stripGroup.filter()
-							);
-							
-							if(RPC.isError(result)) {
-								throw new MessageException(result.getString("error.message"));
-							}
-							
-							for(JSONCollection strip : result.getCollection("data").collectionsIterable()) {
-								String stripId = strip.name();
-								String recommId = strip.getString("recommId");
-								boolean hasNextItems = strip.getBoolean("isNextItems");
-								JSONCollection items = strip.getCollection("items");
-								
-								parseItems(task, items, existing, API::stripItemToProgram);
-								
-								if(hasNextItems) {
-									queue.addTask(new NextItemsTaskArgs(stripId, recommId, perPage));
-								}
-							}
-						});
-					}
-				}
-			}));
+			return ListTask.of(PrimaCommon.handleErrors((task) -> MDI.getPrograms(task)));
 		}
 		
 		public static final ListTask<Episode> getEpisodes(Program program)
@@ -554,112 +436,6 @@ final class PrimaPlus implements IPrima {
 					}
 				}
 			}));
-		}
-		
-		private static final class Filter implements JSONSerializable {
-			
-			private final String type;
-			private final String value;
-			
-			public Filter(String type, String value) {
-				this.type = type;
-				this.value = value;
-			}
-			
-			@Override
-			public JSONNode toJSON() {
-				JSONCollection json = JSONCollection.empty();
-				json.set("type", type);
-				json.set("value", value);
-				return json;
-			}
-		}
-		
-		private static final class StripGroup {
-			
-			private final List<String> stripIds;
-			private final List<Filter> filter;
-			
-			public StripGroup(List<String> stripIds, List<Filter> filter) {
-				this.stripIds = stripIds;
-				this.filter = filter;
-			}
-			
-			public List<String> stripIds() {
-				return stripIds;
-			}
-			
-			public List<Filter> filter() {
-				return filter;
-			}
-		}
-		
-		private static final class ProgramTasks extends ThreadedSpawnableTaskQueue<NextItemsTaskArgs, Integer> {
-			
-			private final ListTask<Program> task;
-			private final Set<Program> existing;
-			private final int perPage;
-			
-			public ProgramTasks(int maxThreads, ListTask<Program> task, Set<Program> existing,
-					int perPage) {
-				super(maxThreads);
-				this.task = task;
-				this.existing = existing;
-				this.perPage = perPage;
-			}
-			
-			@Override
-			protected Integer runTask(NextItemsTaskArgs args) throws Exception {
-				JSONCollection strip = listNextItems(args.stripId(), args.recommId(), args.offset(), perPage);
-				JSONCollection items = strip.getCollection("items");
-				
-				int result;
-				if((result = parseItems(task, items, existing, API::stripItemToProgram)) != EXIT_SUCCESS) {
-					return result;
-				}
-				
-				boolean hasNextItems = strip.getBoolean("isNextItems");
-				
-				if(!shouldShutdown(result) && hasNextItems) {
-					int nextOffset = args.offset() + perPage;
-					
-					if(nextOffset < MAX_OFFSET) {
-						addTask(new NextItemsTaskArgs(args.stripId(), args.recommId(), nextOffset));
-					}
-				}
-				
-				return result;
-			}
-			
-			@Override
-			protected boolean shouldShutdown(Integer val) {
-				return val != EXIT_SUCCESS;
-			}
-		}
-		
-		private static final class NextItemsTaskArgs {
-			
-			private final String stripId;
-			private final String recommId;
-			private final int offset;
-			
-			public NextItemsTaskArgs(String stripId, String recommId, int offset) {
-				this.stripId = stripId;
-				this.recommId = recommId;
-				this.offset = offset;
-			}
-			
-			public String stripId() {
-				return stripId;
-			}
-			
-			public String recommId() {
-				return recommId;
-			}
-			
-			public int offset() {
-				return offset;
-			}
 		}
 		
 		private static final class Season {
