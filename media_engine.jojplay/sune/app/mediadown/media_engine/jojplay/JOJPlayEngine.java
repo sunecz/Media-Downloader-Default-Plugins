@@ -159,6 +159,7 @@ public final class JOJPlayEngine implements MediaEngine {
 		private static final Regex REGEX_EPISODE_TITLE = Regex.of("(?iu)^(\\d+)\\.?\\s*(?:epizóda)?\\s*");
 		
 		private static final URI URI_SOURCES = Net.uri("https://europe-west3-tivio-production.cloudfunctions.net/getSourceUrl");
+		private static final List<String> RESOLVE_LANGUAGES = List.of("sk", "cs", "en");
 		
 		private static final FirebaseChannel openChannel() throws Exception {
 			return FirebaseChannel.open(Authenticator.idToken());
@@ -172,7 +173,22 @@ public final class JOJPlayEngine implements MediaEngine {
 			
 			JSONCollection map;
 			if((map = field.getCollection("mapValue")) != null) { // Translated value
-				return map.getString("fields.sk.stringValue");
+				// Not every language is available, try multiple in the order of preference.
+				for(String lang : RESOLVE_LANGUAGES) {
+					if((value = map.getString("fields." + lang + ".stringValue")) != null) {
+						break; // Valid value found
+					}
+				}
+				
+				// If the preferred languages are not available, just return the first one that
+				// is available, if any, otherwise return null.
+				if(value == null) {
+					value = Utils.stream(map.getCollection("fields").collectionsIterable())
+						.map((c) -> c.getString("stringValue"))
+						.findFirst().orElse(null);
+				}
+				
+				return value;
 			}
 			
 			return null;
