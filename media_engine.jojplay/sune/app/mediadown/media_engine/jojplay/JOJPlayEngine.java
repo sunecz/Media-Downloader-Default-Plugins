@@ -31,7 +31,6 @@ import sune.app.mediadown.MediaDownloader;
 import sune.app.mediadown.authentication.CredentialsManager;
 import sune.app.mediadown.authentication.EmailCredentials;
 import sune.app.mediadown.concurrent.StateMutex;
-import sune.app.mediadown.concurrent.SyncObject;
 import sune.app.mediadown.entity.Episode;
 import sune.app.mediadown.entity.MediaEngine;
 import sune.app.mediadown.entity.Program;
@@ -1136,7 +1135,7 @@ public final class JOJPlayEngine implements MediaEngine {
 				
 				private final Map<Integer, FirestoreResponse.OfContent> responses = new HashMap<>();
 				private final StateMutex mtxSend = new StateMutex();
-				private final SyncObject mtxResponse = new SyncObject();
+				private final StateMutex mtxResponse = new StateMutex();
 				private final Set<Integer> queueRemoveTargets = new HashSet<>();
 				
 				private volatile Thread thread;
@@ -1204,7 +1203,9 @@ public final class JOJPlayEngine implements MediaEngine {
 				}
 				
 				private final void sendRequest() throws Exception {
-					responses.clear();
+					synchronized(responses) {
+						responses.clear();
+					}
 					
 					URI uri = uriWithArgs(
 						"database", DATABASE,
@@ -1235,9 +1236,11 @@ public final class JOJPlayEngine implements MediaEngine {
 							}
 							
 							for(FirestoreResponse.OfContent item : data) {
-								// Change the current target ID based on the response if it is a targetChange response
+								// Change the current target ID based on the response if it is
+								// a targetChange response.
 								if(item instanceof FirestoreResponse.OfTargetChange) {
-									FirestoreResponse.OfTargetChange targetChange = (FirestoreResponse.OfTargetChange) item;
+									FirestoreResponse.OfTargetChange targetChange
+										= (FirestoreResponse.OfTargetChange) item;
 									
 									switch(targetChange.targetChangeType()) {
 										case ADD: currentTargetId = targetChange.targetId(); break;
@@ -1256,6 +1259,19 @@ public final class JOJPlayEngine implements MediaEngine {
 					}
 				}
 				
+				private final void removeResponsesForTarget(int targetId) {
+					synchronized(responses) {
+						for(Iterator<Map.Entry<Integer, FirestoreResponse.OfContent>> it
+								= responses.entrySet().iterator(); it.hasNext();) {
+							FirestoreResponse.OfContent response = it.next().getValue();
+							
+							if(response.targetId() <= targetId) {
+								it.remove();
+							}
+						}
+					}
+				}
+				
 				private final void maybeRemoveTarget(int targetId) throws Exception {
 					boolean enqueued = false;
 					
@@ -1265,12 +1281,14 @@ public final class JOJPlayEngine implements MediaEngine {
 					
 					if(enqueued) {
 						FirebaseChannel.this.removeTarget(targetId);
+						removeResponsesForTarget(targetId);
 					}
 				}
 				
 				public final void removeTarget(int targetId) throws Exception {
 					if(currentTargetId == targetId) {
 						FirebaseChannel.this.removeTarget(targetId);
+						removeResponsesForTarget(targetId);
 						return;
 					}
 					
@@ -1303,12 +1321,17 @@ public final class JOJPlayEngine implements MediaEngine {
 							
 							++id;
 						} else {
-							mtxResponse.await();
+							mtxResponse.awaitAndReset();
 						}
 					}
 					
+					if(list == null) {
+						// Interrupted, return empty list rather than null to avoid NPE
+						return List.of();
+					}
+					
 					// Obtaint all consecutive responses for the targetId
-					while(true) {
+					while(!Thread.currentThread().isInterrupted()) {
 						synchronized(responses) {
 							response = responses.get(id);
 						}
@@ -1317,6 +1340,12 @@ public final class JOJPlayEngine implements MediaEngine {
 							if(response.targetId() != targetId) {
 								break;
 							}
+							
+							synchronized(responses) {
+								responses.remove(id++);
+							}
+							
+							list.add(response);
 							
 							if(response instanceof FirestoreResponse.OfTargetChange) {
 								FirestoreResponse.OfTargetChange targetChange
@@ -1329,14 +1358,12 @@ public final class JOJPlayEngine implements MediaEngine {
 									maybeRemoveTarget(targetId);
 								}
 							}
-							
-							list.add(responses.remove(id++));
 						} else {
 							if(currentTargetId != targetId) {
 								break;
 							}
 							
-							mtxResponse.await();
+							mtxResponse.awaitAndReset();
 						}
 					}
 					
