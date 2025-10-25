@@ -2,10 +2,7 @@ package sune.app.mediadown.media_engine.jojplay;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.Reader;
 import java.net.URI;
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -550,20 +547,24 @@ public final class JOJPlayEngine implements MediaEngine {
 				return RID.getAndIncrement();
 			}
 			
-			private final int nextAID() {
-				return AID.getAndIncrement();
+			private final int maxAID() {
+				return AID.get();
+			}
+			
+			private final int updateAID(int aid) {
+				return AID.updateAndGet((v) -> Math.max(v, aid));
 			}
 			
 			private final String randomZX() {
 				return Utils.randomString(12, "abcdefghijklmnopqrstuvqxyz0123456789");
 			}
 			
-			private final int readLength(Reader reader) throws IOException {
+			private final int readLength(InputStream stream) throws IOException {
 				final int radix = 10;
 				int len = 0;
 				boolean eof = true;
 				
-				for(int c; (c = reader.read()) != -1;) {
+				for(int c; (c = stream.read()) != -1;) {
 					if(c == '\n') {
 						eof = false;
 						break;
@@ -579,42 +580,22 @@ public final class JOJPlayEngine implements MediaEngine {
 				return eof ? -1 : len;
 			}
 			
-			private final String parseResponseString(Reader reader) throws IOException {
-				int len;
-				if((len = readLength(reader)) < 0) {
-					return null;
+			private final JSONCollection parseResponse(InputStream stream) throws IOException {
+				try(InputStream is = stream) {
+					return parseResponse(new LimitedInputStream(is));
 				}
-				
-				int total = 0;
-				StringBuilder builder = Utils.utf16StringBuilder(len);
-				char[] buf = new char[8192];
-				
-				for(int read; total < len && (read = reader.read(buf, 0, Math.min(buf.length, len - total))) != -1;) {
-					builder.append(buf, 0, read);
-					total += Character.codePointCount(buf, 0, read);
-				}
-				
-				if(total < len) {
-					throw new IOException("Not read fully");
-				}
-				
-				return builder.toString();
 			}
 			
-			private final JSONCollection parseResponse(Reader reader) throws IOException {
-				String string = parseResponseString(reader);
+			private final JSONCollection parseResponse(LimitedInputStream stream) throws IOException {
+				stream.setLimit(-1);
 				
-				if(string == null) {
+				int len;
+				if((len = readLength(stream)) < 0) {
 					throw new IllegalStateException("Invalid response content");
 				}
 				
-				return JSON.read(string);
-			}
-			
-			private final JSONCollection parseResponse(InputStream stream) throws IOException {
-				// Do not close the reader, since it would close the stream as well
-				Reader reader = new InputStreamReader(stream, StandardCharsets.UTF_8);
-				return parseResponse(reader);
+				stream.setLimit(len);
+				return JSON.read(stream);
 			}
 			
 			private final String requestBody(String... requests) {
@@ -712,7 +693,7 @@ public final class JOJPlayEngine implements MediaEngine {
 					"gsessionid", session.sessionId(),
 					"SID", session.sid(),
 					"RID", nextRID(),
-					"AID", nextAID(),
+					"AID", maxAID(),
 					"zx", randomZX(),
 					"t", 1
 				);
@@ -750,7 +731,7 @@ public final class JOJPlayEngine implements MediaEngine {
 					"gsessionid", session.sessionId(),
 					"SID", session.sid(),
 					"RID", nextRID(),
-					"AID", nextAID(),
+					"AID", maxAID(),
 					"zx", randomZX(),
 					"t", 1
 				);
@@ -1134,7 +1115,6 @@ public final class JOJPlayEngine implements MediaEngine {
 			private final class Connection {
 				
 				private final Map<Integer, FirestoreResponse.OfContent> responses = new HashMap<>();
-				private final StateMutex mtxSend = new StateMutex();
 				private final StateMutex mtxResponse = new StateMutex();
 				private final Set<Integer> queueRemoveTargets = new HashSet<>();
 				
@@ -1191,7 +1171,6 @@ public final class JOJPlayEngine implements MediaEngine {
 				private final void threadBody() {
 					while(!Thread.currentThread().isInterrupted()) {
 						try {
-							mtxSend.awaitAndReset();
 							sendRequest();
 						} catch(InterruptedException ex) {
 							break; // Exit the loop
@@ -1213,48 +1192,61 @@ public final class JOJPlayEngine implements MediaEngine {
 						"RID", "rpc",
 						"SID", session.sid(),
 						"CI", 0,
-						"AID", nextAID(),
+						"AID", maxAID(),
 						"TYPE", "xmlhttp",
 						"gsessionid", session.sessionId(),
 						"zx", randomZX(),
 						"t", 1
 					);
 					
-					Response.OfStream response = Web.requestStream(
+					try(Response.OfStream response = Web.requestStream(
 						Request.of(uri)
 							.addHeader("Referer", "https://play.joj.sk/")
 							.addHeader("Accept-Encoding", "gzip")
 							.timeout(Duration.ofSeconds(60)).GET()
-					);
-					
-					try(DataPuller puller = new DataPuller(new GZIPInputStream(response.stream()))) {
-						while(!Thread.currentThread().isInterrupted()) {
-							List<FirestoreResponse.OfContent> data = puller.pull();
-							
-							if(data == null) {
-								break; // EOF
-							}
-							
-							for(FirestoreResponse.OfContent item : data) {
-								// Change the current target ID based on the response if it is
-								// a targetChange response.
-								if(item instanceof FirestoreResponse.OfTargetChange) {
-									FirestoreResponse.OfTargetChange targetChange
-										= (FirestoreResponse.OfTargetChange) item;
+					)) {
+						InputStream stream = response.stream();
+						
+						String encoding = response.headers()
+							.firstValue("Content-Encoding")
+							.map(String::toLowerCase)
+							.orElse(null);
+						
+						if("gzip".equals(encoding)) {
+							stream = new GZIPInputStream(stream);
+						}
+						
+						try(DataPuller puller = new DataPuller(stream)) {
+							while(!Thread.currentThread().isInterrupted()) {
+								List<FirestoreResponse.OfContent> data = puller.pull();
+								
+								if(data == null) {
+									break; // EOF
+								}
+								
+								for(FirestoreResponse.OfContent item : data) {
+									updateAID(item.lastId());
 									
-									switch(targetChange.targetChangeType()) {
-										case ADD: currentTargetId = targetChange.targetId(); break;
-										case REMOVE: currentTargetId = 0; break;
-										default: break; // Do nothing
+									// Change the current target ID based on the response if it is
+									// a targetChange response.
+									if(item instanceof FirestoreResponse.OfTargetChange) {
+										FirestoreResponse.OfTargetChange targetChange
+											= (FirestoreResponse.OfTargetChange) item;
+										
+										switch(targetChange.targetChangeType()) {
+											case ADD: currentTargetId = targetChange.targetId(); break;
+											case REMOVE: currentTargetId = 0; break;
+											default: break; // Do nothing
+										}
+									}
+									
+									synchronized(responses) {
+										responses.put(item.lastId(), item);
 									}
 								}
 								
-								synchronized(responses) {
-									responses.put(item.lastId(), item);
-								}
+								mtxResponse.unlock();
 							}
-							
-							mtxResponse.unlock();
 						}
 					}
 				}
@@ -1371,7 +1363,6 @@ public final class JOJPlayEngine implements MediaEngine {
 				}
 				
 				public final void open() {
-					mtxSend.unlock();
 					startThread();
 				}
 				
@@ -1390,16 +1381,102 @@ public final class JOJPlayEngine implements MediaEngine {
 				}
 			}
 			
+			private static final class LimitedInputStream extends InputStream {
+				
+				private final InputStream in;
+				private final byte[] buf = new byte[8192];
+				private int pos, end;
+				private boolean eof;
+				private long remaining = -1;
+				private int seqLeft = 0;
+				
+				public LimitedInputStream(InputStream in) {
+					this.in = Objects.requireNonNull(in);
+				}
+				
+				private static final int utf8SeqLen(byte b) {
+					int x = b & 0xff;
+					if((x & 0x80) ==    0) return 1;
+					if((x & 0xe0) == 0xc0) return 2;
+					if((x & 0xf0) == 0xe0) return 3;
+					if((x & 0xf8) == 0xf0) return 4;
+					return 1;
+				}
+				
+				private final boolean ensureAvailable(int len) throws IOException {
+					while(!eof && (end - pos) < len) {
+						if(pos > 0) {
+							System.arraycopy(buf, pos, buf, 0, end -= pos);
+							pos = 0;
+						}
+						
+						int r = in.read(buf, end, buf.length - end);
+						if(r == -1) eof = true; else end += r;
+					}
+					
+					return end - pos >= len;
+				}
+				
+				public void setLimit(long limitUtf8Chars) {
+					remaining = limitUtf8Chars;
+				}
+				
+				@Override
+				public int read() throws IOException {
+					if(remaining == 0 || !ensureAvailable(1)) return -1;
+					if(seqLeft == 0) seqLeft = utf8SeqLen(buf[pos]);
+					int b = buf[pos++] & 0xff;
+					if(--seqLeft == 0 && remaining > 0) --remaining;
+					return b;
+				}
+				
+				@Override
+				public int read(byte[] out, int off, int len) throws IOException {
+					Objects.checkFromIndexSize(off, len, out.length);
+					if(len == 0) return 0;
+					
+					int written = 0;
+					while(remaining != 0 && written < len) {
+						if(!ensureAvailable(1)) break;
+						int p = pos, l, max = Math.min(len - written, Math.min(p + len, end));
+						
+						if(seqLeft > 0) {
+							p += (l = Math.min(seqLeft, max - p));
+							if((seqLeft -= l) == 0 && remaining > 0) --remaining;
+						}
+						
+						while(remaining != 0 && seqLeft == 0 && p < max) {
+							p += (l = Math.min(seqLeft = utf8SeqLen(buf[p]), max - p));
+							if((seqLeft -= l) == 0 && remaining > 0) --remaining;
+						}
+						
+						int count = p - pos;
+						System.arraycopy(buf, pos, out, off + written, count);
+						pos = p;
+						written += count;
+					}
+					
+					return written == 0 ? -1 : written;
+				}
+				
+				@Override
+				public void close() throws IOException {
+					// Do nothing, must close the `in` InputStream externally
+				}
+			}
+			
 			private final class DataPuller implements AutoCloseable {
 				
-				private final Reader reader;
+				private final InputStream stream;
+				private final LimitedInputStream lis;
 				
 				public DataPuller(InputStream stream) {
-					this.reader = new InputStreamReader(Objects.requireNonNull(stream), StandardCharsets.UTF_8);
+					this.stream = Objects.requireNonNull(stream);
+					this.lis = new LimitedInputStream(stream);
 				}
 				
 				public List<FirestoreResponse.OfContent> pull() throws IOException {
-					JSONCollection responses = parseResponse(reader);
+					JSONCollection responses = parseResponse(lis);
 					
 					if(responses == null) {
 						return null; // Error
@@ -1416,7 +1493,7 @@ public final class JOJPlayEngine implements MediaEngine {
 				
 				@Override
 				public void close() throws IOException {
-					reader.close();
+					stream.close();
 				}
 			}
 		}
