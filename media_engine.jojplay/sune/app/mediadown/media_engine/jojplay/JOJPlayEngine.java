@@ -18,9 +18,8 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiFunction;
 import java.util.function.Function;
-import java.util.function.Predicate;
+import java.util.function.Supplier;
 import java.util.regex.Matcher;
-import java.util.stream.Collectors;
 import java.util.zip.GZIPInputStream;
 
 import javafx.scene.image.Image;
@@ -151,6 +150,9 @@ public final class JOJPlayEngine implements MediaEngine {
 		private static final String TYPE_SERIES = "series";
 		private static final String TYPE_VIDEO = "video";
 		
+		private static final String REF_ORGANIZATION = DATABASE + "/documents/organizations/" + ORGANIZATION_ID;
+		private static final String TAG_MOVIE = DATABASE + "/documents/organizations/" + ORGANIZATION_ID + "/tags/ATpCZv0eXYImMvftr7x0";
+		
 		private static final Regex REGEX_URI_PLAYER = Regex.of("^/?player/([^/]+)$");
 		private static final Regex REGEX_EPISODE_TITLE = Regex.of("(?iu)^(\\d+)\\.?\\s*(?:epizóda)?\\s*");
 		
@@ -179,8 +181,15 @@ public final class JOJPlayEngine implements MediaEngine {
 				// If the preferred languages are not available, just return the first one that
 				// is available, if any, otherwise return null.
 				if(value == null) {
-					value = Utils.stream(map.getCollection("fields").collectionsIterable())
+					JSONCollection fields = map.getCollection("fields");
+					
+					if(fields == null) {
+						return null;
+					}
+					
+					value = Utils.stream(fields.collectionsIterable())
 						.map((c) -> c.getString("stringValue"))
+						.filter(Objects::nonNull)
 						.findFirst().orElse(null);
 				}
 				
@@ -262,8 +271,9 @@ public final class JOJPlayEngine implements MediaEngine {
 			return ListTask.of((task) -> {
 				try(FirebaseChannel channel = openChannel()) {
 					ListTask<Program> tvShows = channel.tvShows((item) -> {
+						String title = resolveFieldValue(item.getCollection("fields.name"));
+						if(title == null || (title = title.trim()).isEmpty()) return null;
 						String slug = Utils.afterLast(item.getString("name"), "/");
-						String title = Utils.unquote(resolveFieldValue(item.getCollection("fields.name")));
 						URI uri = Net.uri("https://play.joj.sk/series/" + slug);
 						return new Program(uri, title, "ref", item.getString("name"), "type", TYPE_SERIES);
 					});
@@ -271,8 +281,19 @@ public final class JOJPlayEngine implements MediaEngine {
 					tvShows.startAndWait();
 					
 					ListTask<Program> movies = channel.movies((item) -> {
-						String slug = Utils.afterLast(item.getString("name"), "/");
+						// Can't include this condition directly in the query filter, so just do it
+						// manually here. Remove episode-like and non-FILM documents. A valid document
+						// may have either the contentType equal to FILM or not have contentType field
+						// at all. This condition is still not perfect, but it removes most of the
+						// false positives that are retrieved.
+						if((item.has("fields.seasonNumber") || item.has("fields.episodeNumber"))
+								|| !"FILM".equals(item.getString("fields.contentType.stringValue", "FILM"))) {
+							return null;
+						}
+						
 						String title = resolveFieldValue(item.getCollection("fields.name"));
+						if(title == null || (title = title.trim()).isEmpty()) return null;
+						String slug = Utils.afterLast(item.getString("name"), "/");
 						URI uri = Net.uri("https://play.joj.sk/videos/" + slug);
 						return new Program(uri, title, "ref", item.getString("name"), "type", TYPE_VIDEO);
 					});
@@ -297,15 +318,28 @@ public final class JOJPlayEngine implements MediaEngine {
 						return; // Do not continue
 					}
 					
-					for(int seasonNumber : reversed(channel.seasons(ref))) {
-						for(JSONCollection item : reversed(channel.seasonEpisodes(ref, seasonNumber))) {
-							String slug = Utils.afterLast(item.getString("name"), "/");
+					JSONCollection document = channel.document(ref);
+					
+					if(document == null) {
+						return; // Program not found
+					}
+					
+					String tagSeriesRef = document.getString("fields.originalSeriesTagRef.referenceValue");
+					
+					if(tagSeriesRef == null) {
+						return; // Invalid series tag
+					}
+					
+					for(int seasonNumber : reversed(channel.seasons(document))) {
+						for(JSONCollection item : reversed(channel.seasonEpisodes(tagSeriesRef, seasonNumber))) {
 							String title = resolveFieldValue(item.getCollection("fields.name"));
+							if(title == null || (title = title.trim()).isEmpty()) continue;
+							String slug = Utils.afterLast(item.getString("name"), "/");
 							URI uri = Net.uri("https://play.joj.sk/player/" + slug);
 							int numEpisode = Integer.parseInt(item.getString("fields.episodeNumber.integerValue", "0"));
 							int numSeason = seasonNumber;
-							Matcher matcher;
 							
+							Matcher matcher;
 							if((matcher = REGEX_EPISODE_TITLE.matcher(title)).find()
 									&& Integer.parseInt(matcher.group(1)) == numEpisode) {
 								title = Utils.OfString.delete(title, matcher.start(), matcher.end());
@@ -500,7 +534,6 @@ public final class JOJPlayEngine implements MediaEngine {
 			private static final int RESPONSE_ID_INITIAL = 1;
 			
 			private static final String QUERY_ROOT_PARENT = DATABASE + "/documents";
-			private static final String QUERY_PARENT = DATABASE + "/documents/organizations/" + ORGANIZATION_ID;
 			private static final int VER = 8;
 			private static final int CVER = 22;
 			
@@ -571,6 +604,17 @@ public final class JOJPlayEngine implements MediaEngine {
 					}
 					
 					if(!Character.isDigit(c)) {
+						// An error can be sent on the response boundary, we have to catch it here.
+						if(c == '<') {
+							String content = new String(stream.readAllBytes());
+							
+							if(!content.contains("404")) {
+								throw new IllegalStateException("Error: " + content);
+							}
+							
+							return -1; // Assume the session has gone away
+						}
+						
 						throw new IllegalStateException("Not a digit: '" + ((char) c) + "'");
 					}
 					
@@ -587,15 +631,14 @@ public final class JOJPlayEngine implements MediaEngine {
 			}
 			
 			private final JSONCollection parseResponse(LimitedInputStream stream) throws IOException {
-				stream.setLimit(-1);
-				
-				int len;
-				if((len = readLength(stream)) < 0) {
-					throw new IllegalStateException("Invalid response content");
-				}
-				
+				int len = -1; // Unlimited
 				stream.setLimit(len);
-				return JSON.read(stream);
+				if((len = readLength(stream)) < 0) return null; // EOF
+				stream.setLimit(len);
+				// Due to an incorrect handling of stream in the JSON helper, we need to convert
+				// its bytes into a String first.
+				String s = new String(stream.readAllBytes());
+				return JSON.read(s);
 			}
 			
 			private final String requestBody(String... requests) {
@@ -653,7 +696,7 @@ public final class JOJPlayEngine implements MediaEngine {
 					JSONCollection data = parseResponse(response.stream()).getCollection(0);
 					String sessionId = response.headers().firstValue("x-http-session-id").get();
 					String sid = data.getCollection(1).getString(1);
-					return new Session(idToken, sessionId, sid);
+					return new Session(sessionId, sid);
 				}
 			}
 			
@@ -681,8 +724,8 @@ public final class JOJPlayEngine implements MediaEngine {
 			}
 			
 			private final <T> FirestoreResponse.OfReference addTarget(
-					BiFunction<Integer, T, JSONCollection> querySupplier,
-					T value
+				BiFunction<Integer, T, JSONCollection> querySupplier,
+				T value
 			) throws Exception {
 				final int requestTargetId = nextTargetId();
 				JSONCollection json = querySupplier.apply(requestTargetId, value);
@@ -710,8 +753,8 @@ public final class JOJPlayEngine implements MediaEngine {
 				return addTarget(this::addTargetQuery, raw);
 			}
 			
-			private final FirestoreResponse.OfReference addTarget(StructuredQuery query) throws Exception {
-				return addTarget(this::addTargetQuery, query);
+			private final FirestoreResponse.OfReference addTarget(StructuredQuery.Builder query) throws Exception {
+				return addTarget(this::addTargetQuery, query.build());
 			}
 			
 			private final JSONCollection removeTargetQuery(int targetId) {
@@ -743,28 +786,6 @@ public final class JOJPlayEngine implements MediaEngine {
 				}
 			}
 			
-			private static final boolean isTvShow(JSONCollection document) {
-				JSONCollection metadata = document.getCollection("fields.metadata.arrayValue.values");
-				
-				if(metadata == null) {
-					return false;
-				}
-				
-				return Utils.stream(metadata.collectionsIterable())
-					.filter((c) -> "tvProfiSerialId".equals(c.getString("mapValue.fields.key.stringValue")))
-					.findFirst().isPresent();
-			}
-			
-			private static final boolean isMovie(JSONCollection document) {
-				// This is a little bit tricky and not perfect, but it should suffice in most cases.
-				// It checks for common traits (properties, values, ...) that a movie should have.
-				return (
-					( document.has("fields.urlName")) &&
-					(!document.has("fields.originalVideoRef") || document.has("fields.originalVideoRef.nullValue")) &&
-					(!document.has("fields.externals.mapValue.fields.tvProfiSeriesName"))
-				);
-			}
-			
 			private final void openConnection() throws Exception {
 				connection.open();
 				connection.removeTarget(TARGET_ID_INITIAL);
@@ -773,44 +794,82 @@ public final class JOJPlayEngine implements MediaEngine {
 			}
 			
 			public final <T> ListTask<T> tvShows(Function<JSONCollection, T> mapper) throws Exception {
-				return items(QUERY_PARENT, "tags", Function.identity(), FirebaseChannel::isTvShow, mapper);
+				return itemsTask(
+					() -> (
+						new StructuredQuery.Builder()
+							.parent(QUERY_ROOT_PARENT)
+							.from(new StructuredQuery.From.Collection("contents"))
+							.where(new StructuredQuery.Where.Composite(
+								StructuredQuery.Where.LogicalOperation.AND,
+								new StructuredQuery.Where.FieldReference(
+									"organizationRef",
+									StructuredQuery.Where.Operation.EQUAL,
+									REF_ORGANIZATION
+								),
+								new StructuredQuery.Where.FieldString(
+									"publishedStatus",
+									StructuredQuery.Where.Operation.EQUAL,
+									"PUBLISHED"
+								),
+								new StructuredQuery.Where.FieldString(
+									"type",
+									StructuredQuery.Where.Operation.EQUAL,
+									"SERIES"
+								)
+							))
+							.orderBy(new StructuredQuery.OrderBy.Field(
+								"__name__",
+								StructuredQuery.OrderBy.Direction.ASCENDING
+							))
+					),
+					mapper
+				);
 			}
 			
 			public final <T> ListTask<T> movies(Function<JSONCollection, T> mapper) throws Exception {
-				return items(QUERY_ROOT_PARENT, "videos", (query) -> {
-					return query.where(
-						new StructuredQuery.Where.Composite(
-							StructuredQuery.Where.LogicalOperation.AND,
-							new StructuredQuery.Where.FieldString(
-								"contentType",
-								StructuredQuery.Where.Operation.EQUAL,
-								"FILM"
-							),
-							new StructuredQuery.Where.FieldArray(
-								"externals.tvProfiType",
-								StructuredQuery.Where.Operation.IN,
-								List.of(
-									new StructuredQuery.Where.SimpleValue.OfString("movie"),
-									new StructuredQuery.Where.SimpleValue.OfString("film"),
-									new StructuredQuery.Where.SimpleValue.OfString("dokument")
+				return itemsTask(
+					() -> (
+						new StructuredQuery.Builder()
+							.parent(QUERY_ROOT_PARENT)
+							.from(new StructuredQuery.From.Collection("videos"))
+							.where(new StructuredQuery.Where.Composite(
+								StructuredQuery.Where.LogicalOperation.AND,
+								new StructuredQuery.Where.FieldReference(
+									"tags",
+									StructuredQuery.Where.Operation.ARRAY_CONTAINS,
+									TAG_MOVIE
+								),
+								new StructuredQuery.Where.FieldString(
+									"publishedStatus",
+									StructuredQuery.Where.Operation.EQUAL,
+									"PUBLISHED"
+								),
+								new StructuredQuery.Where.FieldString(
+									"transcodingStatus",
+									StructuredQuery.Where.Operation.EQUAL,
+									"ENCODING_DONE"
+								),
+								new StructuredQuery.Where.FieldString(
+									"processingStatus",
+									StructuredQuery.Where.Operation.EQUAL,
+									"DONE"
 								)
-							)
-						)
-					);
-				}, FirebaseChannel::isMovie, mapper);
+							))
+							.orderBy(new StructuredQuery.OrderBy.Field(
+								"__name__",
+								StructuredQuery.OrderBy.Direction.ASCENDING
+							))
+					),
+					mapper
+				);
 			}
 			
-			public final <T> ListTask<T> items(String parent, String collectionId,
-					Function<StructuredQuery.Builder, StructuredQuery.Builder> queryMapper,
-					Predicate<JSONCollection> filter, Function<JSONCollection, T> mapper) throws Exception {
+			public final <T> ListTask<T> itemsTask(
+				Supplier<StructuredQuery.Builder> builder,
+				Function<JSONCollection, T> mapper
+			) throws Exception {
 				return ListTask.of((task) -> {
-					StructuredQuery builder = queryMapper.apply(
-						new StructuredQuery.Builder()
-							.parent(parent)
-							.from(new StructuredQuery.From.Collection(collectionId))
-					).build();
-					
-					FirestoreResponse.OfReference response = addTarget(builder);
+					FirestoreResponse.OfReference response = addTarget(builder.get());
 					connection.removeTarget(response.requestTargetId());
 					List<FirestoreResponse.OfContent> data = connection.responses(response);
 					connection.throwIfException();
@@ -822,101 +881,13 @@ public final class JOJPlayEngine implements MediaEngine {
 							)
 					) {
 						JSONCollection document = item.document();
+						T mapped = mapper.apply(document);
 						
-						if(!filter.test(document)) {
-							continue; // Ignore
-						}
-						
-						if(!task.add(mapper.apply(document))) {
+						if(mapped != null && !task.add(mapped)) {
 							return; // Do not continue
 						}
 					}
 				});
-			}
-			
-			public final List<JSONCollection> items(String parent, String collectionId, List<String> refs)
-					throws Exception {
-				List<JSONCollection> items = new ArrayList<>();
-				
-				FirestoreResponse.OfReference response = addTarget(
-					new StructuredQuery.Builder()
-						.parent(parent)
-						.from(new StructuredQuery.From.Collection(collectionId))
-						.where(new StructuredQuery.Where.FieldArray(
-							"__name__",
-							StructuredQuery.Where.Operation.IN,
-							refs.stream()
-								.map(StructuredQuery.Where.SimpleValue.OfReference::new)
-								.collect(Collectors.toList())
-						))
-						.orderBy(new StructuredQuery.OrderBy.Field("__name__", StructuredQuery.OrderBy.Direction.ASCENDING))
-						.build()
-				);
-				
-				connection.removeTarget(response.requestTargetId());
-				List<FirestoreResponse.OfContent> data = connection.responses(response);
-				connection.throwIfException();
-				
-				for(FirestoreResponse.OfDocumentChange item
-						: FirebaseChannel.<FirestoreResponse.OfDocumentChange>filterContent(
-							data,
-							FirestoreResponse.OfContent.ContentType.DOCUMENT_CHANGE
-						)
-				) {
-					JSONCollection document = item.document();
-					items.add(document);
-				}
-				
-				return items;
-			}
-			
-			@SuppressWarnings("unused")
-			public final List<JSONCollection> tagItems(List<String> tagRefs) throws Exception {
-				return items(QUERY_PARENT, "tags", tagRefs);
-			}
-			
-			@SuppressWarnings("unused")
-			public final List<JSONCollection> videoItems(List<String> videoRefs) throws Exception {
-				return items(QUERY_ROOT_PARENT, "videos", videoRefs);
-			}
-			
-			@SuppressWarnings("unused")
-			public final List<String> rowTags(String rowId) throws Exception {
-				List<String> tags = new ArrayList<>();
-				
-				FirestoreResponse.OfReference response = addTarget(
-					new StructuredQuery.Builder()
-						.parent(QUERY_PARENT)
-						.from(new StructuredQuery.From.Collection("rows"))
-						.where(new StructuredQuery.Where.FieldString(
-							"rowId",
-							StructuredQuery.Where.Operation.EQUAL,
-							rowId
-						))
-						.orderBy(new StructuredQuery.OrderBy.Field("__name__", StructuredQuery.OrderBy.Direction.ASCENDING))
-						.build()
-				);
-				
-				connection.removeTarget(response.requestTargetId());
-				List<FirestoreResponse.OfContent> data = connection.responses(response);
-				connection.throwIfException();
-				
-				for(FirestoreResponse.OfDocumentChange item
-						: FirebaseChannel.<FirestoreResponse.OfDocumentChange>filterContent(
-							data,
-							FirestoreResponse.OfContent.ContentType.DOCUMENT_CHANGE
-						)
-				) {
-					JSONCollection document = item.document();
-					JSONCollection arrayTags = document.getCollection("fields.customItems.arrayValue.values");
-					
-					for(JSONCollection tag : arrayTags.collectionsIterable()) {
-						String tagRef = tag.getString("mapValue.fields.itemRef.referenceValue");
-						tags.add(tagRef);
-					}
-				}
-				
-				return tags;
 			}
 			
 			public final JSONCollection document(String ref) throws Exception {
@@ -951,13 +922,8 @@ public final class JOJPlayEngine implements MediaEngine {
 				return documents;
 			}
 			
-			public final List<Integer> seasons(String programRef) throws Exception {
+			public final List<Integer> seasons(JSONCollection document) throws Exception {
 				List<Integer> seasons = new ArrayList<>();
-				JSONCollection document = document(programRef);
-				
-				if(document == null) {
-					return seasons;
-				}
 				
 				for(JSONCollection item
 						: document.getCollection("fields.metadata.arrayValue.values").collectionsIterable()) {
@@ -974,7 +940,7 @@ public final class JOJPlayEngine implements MediaEngine {
 					}
 					
 					for(JSONCollection season : array.collectionsIterable()) {
-						int number = Integer.valueOf(season.getString("mapValue.fields.seasonNumber.integerValue"));
+						int number = Integer.parseInt(season.getString("mapValue.fields.seasonNumber.integerValue"));
 						seasons.add(number);
 					}
 				}
@@ -982,7 +948,7 @@ public final class JOJPlayEngine implements MediaEngine {
 				return seasons;
 			}
 			
-			public final List<JSONCollection> seasonEpisodes(String programRef, int seasonNumber) throws Exception {
+			public final List<JSONCollection> seasonEpisodes(String tagSeriesRef, int seasonNumber) throws Exception {
 				List<JSONCollection> episodes = new ArrayList<>();
 				
 				FirestoreResponse.OfReference response = addTarget(
@@ -994,7 +960,7 @@ public final class JOJPlayEngine implements MediaEngine {
 							new StructuredQuery.Where.FieldArray(
 								"tags",
 								StructuredQuery.Where.Operation.ARRAY_CONTAINS_ANY,
-								new StructuredQuery.Where.SimpleValue.OfReference(programRef)
+								new StructuredQuery.Where.SimpleValue.OfReference(tagSeriesRef)
 							),
 							new StructuredQuery.Where.FieldString(
 								"publishedStatus",
@@ -1012,9 +978,14 @@ public final class JOJPlayEngine implements MediaEngine {
 								seasonNumber
 							)
 						))
-						.orderBy(new StructuredQuery.OrderBy.Field("episodeNumber", StructuredQuery.OrderBy.Direction.ASCENDING))
-						.orderBy(new StructuredQuery.OrderBy.Field("__name__", StructuredQuery.OrderBy.Direction.ASCENDING))
-						.build()
+						.orderBy(new StructuredQuery.OrderBy.Field(
+							"episodeNumber",
+							StructuredQuery.OrderBy.Direction.ASCENDING
+						))
+						.orderBy(new StructuredQuery.OrderBy.Field(
+							"__name__",
+							StructuredQuery.OrderBy.Direction.ASCENDING
+						))
 				);
 				
 				connection.removeTarget(response.requestTargetId());
@@ -1044,9 +1015,11 @@ public final class JOJPlayEngine implements MediaEngine {
 							StructuredQuery.Where.Operation.ARRAY_CONTAINS,
 							slug
 						))
-						.orderBy(new StructuredQuery.OrderBy.Field("__name__", StructuredQuery.OrderBy.Direction.ASCENDING))
+						.orderBy(new StructuredQuery.OrderBy.Field(
+							"__name__",
+							StructuredQuery.OrderBy.Direction.ASCENDING
+						))
 						.limit(2)
-						.build()
 				);
 				
 				connection.removeTarget(response.requestTargetId());
@@ -1064,47 +1037,6 @@ public final class JOJPlayEngine implements MediaEngine {
 				}
 				
 				return null;
-			}
-			
-			@SuppressWarnings("unused")
-			public final List<String> screenRows(String refScreen) throws Exception {
-				List<String> rows = new ArrayList<>();
-				
-				FirestoreResponse.OfReference response = addTarget(
-					new StructuredQuery.Builder()
-						.parent(QUERY_PARENT)
-						.from(new StructuredQuery.From.Collection("rows"))
-						.where(new StructuredQuery.Where.FieldReference(
-							"screenRef",
-							StructuredQuery.Where.Operation.EQUAL,
-							QUERY_PARENT + "/screens/" + refScreen
-						))
-						.orderBy(new StructuredQuery.OrderBy.Field("order", StructuredQuery.OrderBy.Direction.ASCENDING))
-						.orderBy(new StructuredQuery.OrderBy.Field("__name__", StructuredQuery.OrderBy.Direction.ASCENDING))
-						.build()
-				);
-				
-				connection.removeTarget(response.requestTargetId());
-				List<FirestoreResponse.OfContent> data = connection.responses(response);
-				connection.throwIfException();
-				
-				for(FirestoreResponse.OfDocumentChange item
-						: FirebaseChannel.<FirestoreResponse.OfDocumentChange>filterContent(
-							data,
-							FirestoreResponse.OfContent.ContentType.DOCUMENT_CHANGE
-						)
-				) {
-					JSONCollection document = item.document();
-					
-					if(!"ROW".equals(document.getString("fields.rowComponent.stringValue"))) {
-						continue;
-					}
-					
-					String rowId = document.getString("fields.rowId.stringValue");
-					rows.add(rowId);
-				}
-				
-				return rows;
 			}
 			
 			@Override
@@ -1191,9 +1123,7 @@ public final class JOJPlayEngine implements MediaEngine {
 						"VER", VER,
 						"RID", "rpc",
 						"SID", session.sid(),
-						"CI", 0,
 						"AID", maxAID(),
-						"TYPE", "xmlhttp",
 						"gsessionid", session.sessionId(),
 						"zx", randomZX(),
 						"t", 1
@@ -1322,7 +1252,7 @@ public final class JOJPlayEngine implements MediaEngine {
 						return List.of();
 					}
 					
-					// Obtaint all consecutive responses for the targetId
+					// Obtain all consecutive responses for the targetId
 					while(!Thread.currentThread().isInterrupted()) {
 						synchronized(responses) {
 							response = responses.get(id);
@@ -1381,7 +1311,12 @@ public final class JOJPlayEngine implements MediaEngine {
 				}
 			}
 			
-			private static final class LimitedInputStream extends InputStream {
+			/**
+			 * InputStream that can be limited or unlimited. If a limit {@code L} is set,
+			 * then upto only {@code L} UTF-16 characters can be read from the stream, then
+			 * returning end-of-stream.
+			 */
+			private static class LimitedInputStream extends InputStream {
 				
 				private final InputStream in;
 				private final byte[] buf = new byte[8192];
@@ -1389,6 +1324,7 @@ public final class JOJPlayEngine implements MediaEngine {
 				private boolean eof;
 				private long remaining = -1;
 				private int seqLeft = 0;
+				private int seqCount = 0;
 				
 				public LimitedInputStream(InputStream in) {
 					this.in = Objects.requireNonNull(in);
@@ -1401,6 +1337,10 @@ public final class JOJPlayEngine implements MediaEngine {
 					if((x & 0xf0) == 0xe0) return 3;
 					if((x & 0xf8) == 0xf0) return 4;
 					return 1;
+				}
+				
+				private static final int utf16SeqCount(int seqLen) {
+					return seqLen == 4 ? 2 : 1;
 				}
 				
 				private final boolean ensureAvailable(int len) throws IOException {
@@ -1421,12 +1361,17 @@ public final class JOJPlayEngine implements MediaEngine {
 					remaining = limitUtf8Chars;
 				}
 				
+				private final int utf8Seq(byte b) {
+					seqCount = utf16SeqCount(seqLeft = utf8SeqLen(b));
+					return seqLeft;
+				}
+				
 				@Override
 				public int read() throws IOException {
 					if(remaining == 0 || !ensureAvailable(1)) return -1;
-					if(seqLeft == 0) seqLeft = utf8SeqLen(buf[pos]);
+					if(seqLeft == 0) utf8Seq(buf[pos]);
 					int b = buf[pos++] & 0xff;
-					if(--seqLeft == 0 && remaining > 0) --remaining;
+					if(--seqLeft == 0 && remaining > 0) remaining -= seqCount;
 					return b;
 				}
 				
@@ -1442,12 +1387,12 @@ public final class JOJPlayEngine implements MediaEngine {
 						
 						if(seqLeft > 0) {
 							p += (l = Math.min(seqLeft, max - p));
-							if((seqLeft -= l) == 0 && remaining > 0) --remaining;
+							if((seqLeft -= l) == 0 && remaining > 0) remaining -= seqCount;
 						}
 						
 						while(remaining != 0 && seqLeft == 0 && p < max) {
-							p += (l = Math.min(seqLeft = utf8SeqLen(buf[p]), max - p));
-							if((seqLeft -= l) == 0 && remaining > 0) --remaining;
+							p += (l = Math.min(seqLeft = utf8Seq(buf[p]), max - p));
+							if((seqLeft -= l) == 0 && remaining > 0) remaining -= seqCount;
 						}
 						
 						int count = p - pos;
@@ -1461,7 +1406,7 @@ public final class JOJPlayEngine implements MediaEngine {
 				
 				@Override
 				public void close() throws IOException {
-					// Do nothing, must close the `in` InputStream externally
+					// Do nothing, must close the `in` stream externally
 				}
 			}
 			
@@ -1500,19 +1445,12 @@ public final class JOJPlayEngine implements MediaEngine {
 		
 		protected static final class Session {
 			
-			private final String idToken;
 			private final String sessionId;
 			private final String sid;
 			
-			public Session(String idToken, String sessionId, String sid) {
-				this.idToken = idToken;
+			public Session(String sessionId, String sid) {
 				this.sessionId = sessionId;
 				this.sid = sid;
-			}
-			
-			@SuppressWarnings("unused")
-			public String idToken() {
-				return idToken;
 			}
 			
 			public String sessionId() {
@@ -1717,21 +1655,6 @@ public final class JOJPlayEngine implements MediaEngine {
 					
 					protected abstract void setValue(JSONCollection data, String name);
 					
-					protected static final class OfString extends SimpleValue {
-						
-						private final String value;
-						
-						public OfString(String value) {
-							super(ValueType.STRING);
-							this.value = Objects.requireNonNull(value);
-						}
-						
-						@Override
-						protected void setValue(JSONCollection data, String name) {
-							data.set(name, value);
-						}
-					}
-					
 					protected static final class OfReference extends SimpleValue {
 						
 						private final String value;
@@ -1935,8 +1858,12 @@ public final class JOJPlayEngine implements MediaEngine {
 				private final TargetChangeType targetChangeType;
 				private final int targetId;
 				
-				private OfTargetChange(int lastId, JSONCollection content, TargetChangeType targetChangeType,
-						int targetId) {
+				private OfTargetChange(
+					int lastId,
+					JSONCollection content,
+					TargetChangeType targetChangeType,
+					int targetId
+				) {
 					super(ContentType.TARGET_CHANGE, lastId, content);
 					this.targetChangeType = Objects.requireNonNull(targetChangeType);
 					this.targetId = targetId;
