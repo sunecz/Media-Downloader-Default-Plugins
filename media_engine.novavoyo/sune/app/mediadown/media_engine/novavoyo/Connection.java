@@ -4,6 +4,7 @@ import java.net.URI;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.Lock;
@@ -18,7 +19,7 @@ import sune.app.mediadown.util.JSON.JSONObject;
 
 public final class Connection implements AutoCloseable {
 	
-	private static final URI URI_HTTP_BASE = Net.uri("https://http.cms.jyxo.cz/api/v3/");
+	private static final URI URI_HTTP_BASE = Net.uri("https://http.cms.jyxo.cz/api/v1.5/");
 	private static final URI URI_WS_BASE = Net.uri("wss://ws.cms.jyxo.cz/websocket/");
 	private static final long DEFAULT_TIMEOUT_MS = 5000L;
 	
@@ -32,6 +33,7 @@ public final class Connection implements AutoCloseable {
 	private final Map<String, Response> responses = new ConcurrentHashMap<>();
 	private final Lock lockResponse = new ReentrantLock();
 	private final Condition hasResponse = lockResponse.newCondition();
+	private final CountDownLatch latchInit = new CountDownLatch(1);
 	
 	public Connection(String clientId, Device device) {
 		this.clientId = Objects.requireNonNull(clientId);
@@ -100,7 +102,13 @@ public final class Connection implements AutoCloseable {
 	private final void doOpen() {
 		Web.Request req = Web.Request.of(URI_WS_BASE.resolve(clientId)).GET();
 		ws = new WS(req, new WSListener());
-		isOpen = true;
+		
+		try {
+			latchInit.await();
+			isOpen = true;
+		} catch(InterruptedException ex) {
+			// Ignore
+		}
 	}
 	
 	private final void doClose() {
@@ -108,12 +116,14 @@ public final class Connection implements AutoCloseable {
 		responses.clear();
 		context = null;
 		ws = null;
+		latchInit.countDown();
 		isOpen = false;
 	}
 	
 	private final void parseMessage(JSONCollection json) {
 		if(context == null) {
 			parseInitMessage(json);
+			latchInit.countDown();
 		} else {
 			if("Ping".equals(json.getString("schema"))) {
 				sendPong();
