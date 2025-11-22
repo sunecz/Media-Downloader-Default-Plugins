@@ -3,6 +3,7 @@ package sune.app.mediadown.media_engine.jojplay;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -606,7 +607,7 @@ public final class JOJPlayEngine implements MediaEngine {
 					if(!Character.isDigit(c)) {
 						// An error can be sent on the response boundary, we have to catch it here.
 						if(c == '<') {
-							String content = new String(stream.readAllBytes());
+							String content = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
 							
 							if(!content.contains("404")) {
 								throw new IllegalStateException("Error: " + content);
@@ -637,7 +638,7 @@ public final class JOJPlayEngine implements MediaEngine {
 				stream.setLimit(len);
 				// Due to an incorrect handling of stream in the JSON helper, we need to convert
 				// its bytes into a String first.
-				String s = new String(stream.readAllBytes());
+				String s = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
 				return JSON.read(s);
 			}
 			
