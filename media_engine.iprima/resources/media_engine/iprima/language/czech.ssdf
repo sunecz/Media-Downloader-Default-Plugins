@@ -36,8 +36,8 @@
 					value: {
 						USER_SLOT_LIMIT_COUNT:     "Dosažen limit počtu zařízení.",
 						USER_SLOT_LIMIT_CHANGE:    "Dosažen limit maximálního počtu změn.",
-						PLAY_ADMIT_INVALID:        "Video nebylo nalezeno.",
-						PLAY_ACCESS_TOKEN_INVALID: "Video nebylo nalezeno.",
+						PLAY_ADMIT_INVALID:        "Nedostatečný přístup k přehrání videa.",
+						PLAY_ACCESS_TOKEN_INVALID: "Nedostatečný přístup k přehrání videa.",
 						PLAY_STREAM_NOT_FOUND:     "Video nebylo nalezeno.",
 						PLAY_GEOIP_DENIED:         "Video je geograficky blokováno z Vaší současné země.",
 						PLAY_GEOIP_ANONYMOUS:      "Vaše současné VPN či Proxy není povoleno.",

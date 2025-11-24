@@ -3,6 +3,7 @@ package sune.app.mediadown.media_engine.iprima;
 import java.io.IOException;
 import java.net.HttpCookie;
 import java.net.URI;
+import java.net.http.HttpHeaders;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
@@ -44,11 +45,13 @@ public final class PrimaAuthenticator {
 	
 	private static final VarLoader<Session> session;
 	private static final VarLoader<SessionData> sessionData;
+	private static final VarLoader<HttpHeaders> sessionHeaders;
 	
 	static {
 		URL_SESSION_CREATE = "https://ucet.iprima.cz/api/session/create";
 		session = VarLoader.ofChecked(PrimaAuthenticator::initSession);
 		sessionData = VarLoader.ofChecked(PrimaAuthenticator::initSessionData);
+		sessionHeaders = VarLoader.ofChecked(PrimaAuthenticator::initSessionHeaders);
 	}
 	
 	// Forbid anyone to create an instance of this class
@@ -94,12 +97,28 @@ public final class PrimaAuthenticator {
 		);
 	}
 	
+	private static final HttpHeaders initSessionHeaders() throws Exception {
+		// It is important to specify the referer, otherwise the response code is 403.
+		Map<String, String> mutRequestHeaders = Utils.toMap("Referer", "https://www.iprima.cz/");
+		PrimaAuthenticator.SessionData sessionData = sessionData();
+		
+		if(sessionData != null) {
+			Utils.merge(mutRequestHeaders, sessionData.requestHeaders());
+		}
+		
+		return Web.Headers.ofSingleMap(mutRequestHeaders);
+	}
+	
 	private static final Session session() throws Exception {
 		return session.valueChecked();
 	}
 	
 	public static final SessionData sessionData() throws Exception {
 		return sessionData.valueChecked();
+	}
+	
+	public static final HttpHeaders sessionHeaders() throws Exception {
+		return sessionHeaders.valueChecked();
 	}
 	
 	public static final List<Profile> profiles() throws Exception {
@@ -112,6 +131,12 @@ public final class PrimaAuthenticator {
 	
 	public static final Device device() throws Exception {
 		return Cached.device();
+	}
+	
+	public static final void clearSession() {
+		session.unset();
+		sessionData.unset();
+		sessionHeaders.unset();
 	}
 	
 	public static final class IncorrectAuthDataException extends TranslatableException {

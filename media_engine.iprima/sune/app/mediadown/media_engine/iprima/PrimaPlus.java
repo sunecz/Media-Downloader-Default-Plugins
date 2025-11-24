@@ -6,10 +6,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.ListIterator;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import sune.app.mediadown.concurrent.VarLoader;
 import sune.app.mediadown.entity.Episode;
 import sune.app.mediadown.entity.Program;
 import sune.app.mediadown.gui.Dialog;
@@ -118,7 +118,6 @@ final class PrimaPlus implements IPrima {
 	private static final class API {
 		
 		private static final String URL_API_PLAY = "https://api.play-backend.iprima.cz/api/v1/products/play/ids-%{play_id}s";
-		private static final VarLoader<HttpHeaders> sessionHeaders = VarLoader.ofChecked(API::initSessionHeaders);
 		
 		private API() {
 		}
@@ -198,24 +197,12 @@ final class PrimaPlus implements IPrima {
 			return episodes;
 		}
 		
-		private static final HttpHeaders initSessionHeaders() throws Exception {
-			// It is important to specify the referer, otherwise the response code is 403.
-			Map<String, String> mutRequestHeaders = Utils.toMap("Referer", "https://www.iprima.cz/");
-			PrimaAuthenticator.SessionData sessionData = logIn();
-			
-			if(sessionData != null) {
-				Utils.merge(mutRequestHeaders, sessionData.requestHeaders());
-			}
-			
-			return Web.Headers.ofSingleMap(mutRequestHeaders);
-		}
-		
 		private static final PrimaAuthenticator.SessionData logIn() throws Exception {
 			return PrimaAuthenticator.sessionData();
 		}
 		
 		private static final HttpHeaders logInHeaders() throws Exception {
-			return sessionHeaders.valueChecked();
+			return PrimaAuthenticator.sessionHeaders();
 		}
 		
 		private static final String accessToken() throws Exception {
@@ -245,18 +232,46 @@ final class PrimaPlus implements IPrima {
 				}
 				
 				HttpHeaders requestHeaders = logInHeaders();
-				String html = Web.request(Request.of(program.uri()).headers(requestHeaders).GET()).body();
-				Nuxt nuxt = Nuxt.extract(html);
+				String programId = null;
+				int retry = 0;
 				
-				if(nuxt == null) {
-					throw new IllegalStateException("Unable to extract information about episodes");
+				do {
+					// If retrying, refresh the current session
+					if(retry > 0) {
+						PrimaAuthenticator.clearSession();
+						requestHeaders = logInHeaders(); // Login again (refresh)
+					}
+					
+					Nuxt nuxt = Nuxt.extract(
+						Web.request(Request.of(program.uri()).headers(requestHeaders).GET()).body()
+					);
+					
+					if(nuxt == null) {
+						throw new IllegalStateException(
+							"Unable to extract information about episodes"
+						);
+					}
+					
+					JSONCollection data = Utils.stream(nuxt.data().collectionsIterable())
+						.map((c) -> c.getCollection("title"))
+						.filter(Objects::nonNull)
+						.findFirst().orElse(null);
+					
+					if(data == null) {
+						throw new IllegalStateException(
+							"Unable to extract information about episodes"
+						);
+					}
+					
+					programId = data.getString("id", null);
+				} while(programId == null && ++retry <= 1); // Retry at most once
+				
+				// Fail early, but only after attempting to retry
+				if(programId == null) {
+					throw new IllegalStateException(
+						"Unable to extract information about episodes"
+					);
 				}
-				
-				String dataName = Utils.stream(nuxt.data().collectionsIterable())
-					.filter((c) -> c.hasCollection("title"))
-					.findFirst().get().name();
-				
-				String programId = nuxt.get(dataName + ".title.id", null);
 				
 				for(Season season : listSeasons(programId)) {
 					for(Episode episode : listEpisodes(program, season.id())) {
@@ -270,39 +285,70 @@ final class PrimaPlus implements IPrima {
 		
 		public static final ListTask<Media> getMedia(IPrimaEngine engine, URI uri) throws Exception {
 			return ListTask.of(PrimaCommon.handleErrors((task) -> {
-				// Always log in first to ensure the data are correct
-				HttpHeaders requestHeaders = logInHeaders();
+				HttpHeaders requestHeaders = logInHeaders(); // Always login first
+				JSONCollection nuxtData = null, configData = null, errorInfo = null;
+				int retry = 0;
 				
-				String html = Web.request(Request.of(uri).headers(requestHeaders).GET()).body();
-				Nuxt nuxt = Nuxt.extract(html);
+				do {
+					// If retrying, refresh the current session
+					if(retry > 0) {
+						PrimaAuthenticator.clearSession();
+						requestHeaders = logInHeaders(); // Login again (refresh)
+					}
+					
+					Nuxt nuxt = Nuxt.extract(
+						Web.request(Request.of(uri).headers(requestHeaders).GET()).body()
+					);
+					
+					if(nuxt == null) {
+						throw new IllegalStateException(
+							"Unable to extract information about media content"
+						);
+					}
+					
+					nuxtData = Utils.stream(nuxt.data().collectionsIterable())
+						.map((c) -> c.getCollection("content"))
+						.filter(Objects::nonNull)
+						.findFirst().orElse(null);
+					
+					if(nuxtData == null) {
+						throw new IllegalStateException(
+							"Unable to extract information about media content"
+						);
+					}
+					
+					String videoPlayId = nuxtData.getString("additionals.videoPlayId", null);
+					
+					if(videoPlayId == null) {
+						throw new IllegalStateException("Unable to extract video play ID");
+					}
+					
+					URI configUri = Net.uri(Utils.format(URL_API_PLAY, "play_id", videoPlayId));
+					
+					try(Response.OfStream configResponse = Web.requestStream(
+							Request.of(configUri).headers(requestHeaders).GET()
+					)) {
+						configData = JSON.read(configResponse.stream());
+					}
+					
+					// Look for any errors in the output
+					errorInfo = Utils.stream(configData.collectionsIterable())
+						.map((c) -> c.getCollection("errorResult"))
+						.filter(Objects::nonNull)
+						.findFirst().orElse(null);
+				} while(errorInfo != null && ++retry <= 1); // Retry at most once
 				
-				if(nuxt == null) {
-					throw new IllegalStateException("Unable to extract information about media content");
+				// First, check whether there is any error (after retrying)
+				if(errorInfo != null) {
+					displayError(errorInfo);
+					return; // Do not continue
 				}
-				
-				String dataName = Utils.stream(nuxt.data().collectionsIterable())
-					.filter((c) -> c.hasCollection("content"))
-					.findFirst().get().name();
-				String videoPlayId = nuxt.get(dataName + ".content.additionals.videoPlayId", null);
-				
-				if(videoPlayId == null) {
-					throw new IllegalStateException("Unable to extract video play ID");
-				}
-				
-				URI configUri = Net.uri(Utils.format(URL_API_PLAY, "play_id", videoPlayId));
-				String content = Web.request(Request.of(configUri).headers(requestHeaders).GET()).body();
-				
-				if(content == null || content.isEmpty()) {
-					throw new IllegalStateException("Empty play configuration content");
-				}
-				
-				JSONCollection configData = JSON.read(content);
 				
 				// Get information for the media title
-				String programName = nuxt.get(dataName + ".content.additionals.programTitle", "");
-				String numSeason = nuxt.get(dataName + ".content.additionals.seasonNumber", null);
-				String numEpisode = nuxt.get(dataName + ".content.additionals.episodeNumber", null);
-				String episodeName = nuxt.get(dataName + ".content.title", "");
+				String programName = nuxtData.getString("additionals.programTitle", "");
+				String numSeason = nuxtData.getString("additionals.seasonNumber", null);
+				String numEpisode = nuxtData.getString("additionals.episodeNumber", null);
+				String episodeName = nuxtData.getString("title", "");
 				
 				if(programName.isEmpty()) {
 					programName = episodeName;
@@ -327,14 +373,6 @@ final class PrimaPlus implements IPrima {
 				List<Media.Builder<?, ?>> subtitles = new ArrayList<>();
 				
 				for(JSONCollection configItem : configData.collectionsIterable()) {
-					// First, check whether there is any error regarding the media source
-					JSONCollection errorInfo;
-					if((errorInfo = configItem.getCollection("errorResult")) != null) {
-						displayError(errorInfo);
-						// If one media source has an error, we don't need to continue
-						return;
-					}
-					
 					for(JSONCollection streamInfo : configItem.getCollection("streamInfos").collectionsIterable()) {
 						streamInfos.add(streamInfo);
 					}
