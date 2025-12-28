@@ -112,13 +112,12 @@ public final class SledovaniTVServerPlugin extends PluginBase {
 				"authData_password",
 				"profile_id",
 				"device_id",
-				"device_auth",
-				"device_time"
+				"device_auth"
+				// Match the number of arguments in the new credentials class
 			)
 			.asCredentials(
 				SledovaniTVCredentials.class,
-				String.class, String.class, String.class, String.class, String.class,
-				String.class
+				String.class, String.class, String.class, String.class, String.class
 			)
 			.migrate(name);
 		
