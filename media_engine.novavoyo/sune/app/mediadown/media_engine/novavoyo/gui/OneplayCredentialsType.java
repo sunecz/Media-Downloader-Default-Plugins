@@ -30,8 +30,10 @@ import sune.app.mediadown.util.Regex;
 
 public class OneplayCredentialsType extends CredentialsType<OneplayCredentials> {
 	
+	private static final String JSON_EMPTY_ARRAY = "[]";
+	
 	private final Translation translation;
-	private String accounts; // Need to hold the original value for saving purposes
+	private String accounts = JSON_EMPTY_ARRAY; // Need to hold the original value for saving purposes
 	
 	public OneplayCredentialsType(Translation translation) {
 		super(OneplayCredentials.class);
@@ -112,7 +114,10 @@ public class OneplayCredentialsType extends CredentialsType<OneplayCredentials> 
 		cmbAccount.value(credentials.accountId());
 		cmbProfile.value(credentials.profileId());
 		txtProfilePin.setText(credentials.profilePin());
-		accounts = credentials.accounts();
+		
+		if((accounts = credentials.accounts()) == null) {
+			accounts = JSON_EMPTY_ARRAY; // Must be non-null and a valid JSON
+		}
 	}
 	
 	@Override
@@ -131,7 +136,8 @@ public class OneplayCredentialsType extends CredentialsType<OneplayCredentials> 
 		String authToken = ""; // Empty due to possible login and profile data change
 		String deviceId = ""; // Empty due to possible login and profile data change
 		String rawAccounts = accounts;
-		accounts = null; // No longer reference the accounts in memory
+		accounts = JSON_EMPTY_ARRAY; // No longer reference the accounts in memory
+		
 		return new OneplayCredentials(
 			email, password, account, profile, profilePin, authToken, deviceId, rawAccounts
 		);
