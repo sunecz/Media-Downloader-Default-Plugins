@@ -33,12 +33,15 @@ public class OneplayCredentialsType extends CredentialsType<OneplayCredentials> 
 	private static final String JSON_EMPTY_ARRAY = "[]";
 	
 	private final Translation translation;
-	private String accounts = JSON_EMPTY_ARRAY; // Need to hold the original value for saving purposes
+	private String accounts; // Need to hold the original value for saving purposes
 	
 	public OneplayCredentialsType(Translation translation) {
 		super(OneplayCredentials.class);
 		this.translation = Objects.requireNonNull(translation);
 	}
+	
+	private static final String nonNull(String s) { return nonNull(s, ""); }
+	private static final String nonNull(String s, String d) { return s == null ? d : s; }
 	
 	@Override
 	public Pane create() {
@@ -114,10 +117,7 @@ public class OneplayCredentialsType extends CredentialsType<OneplayCredentials> 
 		cmbAccount.value(credentials.accountId());
 		cmbProfile.value(credentials.profileId());
 		txtProfilePin.setText(credentials.profilePin());
-		
-		if((accounts = credentials.accounts()) == null) {
-			accounts = JSON_EMPTY_ARRAY; // Must be non-null and a valid JSON
-		}
+		accounts = credentials.accounts();
 	}
 	
 	@Override
@@ -128,14 +128,14 @@ public class OneplayCredentialsType extends CredentialsType<OneplayCredentials> 
 		AccountSelect cmbAccount = (AccountSelect) grid.lookup(".field-account");
 		ProfileSelect cmbProfile = (ProfileSelect) grid.lookup(".field-profile");
 		PasswordFieldPane txtProfilePin = (PasswordFieldPane) grid.lookup(".field-profile-pin");
-		String email = txtEmail.getText();
-		String password = txtPassword.getText();
-		String account = cmbAccount.value();
-		String profile = cmbProfile.value();
-		String profilePin = txtProfilePin.getText();
+		String email = nonNull(txtEmail.getText());
+		String password = nonNull(txtPassword.getText());
+		String account = nonNull(cmbAccount.value());
+		String profile = nonNull(cmbProfile.value());
+		String profilePin = nonNull(txtProfilePin.getText());
 		String authToken = ""; // Empty due to possible login and profile data change
 		String deviceId = ""; // Empty due to possible login and profile data change
-		String rawAccounts = accounts;
+		String rawAccounts = nonNull(accounts, JSON_EMPTY_ARRAY);
 		accounts = JSON_EMPTY_ARRAY; // No longer reference the accounts in memory
 		
 		return new OneplayCredentials(
