@@ -183,14 +183,22 @@ final class PrimaPlus implements IPrima {
 				}
 				
 				String title = episodeData.getString("title");
-				String uri = episodeData.getString("additionals.webUrl");
+				String url = episodeData.getString("additionals.webUrl");
 				int numEpisode = episodeData.getInt("additionals.episodeNumber");
+				URI uri;
 				
 				if(regexEpisodeName.matcher(title).matches()) {
 					title = null;
 				}
 				
-				Episode episode = new Episode(program, Net.uri(uri), title, numEpisode, numSeason);
+				if(url == null) {
+					String slug = episodeData.getString("slug");
+					uri = program.uri().resolve(slug);
+				} else {
+					uri = Net.uri(url);
+				}
+				
+				Episode episode = new Episode(program, uri, title, numEpisode, numSeason);
 				episodes.add(episode);
 			}
 			
