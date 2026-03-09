@@ -152,7 +152,7 @@ public final class Oneplay {
 		return parseCarouselDataCount(task, data, itemParser) >= 0;
 	}
 	
-	private final String getContentId(Connection connection, URI uri) throws Exception {
+	private final JSONCollection getPlayCriteria(Connection connection, URI uri) throws Exception {
 		JSONCollection payload = JSONCollection.ofObject(
 			"reason", "start",
 			"route", JSONCollection.ofObject(
@@ -165,40 +165,8 @@ public final class Oneplay {
 		);
 		
 		JSONCollection data = connection.request("app.init", payload, customData).data();
-		JSONCollection params = data.getCollection("startAction.params.payload");
-		String contentId;
-		
-		return (
-			(contentId = params.getString("contentId")) != null
-				? contentId
-				: params.getString("criteria.contentId")
-		);
-	}
-	
-	private final String getEPGContentId(Connection connection, String contentId) throws Exception {
-		JSONCollection payload = JSONCollection.ofObject(
-			"contentId", JSONObject.ofString(contentId)
-		);
-		
-		JSONCollection customData = JSONCollection.ofObject(
-			"shouldBeInModal", JSONObject.ofBoolean(true)
-		);
-		
-		Response response = connection.request(
-			"page.content.display",
-			payload,
-			customData,
-			playbackCapabilities()
-		);
-		
-		JSONCollection blocks = response.data().getCollection("layout.blocks");
-		
-		return Utils.stream(blocks.collectionsIterable())
-			.map((c) -> c.getCollection("mainAction.action"))
-			.filter(Objects::nonNull)
-			.filter((c) -> "content.play".equals(c.getString("call")))
-			.map((c) -> c.getString("params.payload.criteria.contentId"))
-			.findFirst().orElse(null);
+		JSONCollection criteria = data.getCollection("startAction.params.payload.criteria");
+		return criteria; // Return just the raw criteria, they will be passed along
 	}
 	
 	private final ProgramInfo getProgramInfo(Connection connection, URI uri) throws Exception {
@@ -541,20 +509,17 @@ public final class Oneplay {
 		public void getMedia(ListTask<Media> task, MediaEngine engine, URI uri) throws Exception {
 			ensureAuthenticated(null, true);
 			
-			String contentId = openConnection((connection) -> {
-				return getContentId(connection, uri);
+			JSONCollection playCriteria = openConnection((connection) -> {
+				return getPlayCriteria(connection, uri);
 			});
 			
-			if(contentId == null) {
-				throw new IllegalStateException("Failed to obtain the content ID");
+			if(playCriteria == null) {
+				throw new IllegalStateException("Failed to obtain play criteria");
 			}
 			
 			JSONCollection data = openConnection((connection) -> {
 				JSONCollection payload = JSONCollection.ofObject(
-					"criteria", JSONCollection.ofObject(
-						"schema", JSONObject.ofString("ContentCriteria"),
-						"contentId", JSONObject.ofString(contentId)
-					)
+					"criteria", playCriteria
 				);
 				
 				return connection.request(
@@ -564,32 +529,6 @@ public final class Oneplay {
 					playbackCapabilities()
 				).data();
 			});
-			
-			if("Error".equals(data.getString("status"))) {
-				if(!"4099".equals(data.getString("code"))) {
-					throw new MessageException(data.getString("message"));
-				}
-				
-				String epgContentId = openConnection((connection) -> {
-					return getEPGContentId(connection, contentId);
-				});
-				
-				data = openConnection((connection) -> {
-					JSONCollection payload = JSONCollection.ofObject(
-						"criteria", JSONCollection.ofObject(
-							"schema", JSONObject.ofString("ContentCriteria"),
-							"contentId", JSONObject.ofString(epgContentId)
-						)
-					);
-					
-					return connection.request(
-						"content.play",
-						payload,
-						null,
-						playbackCapabilities()
-					).data();
-				});
-			}
 			
 			MediaSource source = MediaSource.of(engine);
 			URI sourceUri = uri;
