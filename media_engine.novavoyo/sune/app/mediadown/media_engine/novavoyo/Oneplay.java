@@ -437,14 +437,14 @@ public final class Oneplay {
 		
 		protected final Program parseProgramItem(JSONCollection item) {
 			String routeUrl = item.getString("action.route.url");
+			String type = item.getString("tracking.type");
 			
-			if(routeUrl == null) {
+			if(routeUrl == null || "collection".equals(type)) {
 				return null; // Few items currently have no route, ignore them
 			}
 			
 			String title = item.getString("title");
 			URI uri = Net.uri(item.getString("action.route.url"));
-			String type = item.getString("tracking.type");
 			return new Program(uri, title, "type", type);
 		}
 		
@@ -512,6 +512,7 @@ public final class Oneplay {
 			ProgramInfo programInfo = openConnection((connection) -> {
 				return getProgramInfo(connection, program.uri());
 			});
+			
 			if(programInfo == null) {
 				throw new IllegalStateException("Program not found");
 			}
