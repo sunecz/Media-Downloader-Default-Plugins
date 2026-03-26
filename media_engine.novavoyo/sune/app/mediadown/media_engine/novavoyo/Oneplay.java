@@ -405,6 +405,17 @@ public final class Oneplay {
 			
 			URI uri = Net.uri(tile.getString("action.route.url"));
 			String title = tile.getString("action.route.title");
+			
+			// If available, add the additional date and time label. It should be present
+			// as the second label of the first item, if it is an EPG item.
+			JSONCollection fragments;
+			String dateTimeLabel;
+			if((fragments = tile.getCollection("additionalFragments")) != null
+					&& "epgItem".equals(fragments.getString("0.template"))
+					&& (dateTimeLabel = fragments.getString("0.labels.1.name")) != null) {
+				title += " (" + dateTimeLabel + ")";
+			}
+			
 			episodeInfos.add(new EpisodeInfo(uri, title));
 		}
 		
