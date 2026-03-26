@@ -230,8 +230,8 @@ public final class Oneplay {
 			
 			String strSeason = data.getString("season", "0");
 			String strEpisode = data.getString("episodeNumber", "0");
-			numSeason = Utils.OfString.asInt(strSeason);
-			numEpisode = Utils.OfString.asInt(strEpisode);
+			numSeason = Utils.OfString.asIntOrDefault(strSeason, 0);
+			numEpisode = Utils.OfString.asIntOrDefault(strEpisode, 0);
 			
 			// Remove redundant information from the episode title. Variations include
 			// text such as "X. díl" or "Díl X".
