@@ -39,6 +39,10 @@
 						title: "Chyba",
 						text:  "Je vyžadován profilový pin, je ale neplatný. PIN musí mít 4 číslice."
 					},
+					inaccessible_content_upsell: {
+						title: "Chyba",
+						text:  "Tento obsah není dostupný, vyžaduje vyšší tarif."
+					},
 					message_error: {
 						title: "Chyba"
 					}

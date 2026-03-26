@@ -152,7 +152,7 @@ public final class Oneplay {
 		return parseCarouselDataCount(task, data, itemParser) >= 0;
 	}
 	
-	private final JSONCollection getPlayCriteria(Connection connection, URI uri) throws Exception {
+	private final PlayPayload getPlayPayload(Connection connection, URI uri) throws Exception {
 		JSONCollection payload = JSONCollection.ofObject(
 			"reason", "start",
 			"route", JSONCollection.ofObject(
@@ -165,8 +165,37 @@ public final class Oneplay {
 		);
 		
 		JSONCollection data = connection.request("app.init", payload, customData).data();
-		JSONCollection criteria = data.getCollection("startAction.params.payload.criteria");
-		return criteria; // Return just the raw criteria, they will be passed along
+		JSONCollection startAction = data.getCollection("startAction");
+		
+		do {
+			JSONCollection callPayload = startAction.getCollection("params.payload");
+			if(callPayload == null) return null; // Fail-fast
+			
+			switch(startAction.getString("call")) {
+				case "content.play":
+					// Return just the raw payload, it will be passed along
+					return new PlayPayload(callPayload, false);
+				case "page.content.display":
+					startAction = connection.request("page.content.display", callPayload).data();
+					
+					// The main action is inside a layout block, we need to find it first
+					JSONCollection blocks = startAction.getCollection("layout.blocks");
+					if(blocks == null) return null; // Fail-fast
+					
+					JSONCollection mainBlock = Utils.stream(blocks.collectionsIterable())
+						.map((b) -> b.getCollection("mainAction.action"))
+						.filter(Objects::nonNull)
+						.findFirst().orElse(null);
+					if(mainBlock == null) return null; // Fail-fast
+					
+					startAction = mainBlock;
+					continue; // Updated the data, try again
+				case "user.upsell.preview":
+					return new PlayPayload(null, true);
+				default:
+					return null; // Currently unsupported path
+			}
+		} while(true);
 	}
 	
 	private final ProgramInfo getProgramInfo(Connection connection, URI uri) throws Exception {
@@ -509,22 +538,22 @@ public final class Oneplay {
 		public void getMedia(ListTask<Media> task, MediaEngine engine, URI uri) throws Exception {
 			ensureAuthenticated(null, true);
 			
-			JSONCollection playCriteria = openConnection((connection) -> {
-				return getPlayCriteria(connection, uri);
+			PlayPayload playPayload = openConnection((connection) -> {
+				return getPlayPayload(connection, uri);
 			});
 			
-			if(playCriteria == null) {
+			if(playPayload == null) {
 				throw new IllegalStateException("Failed to obtain play criteria");
 			}
 			
+			if(playPayload.isUpsell() || playPayload.payload() == null) {
+				throw new TranslatableException("error.inaccessible_content_upsell");
+			}
+			
 			JSONCollection data = openConnection((connection) -> {
-				JSONCollection payload = JSONCollection.ofObject(
-					"criteria", playCriteria
-				);
-				
 				return connection.request(
 					"content.play",
-					payload,
+					playPayload.payload(),
 					null,
 					playbackCapabilities()
 				).data();
@@ -894,5 +923,19 @@ public final class Oneplay {
 		public int seasonNumber() { return numSeason; }
 		public int episodeNumber() { return numEpisode; }
 		public String title() { return title; }
+	}
+	
+	private static final class PlayPayload {
+		
+		private final JSONCollection payload;
+		private final boolean isUpsell;
+		
+		public PlayPayload(JSONCollection payload, boolean isUpsell) {
+			this.payload = payload;
+			this.isUpsell = isUpsell;
+		}
+		
+		public JSONCollection payload() { return payload; }
+		public boolean isUpsell() { return isUpsell; }
 	}
 }

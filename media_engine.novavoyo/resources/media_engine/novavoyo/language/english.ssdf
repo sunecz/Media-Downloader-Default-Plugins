@@ -39,6 +39,10 @@
 						title: "Error",
 						text:  "Profile PIN is required but is invalid. PIN must have 4 digits."
 					},
+					inaccessible_content_upsell: {
+						title: "Error",
+						text:  "This content is not accessible, it requires a higher plan."
+					},
 					message_error: {
 						title: "Error"
 					}
