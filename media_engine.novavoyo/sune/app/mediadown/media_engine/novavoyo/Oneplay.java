@@ -1,6 +1,7 @@
 package sune.app.mediadown.media_engine.novavoyo;
 
 import java.net.URI;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -312,6 +313,26 @@ public final class Oneplay {
 		}
 	}
 	
+	private final JSONCollection getContentData(Connection connection, String contentId)
+			throws Exception {
+		JSONCollection payload = JSONCollection.ofObject(
+			"contentId", JSONObject.ofString(contentId)
+		);
+		
+		JSONCollection customData = JSONCollection.ofObject(
+			"shouldBeInModal", JSONObject.ofBoolean(true)
+		);
+		
+		Response response = connection.request(
+			"page.content.display",
+			payload,
+			customData,
+			playbackCapabilities()
+		);
+		
+		return response.data();
+	}
+	
 	// This method is used to find carousels in the responses for shows returned from WebSocket.
 	// Since layout blocks can be nested, carousels may be as deep as multiple levels.
 	private final Stream<JSONCollection> blocksFindCarousels(JSONCollection blocks) {
@@ -338,24 +359,8 @@ public final class Oneplay {
 		);
 	}
 	
-	private final List<SeasonInfo> getSeasons(Connection connection, String programId)
-			throws Exception {
-		JSONCollection payload = JSONCollection.ofObject(
-			"contentId", JSONObject.ofString(programId)
-		);
-		
-		JSONCollection customData = JSONCollection.ofObject(
-			"shouldBeInModal", JSONObject.ofBoolean(true)
-		);
-		
-		Response response = connection.request(
-			"page.content.display",
-			payload,
-			customData,
-			playbackCapabilities()
-		);
-		
-		JSONCollection blocks = response.data().getCollection("layout.blocks");
+	private final List<SeasonInfo> getSeasons(JSONCollection contentData) {
+		JSONCollection blocks = contentData.getCollection("layout.blocks");
 		
 		if(blocks == null) {
 			return List.of(); // Do not return null
@@ -368,6 +373,42 @@ public final class Oneplay {
 				.filter((p) -> p.seasonId() != null)
 				.collect(Collectors.toList())
 		);
+	}
+	
+	private final List<EpisodeInfo> getDirectEpisodes(JSONCollection contentData) {
+		JSONCollection blocks = contentData.getCollection("layout.blocks");
+		
+		if(blocks == null) {
+			return List.of(); // Do not return null
+		}
+		
+		JSONCollection carousel = blocksFindCarousels(blocks)
+			.filter((c) -> Utils.stream(c.getCollection("tiles").collectionsIterable())
+				.allMatch((t) -> (
+					// The tile can either be played or hasn't been broadcasted yet
+					"content.play".equals(t.getString("action.call"))
+						|| "NoAppAction".equals(t.getString("action.schema"))
+				))
+			)
+			.findFirst().orElse(null);
+		
+		if(carousel == null) {
+			return List.of(); // Do not return null
+		}
+		
+		List<EpisodeInfo> episodeInfos = new ArrayList<>();
+		
+		for(JSONCollection tile : carousel.getCollection("tiles").collectionsIterable()) {
+			if("NoAppAction".equals(tile.getString("action.schema"))) {
+				continue; // Ignore non-broadcasted episodes
+			}
+			
+			URI uri = Net.uri(tile.getString("action.route.url"));
+			String title = tile.getString("action.route.title");
+			episodeInfos.add(new EpisodeInfo(uri, title));
+		}
+		
+		return episodeInfos;
 	}
 	
 	private final String getMediaTitle(JSONCollection data) {
@@ -524,9 +565,26 @@ public final class Oneplay {
 			
 			final int itemsPerPage = EPISODE_LIST_MAX_ITEMS_PER_PAGE;
 			
-			List<SeasonInfo> seasons = openConnection((connection) -> {
-				return getSeasons(connection, programInfo.programId());
+			JSONCollection contentData = openConnection((connection) -> {
+				return getContentData(connection, programInfo.programId());
 			});
+			
+			List<SeasonInfo> seasons = getSeasons(contentData);
+			
+			if(seasons == null || seasons.isEmpty()) {
+				// Some programs, e.g. the one broadcasted in TV, may not have any seasons
+				// and directly show available episodes in the program's detail. Find them
+				// and return them as the actual list of episodes.
+				for(EpisodeInfo info : getDirectEpisodes(contentData)) {
+					Episode episode = new Episode(program, info.uri(), info.title());
+					
+					if(!task.add(episode)) {
+						return; // Do not continue
+					}
+				}
+				
+				return; // Do not continue
+			}
 			
 			Function<JSONCollection, Episode> itemParser = (item) -> {
 				return parseEpisodeItem(program, item);
@@ -889,6 +947,20 @@ public final class Oneplay {
 		
 		public String programId() { return programId; }
 		public String type() { return type; }
+		public String title() { return title; }
+	}
+	
+	private static final class EpisodeInfo {
+		
+		private final URI uri;
+		private final String title;
+		
+		public EpisodeInfo(URI uri, String title) {
+			this.uri = uri;
+			this.title = title;
+		}
+		
+		public URI uri() { return uri; }
 		public String title() { return title; }
 	}
 
