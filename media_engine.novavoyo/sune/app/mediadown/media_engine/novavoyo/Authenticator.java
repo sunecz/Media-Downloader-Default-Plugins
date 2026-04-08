@@ -287,13 +287,16 @@ public final class Authenticator {
 		JSONCollection payload = JSONCollection.ofObject(
 			"screen", JSONObject.ofString("account")
 		);
-		
-		JSONCollection data = connection.request("setting.display", payload).data();
-		
-		return (
-			!"Error".equals(data.getString("status"))
-				&& !"4001".equals(data.getString("code"))
-		);
+
+		try {
+			JSONCollection data = connection.request("setting.display", payload).data();
+			return (
+				!"Error".equals(data.getString("status"))
+					&& !"4001".equals(data.getString("code"))
+			);
+		} catch(IllegalStateException ex) {
+			return false;
+		}
 	}
 	
 	public static final AuthenticationData login(

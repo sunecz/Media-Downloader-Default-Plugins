@@ -19,7 +19,7 @@ import sune.app.mediadown.util.JSON.JSONObject;
 
 public final class Connection implements AutoCloseable {
 	
-	private static final URI URI_HTTP_BASE = Net.uri("https://http.cms.jyxo.cz/api/v1.8/");
+	private static final URI URI_HTTP_BASE = Net.uri("https://http.cms.jyxo.cz/api/v1.9/");
 	private static final URI URI_WS_BASE = Net.uri("wss://ws.cms.jyxo.cz/websocket/");
 	private static final long DEFAULT_TIMEOUT_MS = 5000L;
 	
@@ -79,12 +79,18 @@ public final class Connection implements AutoCloseable {
 		
 		try(Web.Response.OfStream httpResponse = Web.requestStream(request.POST(body))) {
 			if(httpResponse.statusCode() != 200) {
-				throw new IllegalStateException("Non-success HTTP status code");
+				throw new IllegalStateException("Non-success HTTP status code: " + httpResponse.statusCode());
 			}
 			
 			JSONCollection json = JSON.read(httpResponse.stream());
 			String status = json.getString("result.status");
 			
+			if(status.equals("Ok")) {
+				JSONCollection resData = json.getCollection("data");
+				Response responseObj = new Response(path, status, resData);
+				return responseObj;
+			}
+
 			if(!status.equals("OkAsync")) {
 				throw new IllegalStateException("Error status: " + status);
 			}
