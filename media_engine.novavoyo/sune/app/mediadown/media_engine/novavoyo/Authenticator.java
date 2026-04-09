@@ -143,6 +143,13 @@ public final class Authenticator {
 			args
 		);
 		
+		if(!response.isSuccess()) {
+			throw new MessageException(String.format(
+				"Failed to log in. Reason: %s",
+				response.data().getString("message", "Unknown reason")
+			));
+		}
+		
 		JSONCollection data = response.data();
 		String schema = data.getString("step.schema");
 		LoginResult result;
@@ -288,25 +295,7 @@ public final class Authenticator {
 			"screen", JSONObject.ofString("account")
 		);
 		
-		try {
-			Response response = connection.request("setting.display", payload);
-			
-			if(response.type() == Response.Type.SYNC) {
-				return true; // We can return true, because the response is "Ok"
-			}
-			
-			JSONCollection data = response.data();
-			
-			// Keep the async-specific path for now
-			return (
-				!"Error".equals(data.getString("status"))
-					&& !"4001".equals(data.getString("code"))
-			);
-		} catch(IllegalStateException ex) {
-			// Ignore, the response is an error
-		}
-		
-		return false;
+		return connection.request("setting.display", payload).isSuccess();
 	}
 	
 	public static final AuthenticationData login(

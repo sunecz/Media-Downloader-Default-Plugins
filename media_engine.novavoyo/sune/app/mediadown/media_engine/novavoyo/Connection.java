@@ -103,7 +103,7 @@ public final class Connection implements AutoCloseable {
 				
 				return awaitResponse(requestId);
 			default:
-				throw new IllegalStateException("Error status: " + status);
+				return new Response(path, status, json, Response.Type.SYNC);
 		}
 	}
 	

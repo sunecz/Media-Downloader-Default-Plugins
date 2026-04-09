@@ -118,10 +118,29 @@ public final class Oneplay {
 		);
 	}
 	
-	private final void handleErrors(JSONCollection data) throws MessageException {
+	private final MessageException resultError(JSONCollection data) {
 		if("Error".equals(data.getString("result.status"))) {
-			throw new MessageException(data.getString("result.message"));
+			return new MessageException(data.getString("result.message"));
 		}
+		
+		return null;
+	}
+	
+	private final void handleErrors(JSONCollection data) throws MessageException {
+		MessageException ex;
+		if((ex = resultError(data)) != null) {
+			throw ex; // Explicit throw
+		}
+	}
+	
+	private final JSONCollection successData(Response response) throws MessageException {
+		MessageException ex;
+		if(!response.isSuccess()
+				&& (ex = resultError(response.data())) != null) {
+			throw ex; // Explicit throw
+		}
+		
+		return response.data();
 	}
 	
 	private final <T> int parseCarouselDataCount(ListTask<T> task, JSONCollection data,
@@ -166,7 +185,7 @@ public final class Oneplay {
 			"requireStartAction", JSONObject.ofBoolean(true)
 		);
 		
-		JSONCollection data = connection.request("app.init", payload, customData).data();
+		JSONCollection data = successData(connection.request("app.init", payload, customData));
 		JSONCollection startAction = data.getCollection("startAction");
 		
 		do {
@@ -178,7 +197,7 @@ public final class Oneplay {
 					// Return just the raw payload, it will be passed along
 					return new PlayPayload(callPayload, false);
 				case "page.content.display":
-					startAction = connection.request("page.content.display", callPayload).data();
+					startAction = successData(connection.request("page.content.display", callPayload));
 					
 					// The main action is inside a layout block, we need to find it first
 					JSONCollection blocks = startAction.getCollection("layout.blocks");
@@ -212,7 +231,7 @@ public final class Oneplay {
 			"requireStartAction", JSONObject.ofBoolean(true)
 		);
 		
-		JSONCollection data = connection.request("app.init", payload, customData).data();
+		JSONCollection data = successData(connection.request("app.init", payload, customData));
 		String programId = data.getString("startAction.params.payload.contentId");
 		String type = data.getString("startAction.params.contentType");
 		String title = data.getString("startAction.route.title");
@@ -324,14 +343,12 @@ public final class Oneplay {
 			"shouldBeInModal", JSONObject.ofBoolean(true)
 		);
 		
-		Response response = connection.request(
+		return successData(connection.request(
 			"page.content.display",
 			payload,
 			customData,
 			playbackCapabilities()
-		);
-		
-		return response.data();
+		));
 	}
 	
 	// This method is used to find carousels in the responses for shows returned from WebSocket.
@@ -546,9 +563,8 @@ public final class Oneplay {
 			);
 			
 			JSONCollection data = openConnection((connection) -> {
-				return connection.request("carousel.display", payload).data();
+				return successData(connection.request("carousel.display", payload));
 			});
-			
 			
 			if(!parseCarouselData(task, data, this::parseProgramItem)) {
 				return; // Interrupted, do not continue
@@ -622,12 +638,12 @@ public final class Oneplay {
 			}
 			
 			JSONCollection data = openConnection((connection) -> {
-				return connection.request(
+				return successData(connection.request(
 					"content.play",
 					playPayload.payload(),
 					null,
 					playbackCapabilities()
-				).data();
+				));
 			});
 			
 			MediaSource source = MediaSource.of(engine);
@@ -730,10 +746,8 @@ public final class Oneplay {
 							JSONCollection lPayload = payloads[item.idx()];
 							lPayload.set("paging.position", (p - 1) * itemsPerPage + 1);
 							Connection con = item.connection();
-							return con.request("carousel.display", payload).data();
+							return successData(con.request("carousel.display", payload));
 						});
-						
-						handleErrors(lData);
 						
 						List<Program> lp = ListTask.<Program>of((t) -> {
 							if(!parseCarouselData(t, lData, this::parseProgramItem)) {
@@ -789,11 +803,20 @@ public final class Oneplay {
 					// may not be the actual last page, but we have an approximate end.
 					while(true) {
 						pagination.set("position", hi + 1);
-						JSONCollection data = openConnection((connection) -> {
-							return connection.request("carousel.display", payload).data();
+						Response response = openConnection((connection) -> {
+							return connection.request("carousel.display", payload);
 						});
 						
-						handleErrors(data);
+						JSONCollection data = response.data();
+						
+						if(!response.isSuccess()) {
+							if("4055".equals(data.getString("result.code"))) {
+								break; // There are no next pages
+							}
+							
+							handleErrors(data);
+							return; // Do not continue
+						}
 						
 						// Also extract the items, since we already visited the page.
 						if((c = parseCarouselDataCount(task, data, itemParser)) < 0) {
@@ -815,12 +838,21 @@ public final class Oneplay {
 					while(hi - lo > count) {
 						int mid = lo + (hi - lo) / 2;
 						
-						pagination.set("position", mid + 1);
-						JSONCollection data = openConnection((connection) -> {
-							return connection.request("carousel.display", payload).data();
+						Response response = openConnection((connection) -> {
+							return connection.request("carousel.display", payload);
 						});
 						
-						handleErrors(data);
+						JSONCollection data = response.data();
+						
+						if(!response.isSuccess()) {
+							if("4055".equals(data.getString("result.code"))) {
+								hi = mid; // No items, end reached
+								continue;
+							}
+							
+							handleErrors(data);
+							return; // Do not continue
+						}
 						
 						// Also extract the items, since we already visited the page.
 						if((c = parseCarouselDataCount(task, data, itemParser)) < 0) {
@@ -859,14 +891,12 @@ public final class Oneplay {
 								return; // Interrupted, do not continue
 							}
 							
-							JSONCollection lData =  openConnectionItem((item) -> {
+							JSONCollection lData = openConnectionItem((item) -> {
 								JSONCollection lPayload = payloads[item.idx()];
 								lPayload.set("paging.position", o + 1);
 								Connection con = item.connection();
-								return con.request("carousel.display", payload).data();
+								return successData(con.request("carousel.display", payload));
 							});
-							
-							handleErrors(lData);
 							
 							List<Episode> lp = ListTask.<Episode>of((t) -> {
 								if(!parseCarouselData(t, lData, itemParser)) {
@@ -895,7 +925,7 @@ public final class Oneplay {
 			while(++page <= maxPage) {
 				payload.set("paging.position", (page - 1) * itemsPerPage + 1);
 				JSONCollection data = openConnection((connection) -> {
-					return connection.request("carousel.display", payload).data();
+					return successData(connection.request("carousel.display", payload));
 				});
 				
 				if(!parseCarouselData(task, data, this::parseProgramItem)) {
@@ -932,7 +962,7 @@ public final class Oneplay {
 				do {
 					pagination.set("position", position);
 					data = openConnection((connection) -> {
-						return connection.request("carousel.display", payload).data();
+						return successData(connection.request("carousel.display", payload));
 					});
 					
 					if(!parseCarouselData(task, data, itemParser)) {
