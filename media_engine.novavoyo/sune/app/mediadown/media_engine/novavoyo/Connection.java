@@ -69,40 +69,42 @@ public final class Connection implements AutoCloseable {
 	
 	private final Response doRequest(String path, JSONCollection data) throws Exception {
 		String body = data.toString(true);
-		String requestId;
-		
 		Web.Request.Builder request = Web.Request.of(URI_HTTP_BASE.resolve(path));
 		
 		if(authToken != null) {
 			request.header("Authorization", "Bearer " + authToken.value());
 		}
 		
+		JSONCollection json;
+		
 		try(Web.Response.OfStream httpResponse = Web.requestStream(request.POST(body))) {
 			if(httpResponse.statusCode() != 200) {
-				throw new IllegalStateException("Non-success HTTP status code: " + httpResponse.statusCode());
+				throw new IllegalStateException(
+					"Non-success HTTP status code: " + httpResponse.statusCode()
+				);
 			}
 			
-			JSONCollection json = JSON.read(httpResponse.stream());
-			String status = json.getString("result.status");
-			
-			if(status.equals("Ok")) {
-				JSONCollection resData = json.getCollection("data");
-				Response responseObj = new Response(path, status, resData);
-				return responseObj;
-			}
-
-			if(!status.equals("OkAsync")) {
+			json = JSON.read(httpResponse.stream());
+		}
+		
+		String status = json.getString("result.status");
+		
+		// Since v1.9 the API primarily serves data synchronously. Handle both routes for now
+		// for compatibility reasons.
+		switch(status) {
+			case "Ok":
+				return new Response(path, status, json.getCollection("data"), Response.Type.SYNC);
+			case "OkAsync":
+				String requestId = json.getString("context.requestId");
+				
+				if(requestId == null) {
+					throw new IllegalStateException("Invalid request ID");
+				}
+				
+				return awaitResponse(requestId);
+			default:
 				throw new IllegalStateException("Error status: " + status);
-			}
-			
-			requestId = json.getString("context.requestId");
 		}
-		
-		if(requestId == null) {
-			throw new IllegalStateException("Invalid request ID");
-		}
-		
-		return awaitResponse(requestId);
 	}
 	
 	private final void doOpen() {
@@ -164,7 +166,7 @@ public final class Connection implements AutoCloseable {
 		
 		String key = "Ok".equals(status) ? "data" : "result";
 		JSONCollection data = response.getCollection(key);
-		Response responseObj = new Response(command, status, data);
+		Response responseObj = new Response(command, status, data, Response.Type.ASYNC);
 		lockResponse.lock();
 		
 		try {
@@ -325,14 +327,18 @@ public final class Connection implements AutoCloseable {
 	
 	public static final class Response {
 		
+		public static enum Type { ASYNC, SYNC; }
+		
 		private final String command;
 		private final String status;
 		private final JSONCollection data;
+		private final Type type;
 		
-		public Response(String command, String status, JSONCollection data) {
+		public Response(String command, String status, JSONCollection data, Type type) {
 			this.command = command;
 			this.status = status;
 			this.data = data;
+			this.type = Objects.requireNonNull(type);
 		}
 		
 		public String command() {
@@ -345,6 +351,10 @@ public final class Connection implements AutoCloseable {
 		
 		public boolean isSuccess() {
 			return "Ok".equals(status);
+		}
+		
+		public Type type() {
+			return type;
 		}
 	}
 }

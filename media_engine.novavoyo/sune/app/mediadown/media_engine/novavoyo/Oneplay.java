@@ -47,7 +47,7 @@ public final class Oneplay {
 	private static final int DEFAULT_PARALLELISM = 4; // Currently not configurable
 	private static final VarLoader<Oneplay> instance = VarLoader.of(Oneplay::createInstance);
 	
-	private static final String APP_VERSION = "R9.18";
+	private static final String APP_VERSION = "R9.19";
 	private static final String DEVICE_TYPE_WEB = "web";
 	private static final int PROGRAM_LIST_MAX_ITEMS_PER_PAGE = 24; // Capped at 24
 	private static final int EPISODE_LIST_MAX_ITEMS_PER_PAGE = 12; // Capped at 12

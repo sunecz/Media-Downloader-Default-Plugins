@@ -287,16 +287,26 @@ public final class Authenticator {
 		JSONCollection payload = JSONCollection.ofObject(
 			"screen", JSONObject.ofString("account")
 		);
-
+		
 		try {
-			JSONCollection data = connection.request("setting.display", payload).data();
+			Response response = connection.request("setting.display", payload);
+			
+			if(response.type() == Response.Type.SYNC) {
+				return true; // We can return true, because the response is "Ok"
+			}
+			
+			JSONCollection data = response.data();
+			
+			// Keep the async-specific path for now
 			return (
 				!"Error".equals(data.getString("status"))
 					&& !"4001".equals(data.getString("code"))
 			);
 		} catch(IllegalStateException ex) {
-			return false;
+			// Ignore, the response is an error
 		}
+		
+		return false;
 	}
 	
 	public static final AuthenticationData login(
