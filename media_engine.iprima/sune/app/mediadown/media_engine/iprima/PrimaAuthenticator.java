@@ -320,20 +320,32 @@ public final class PrimaAuthenticator {
 			);
 		}
 		
+		private static final Device parseSession(JSONCollection data) {
+			return new Device(
+				data.getString("sessionId"),
+				data.getString("deviceType"),
+				data.getString("deviceName")
+			);
+		}
+		
 		private static final Stream<Device> listStream() throws Exception {
-			final String method = "user.device.slot.list";
+			final String method = "user.user.session.list";
 			
 			JSONCollection response = RPC.request(
 				method,
-				"_accessToken", accessToken()
+				"_accessToken", accessToken(),
+				// Looping through all devices is probably a waste of time just to find
+				// our exact device since we can use any after all. Just use the default
+				// pagination of 200 and be done with it.
+				"pager", Map.of("offset", 0, "limit", 200)
 			);
 			
 			if(RPC.isError(response)) {
 				throw new MessageException(response.getString("error.message"));
 			}
 			
-			return Utils.stream(response.getCollection("data").collectionsIterable())
-						.map(Devices::parseDevice);
+			return Utils.stream(response.getCollection("data.data").collectionsIterable())
+						.map(Devices::parseSession);
 		}
 		
 		public static final List<Device> list() throws Exception {
