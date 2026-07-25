@@ -19,7 +19,7 @@ import sune.app.mediadown.util.JSON.JSONObject;
 
 public final class Connection implements AutoCloseable {
 	
-	private static final URI URI_HTTP_BASE = Net.uri("https://http.cms.jyxo.cz/api/v1.9/");
+	private static final URI URI_HTTP_BASE = Net.uri("https://http.cms.jyxo.cz/api/v1.12/");
 	private static final URI URI_WS_BASE = Net.uri("wss://ws.cms.jyxo.cz/websocket/");
 	private static final long DEFAULT_TIMEOUT_MS = 5000L;
 	
