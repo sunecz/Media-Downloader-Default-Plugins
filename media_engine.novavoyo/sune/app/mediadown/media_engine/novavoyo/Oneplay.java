@@ -260,7 +260,7 @@ public final class Oneplay {
 		int numEpisode = 0;
 		
 		if("episode".equals(type)) {
-			programName = data.getString("show.title");
+			programName = data.getString("parent.title");
 			
 			String strSeason = data.getString("season", "0");
 			String strEpisode = data.getString("episodeNumber", "0");
