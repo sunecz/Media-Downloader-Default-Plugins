@@ -40,6 +40,7 @@ import sune.app.mediadown.util.JSON.JSONObject;
 import sune.app.mediadown.util.Ref;
 import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
+import sune.app.mediadown.util.Utils.Ignore;
 
 
 public final class Oneplay {
@@ -120,7 +121,19 @@ public final class Oneplay {
 	
 	private final MessageException resultError(JSONCollection data) {
 		if("Error".equals(data.getString("result.status"))) {
-			return new MessageException(data.getString("result.message"));
+			int code = Ignore.defaultValue(() -> Integer.parseInt(data.getString("result.code")), 0);
+			
+			switch(code) {
+				case 5029:
+				case 4091:
+				case 4054:
+				case 4094:
+					// These codes are treated as non-error, see `api_error` event handler
+					// in the source code.
+					return null;
+			}
+			
+			return new MessageException(data.getString("result.message", "Unknown error"));
 		}
 		
 		return null;

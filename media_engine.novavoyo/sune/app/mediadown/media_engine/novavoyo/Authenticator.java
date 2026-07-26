@@ -36,7 +36,7 @@ public final class Authenticator {
 		
 		if(!response.isSuccess()) {
 			// Check whether it is something else than the PIN lock error, and if so, exit early.
-			if(!"4080".equals(response.data().getString("code"))) {
+			if(!"4080".equals(response.data().getString("result.code"))) {
 				Logging.logDebug("[Auth] Erroneous response: %s", response.data());
 				
 				throw new MessageException(String.format(
