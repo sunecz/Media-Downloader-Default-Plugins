@@ -144,6 +144,8 @@ public final class Authenticator {
 		);
 		
 		if(!response.isSuccess()) {
+			Logging.logDebug("[Auth] Erroneous response: %s", response.data());
+			
 			throw new MessageException(String.format(
 				"Failed to log in. Reason: %s",
 				response.data().getString("message", "Unknown reason")
