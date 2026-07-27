@@ -40,6 +40,7 @@ import sune.app.mediadown.task.ListTask;
 import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.JSON.JSONCollection;
 import sune.app.mediadown.util.JSON.JSONNode;
+import sune.app.mediadown.util.JSON.JSONObject;
 import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
 
@@ -224,6 +225,38 @@ final class PrimaPlus implements IPrima {
 			Dialog.showContentError(tr.getSingle("title"), tr.getSingle("text"), message);
 		}
 		
+		private static final String extractMediaTitle(JSONCollection nuxtData) {
+			String programName = nuxtData.getString("additionals.programTitle", "");
+			String episodeName = nuxtData.getString("title", "");
+			String numSeason = null;
+			String numEpisode = null;
+			
+			// In the past the numbers were present as strings, now they are mostly integers.
+			// Keep the extraction generic, so that it always gets the raw value and converts it
+			// to String. This works for both strings and integers in the JSON.
+			JSONObject objSeason = nuxtData.getObject("additionals.seasonNumber");
+			JSONObject objEpisode = nuxtData.getObject("additionals.episodeNumber");
+			if(objSeason != null) numSeason = objSeason.stringValue();
+			if(objEpisode != null) numEpisode = objSeason.stringValue();
+			
+			if(programName.isEmpty()) {
+				programName = episodeName;
+				episodeName = "";
+			}
+			
+			Regex regexEpisodeName = Regex.of("Epizoda\\s+\\d+|^" + Regex.quote(programName) + "\\s+\\(\\d+\\)$");
+			
+			if(!episodeName.isEmpty()
+					&& regexEpisodeName.matcher(episodeName).matches()) {
+				episodeName = "";
+			}
+			
+			if(numSeason != null && numSeason.isEmpty()) numSeason = null;
+			if(numEpisode != null && numEpisode.isEmpty()) numEpisode = null;
+			
+			return MediaUtils.mediaTitle(programName, numSeason, numEpisode, episodeName, false);
+		}
+		
 		public static final ListTask<Program> getPrograms() throws Exception {
 			return ListTask.of(PrimaCommon.handleErrors((task) -> MDI.getPrograms(task)));
 		}
@@ -352,28 +385,7 @@ final class PrimaPlus implements IPrima {
 					return; // Do not continue
 				}
 				
-				// Get information for the media title
-				String programName = nuxtData.getString("additionals.programTitle", "");
-				String numSeason = nuxtData.getString("additionals.seasonNumber", null);
-				String numEpisode = nuxtData.getString("additionals.episodeNumber", null);
-				String episodeName = nuxtData.getString("title", "");
-				
-				if(programName.isEmpty()) {
-					programName = episodeName;
-					episodeName = "";
-				}
-				
-				Regex regexEpisodeName = Regex.of("Epizoda\\s+\\d+|^" + Regex.quote(programName) + "\\s+\\(\\d+\\)$");
-				
-				if(!episodeName.isEmpty()
-						&& regexEpisodeName.matcher(episodeName).matches()) {
-					episodeName = "";
-				}
-				
-				if(numSeason != null && numSeason.isEmpty()) numSeason = null;
-				if(numEpisode != null && numEpisode.isEmpty()) numEpisode = null;
-				
-				String title = MediaUtils.mediaTitle(programName, numSeason, numEpisode, episodeName, false);
+				String title = extractMediaTitle(nuxtData);
 				URI sourceURI = uri;
 				MediaSource source = MediaSource.of(engine);
 				
