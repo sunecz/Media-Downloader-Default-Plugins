@@ -348,8 +348,7 @@ final class PrimaPlus implements IPrima {
 					}
 					
 					nuxtData = Utils.stream(nuxt.data().collectionsIterable())
-						.map((c) -> c.getCollection("content"))
-						.filter(Objects::nonNull)
+						.filter((c) -> c.hasString("playId"))
 						.findFirst().orElse(null);
 					
 					if(nuxtData == null) {
@@ -358,7 +357,7 @@ final class PrimaPlus implements IPrima {
 						);
 					}
 					
-					String videoPlayId = nuxtData.getString("additionals.videoPlayId", null);
+					String videoPlayId = nuxtData.getString("playId", null);
 					
 					if(videoPlayId == null) {
 						throw new IllegalStateException("Unable to extract video play ID");
