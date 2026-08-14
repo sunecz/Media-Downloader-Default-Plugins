@@ -1,13 +1,11 @@
 package sune.app.mediadown.media_engine.ceskatelevize;
 
-import java.lang.StackWalker.Option;
-import java.lang.StackWalker.StackFrame;
-import java.lang.reflect.Constructor;
 import java.net.URI;
 import java.net.http.HttpConnectTimeoutException;
 import java.net.http.HttpHeaders;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -17,28 +15,23 @@ import java.util.Map.Entry;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Predicate;
 import java.util.regex.Matcher;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
-import java.util.stream.StreamSupport;
 
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 
 import javafx.scene.image.Image;
-import sune.app.mediadown.MediaDownloader;
 import sune.app.mediadown.concurrent.Threads;
-import sune.app.mediadown.concurrent.VarLoader;
 import sune.app.mediadown.entity.Episode;
 import sune.app.mediadown.entity.MediaEngine;
 import sune.app.mediadown.entity.Program;
-import sune.app.mediadown.gui.Dialog;
-import sune.app.mediadown.language.Translation;
 import sune.app.mediadown.media.Media;
 import sune.app.mediadown.media.MediaContainer;
 import sune.app.mediadown.media.MediaFormat;
@@ -60,9 +53,7 @@ import sune.app.mediadown.util.CheckedSupplier;
 import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.JSON.JSONCollection;
 import sune.app.mediadown.util.JSON.JSONObject;
-import sune.app.mediadown.util.JavaScript;
 import sune.app.mediadown.util.Opt;
-import sune.app.mediadown.util.Reflection;
 import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
 import sune.app.mediadown.util.Utils.Ignore;
@@ -78,22 +69,16 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 	public static final Image  ICON    = PLUGIN.getIcon();
 	
 	private static final CT[] SUPPORTED_WEBS = {
-		CT_iVysilani.getInstance(),
-		CT_Porady.getInstance(),
-		CT_Decko.getInstance(),
-		CT_24.getInstance(),
-		CT_Sport.getInstance(),
-		CT_Art.getInstance(),
-		CT_Edu.getInstance(),
+		CT_iVysilani.INSTANCE,
+		CT_Decko.INSTANCE,
+		CT_24.INSTANCE,
+		CT_Sport.INSTANCE,
+		CT_Art.INSTANCE,
+		CT_Edu.INSTANCE,
 	};
 	
 	// Allow to create an instance when registering the engine
 	CeskaTelevizeEngine() {
-	}
-	
-	private static final Translation translation() {
-		String path = "plugin." + PLUGIN.getContext().getPlugin().instance().name();
-		return MediaDownloader.translation().getTranslation(path);
 	}
 	
 	private static final boolean checkURLSubdomain(URI uri, String required) {
@@ -101,21 +86,8 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		return hostParts.length > 1 && hostParts[0].equalsIgnoreCase(required);
 	}
 	
-	private static final void displayError(String name, Object... args) {
-		Translation tr = translation().getTranslation("error");
-		String message = tr.getSingle("value." + name, args);
-		tr = tr.getTranslation("media_error");
-		Dialog.showContentInfo(tr.getSingle("title"), tr.getSingle("text"), message);
-	}
-	
-	private static final String extractErrorMessage(URI uri) {
-		try {
-			return HTML.from(uri).selectFirst("main [class^='errorTitle']").text().trim();
-		} catch(Exception ex) {
-			// Ignore, will just display empty error message
-		}
-		
-		return "";
+	private static final String randomUUID() {
+		return UUID.randomUUID().toString();
 	}
 	
 	@Override
@@ -148,7 +120,9 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 	@Override
 	public ListTask<Media> getMedia(URI uri, Map<String, Object> data) throws Exception {
 		return ListTask.of((task) -> {
-			CT ct = Arrays.stream(SUPPORTED_WEBS).filter((c) -> c.isCompatible(uri)).findFirst().orElse(null);
+			CT ct = Arrays.stream(SUPPORTED_WEBS)
+				.filter((c) -> c.isCompatible(uri))
+				.findFirst().orElse(null);
 			
 			if(ct == null) {
 				return; // Not supported
@@ -159,81 +133,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			ct.extractJobs(uri, HTML.from(uri), jobs);
 			
 			for(ExtractJob job : jobs) {
-				URI videoUri = job.uri();
-				
-				switch(job.method()) {
-					case SOURCE_INFO: {
-						VOD.Playlist playlist = null;
-						SourceInfo info = job.source();
-						
-						// Always try the new API first, the old one just as a fallback
-						for(VOD.API api : List.of(VOD.v1(), VOD.v0())) {
-							playlist = Common.retry(() -> api.ofExternal(info));
-							
-							if(playlist != null) {
-								break; // Successfully obtained
-							}
-						}
-						
-						if(playlist == null) {
-							continue; // Unsuccessful, try another job, if any
-						}
-						
-						for(VOD.Playlist.Stream stream : playlist.streams()) {
-							URI finalUri;
-							
-							try(Response response = Web.peek(Request.of(stream.uri()).HEAD())) {
-								finalUri = response.uri();
-							}
-							
-							List<Media.Builder<?, ?>> media = MediaUtils.createMediaBuilders(
-								source, finalUri, uri, job.title(), MediaLanguage.UNKNOWN, MediaMetadata.empty()
-							);
-							
-							for(Entry<MediaLanguage, List<URI>> entry : stream.subtitles().entrySet()) {
-								MediaLanguage language = entry.getKey();
-								
-								for(URI subtitleUri : entry.getValue()) {
-									if(!subtitleUri.getPath().endsWith("vtt")) {
-										continue;
-									}
-									
-									MediaFormat format = MediaFormat.VTT;
-									SubtitlesMedia.Builder<?, ?> subtitles = SubtitlesMedia.simple()
-										.source(source)
-										.uri(subtitleUri)
-										.format(format)
-										.language(language);
-									
-									media.forEach((m) -> ((MediaContainer.Builder<?, ?>) m).addMedia(subtitles));
-									break; // Keep only VTT for now
-								}
-							}
-							
-							// Finally, add all the media
-							for(Media s : Utils.iterable(media.stream().map(Media.Builder::build).iterator())) {
-								if(!task.add(s)) {
-									return; // Do not continue
-								}
-							}
-						}
-						
-						break;
-					}
-					case NONE: {
-						List<Media> media = MediaUtils.createMedia(
-							source, videoUri, uri, job.title(), MediaLanguage.UNKNOWN, MediaMetadata.empty()
-						);
-						
-						for(Media s : media) {
-							if(!task.add(s)) {
-								return; // Do not continue
-							}
-						}
-						
-						break;
-					}
-				}
+				job.execute(source, task);
 			}
 		});
 	}
@@ -495,7 +395,6 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			return json.toString(true).replaceAll("\\n", "\\\\n");
 		}
 		
-		@SuppressWarnings("resource")
 		private static final JSONCollection doOperation(String operationName, String query, Object... variables)
 				throws Exception {
 			String body = createRequestBody(operationName, query, variables);
@@ -711,28 +610,77 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		}
 	}
 	
-	private static enum ExtractMethod {
-		SOURCE_INFO, NONE;
+	private static interface ExtractJob {
+		
+		void execute(MediaSource source, ListTask<Media> task) throws Exception;
 	}
 	
-	private static final class ExtractJob {
+	private static interface SourceInfo {
+		
+		URI playlistUri();
+	}
+	
+	private static final class SourceInfoExtractJob implements ExtractJob {
 		
 		private final URI uri;
-		private final ExtractMethod method;
 		private final SourceInfo source;
 		private final String title;
 		
-		public ExtractJob(URI uri, ExtractMethod method, SourceInfo source, String title) {
+		public SourceInfoExtractJob(URI uri, SourceInfo source, String title) {
 			this.uri = Objects.requireNonNull(uri);
-			this.method = Objects.requireNonNull(method);
 			this.source = Objects.requireNonNull(source);
-			this.title = Objects.requireNonNull(title);
+			this.title = title; // Optional title
 		}
 		
-		public URI uri() { return uri; }
-		public ExtractMethod method() { return method; }
-		public SourceInfo source() { return source; }
-		public String title() { return title; }
+		@Override
+		public void execute(MediaSource source, ListTask<Media> task) throws Exception {
+			VOD.Playlist playlist = Common.retry(() -> VOD.INSTANCE.ofSource(this.source));
+			if(playlist == null) return; // Unsuccessful
+			
+			String title;
+			if((title = this.title) == null) {
+				title = playlist.title();
+			}
+			
+			for(VOD.Playlist.Stream stream : playlist.streams()) {
+				URI finalUri;
+				
+				try(Response response = Web.peek(Request.of(stream.uri()).HEAD())) {
+					finalUri = response.uri();
+				}
+				
+				List<Media.Builder<?, ?>> media = MediaUtils.createMediaBuilders(
+					source, finalUri, uri, title, MediaLanguage.UNKNOWN, MediaMetadata.empty()
+				);
+				
+				for(Entry<MediaLanguage, List<URI>> entry : stream.subtitles().entrySet()) {
+					MediaLanguage language = entry.getKey();
+					
+					for(URI subtitleUri : entry.getValue()) {
+						if(!subtitleUri.getPath().endsWith("vtt")) {
+							continue;
+						}
+						
+						MediaFormat format = MediaFormat.VTT;
+						SubtitlesMedia.Builder<?, ?> subtitles = SubtitlesMedia.simple()
+							.source(source)
+							.uri(subtitleUri)
+							.format(format)
+							.language(language);
+						
+						media.forEach((m) -> ((MediaContainer.Builder<?, ?>) m).addMedia(subtitles));
+						break; // Keep only VTT for now
+					}
+				}
+				
+				// Finally, add all the media
+				for(Media s : Utils.iterable(media.stream().map(Media.Builder::build).iterator())) {
+					if(!task.add(s)) {
+						return; // Do not continue
+					}
+				}
+			}
+		}
 	}
 	
 	private static final class WebMediaMetadata {
@@ -792,260 +740,219 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		}
 	}
 	
-	private static final class SourceInfo {
-		
-		private final URI sourceUri;
-		private final String type;
-		private final String idec;
-		
-		private SourceInfo(URI sourceUri, String type, String idec) {
-			this.sourceUri = Objects.requireNonNull(sourceUri);
-			this.type = Objects.requireNonNull(type);
-			this.idec = Objects.requireNonNull(idec);
-		}
-		
-		public static final SourceInfo ofEpisode(URI sourceUri, String idec) {
-			return new SourceInfo(sourceUri, "episode", idec);
-		}
-		
-		public static final SourceInfo ofBonus(URI sourceUri, String idec) {
-			return new SourceInfo(sourceUri, "bonus", idec);
-		}
-		
-		public URI sourceUri() { return sourceUri; }
-		public String type() { return type; }
-		public String idec() { return idec; }
-	}
-	
 	// Note: Based on https://player.ceskatelevize.cz/_next/static/chunks/695-cede098ec19ef364.js
-	private static final class VOD {
+	private static enum VOD {
+		INSTANCE;
 		
-		private VOD() {}
+		private static final URI ENDPOINT;
+		private static final String PATH_EXTERNAL;
+		private static final String PATH_INTERNAL;
+		private static final String PATH_BONUS;
 		
-		public static final API v0() { return V0.instance(); }
-		public static final API v1() { return V1.instance(); }
+		private static final Regex REGEX_NUM_EPISODE = Regex.of("\\s*\\|\\s*(\\d+)$");
+		private static final String CLIENT_VERSION = "0.37.1";
 		
-		// The old API that uses the iFramePlayer.php
-		private static final class V0 implements API {
+		static {
+			ENDPOINT = Net.uri("https://api.ceskatelevize.cz/video/v1/playlist-vod/v1/");
+			PATH_EXTERNAL = "stream-data/media"
+				+ "/external"
+				+ "/%{idec}s"
+				+ "?canPlayDrm=true"
+				+ "&quality=web"
+				+ "&streamType=dash"
+				+ "&deviceId=%{deviceId}s"
+				+ "&origin=%{origin}s"
+				+ "&client=%{client}s"
+				+ "&clientVersion=" + CLIENT_VERSION;
+			PATH_INTERNAL = "stream-data/version"
+				+ "/%{versionId}s"
+				+ "?canPlayDrm=true"
+				+ "&quality=web"
+				+ "&streamType=dash"
+				+ "&sessionId=%{sessionId}s"
+				+ "&origin=%{origin}s"
+				+ "&client=%{client}s"
+				+ "&clientVersion=" + CLIENT_VERSION;
+			PATH_BONUS = "stream-data/bonus"
+				+ "/BO-%{value}s"
+				+ "?canPlayDrm=true"
+				+ "&quality=web"
+				+ "&streamType=dash"
+				+ "&deviceId=%{deviceId}s"
+				+ "&origin=%{origin}s"
+				+ "&client=%{client}s"
+				+ "&clientVersion=" + CLIENT_VERSION;
+		}
+		
+		private static final Playlist.Stream parseStream(JSONCollection collection) {
+			URI uri = Net.uri(collection.getString("url"));
 			
-			private static final VarLoader<API> instance = VarLoader.of(V0::new);
-			
-			private static final URI ENDPOINT;
-			private static final String REQUEST_URI;
-			private static final String REQUEST_SOURCE;
-			private static final String STREAM_PROTOCOL;
-			
-			static {
-				ENDPOINT = Net.uri("https://www.ceskatelevize.cz/ivysilani/ajax/get-client-playlist/");
-				REQUEST_URI = "/ivysilani/embed/iFramePlayer.php";
-				REQUEST_SOURCE = "iVysilani";
-				STREAM_PROTOCOL = "dash"; // Either dash or hls
+			if(!collection.hasCollection("subtitles")) {
+				return new Playlist.Stream(uri, Map.of());
 			}
 			
-			private V0() {}
+			Map<MediaLanguage, List<URI>> subtitles = new LinkedHashMap<>();
 			
-			private static final Playlist.Stream parseStream(JSONCollection collection) {
-				URI uri = Net.uri(collection.getString("streamUrls.main"));
+			for(JSONCollection item : collection.getCollection("subtitles").collectionsIterable()) {
+				MediaLanguage language = MediaLanguage.ofCode(item.getString("language"));
+				List<URI> uris = new ArrayList<>();
 				
-				if(!collection.hasCollection("subtitles")) {
-					return new Playlist.Stream(uri, Map.of());
+				for(JSONCollection file : item.getCollection("files").collectionsIterable()) {
+					uris.add(Net.uri(file.getString("url")));
 				}
 				
-				Map<MediaLanguage, List<URI>> subtitles = new LinkedHashMap<>();
-				
-				for(JSONCollection item : collection.getCollection("subtitles").collectionsIterable()) {
-					MediaLanguage language = MediaLanguage.ofCode(item.getString("code"));
-					List<URI> uris = List.of(Net.uri(item.getString("url")));
-					subtitles.put(language, uris);
-				}
-				
-				return new Playlist.Stream(uri, subtitles);
+				subtitles.put(language, uris);
 			}
 			
-			private static final Playlist parsePlaylist(URI uri) throws Exception {
-				List<Playlist.Stream> streams = new ArrayList<>();
+			return new Playlist.Stream(uri, subtitles);
+		}
+		
+		private static final Playlist parsePlaylist(URI uri) throws Exception {
+			List<Playlist.Stream> streams = new ArrayList<>();
+			String title = null;
+			
+			try(Response.OfStream response = Web.requestStream(Request.of(uri).GET())) {
+				JSONCollection json = JSON.read(response.stream());
 				
-				try(Response.OfStream response = Web.requestStream(Request.of(uri).GET())) {
-					JSONCollection json = JSON.read(response.stream());
+				if(json.has("error") || json.has("message")) {
+					return null; // Do not throw exception
+				}
+				
+				for(JSONCollection item : json.getCollection("streams").collectionsIterable()) {
+					Playlist.Stream stream = parseStream(item);
 					
-					for(JSONCollection item : json.getCollection("playlist").collectionsIterable()) {
-						// Ignore non-VOD sources, such as TRAILER, which is often the video about
-						// minimal age requirement or parental supervision.
-						if(!item.getString("type").equals("VOD")) {
-							continue;
-						}
-						
-						Playlist.Stream stream = parseStream(item);
-						
-						if(stream == null) {
-							continue;
-						}
-						
-						streams.add(stream);
+					if(stream == null) {
+						continue;
 					}
+					
+					streams.add(stream);
 				}
 				
-				return new Playlist(streams);
+				String programTitle = json.getString("showTitle");
+				String episodeTitle = json.getString("episodeTitle");
+				
+				if(programTitle != null && episodeTitle != null) {
+					String numEpisode = null;
+					Matcher matcher = REGEX_NUM_EPISODE.matcher(episodeTitle);
+					
+					// If there is an episode number in the suffix of the episode title,
+					// extract it and remove it from the episode title.
+					if(matcher.find()) {
+						numEpisode = matcher.group(1);
+						episodeTitle = episodeTitle.substring(0, matcher.start());
+					}
+					
+					title = MediaUtils.mediaTitle(programTitle, null, numEpisode, episodeTitle);
+				} else {
+					title = json.getString("title");
+				}
 			}
 			
-			public static final API instance() {
-				return instance.value();
+			return new Playlist(streams, title);
+		}
+		
+		public Playlist ofSource(SourceInfo source) throws Exception {
+			return parsePlaylist(source.playlistUri());
+		}
+		
+		private static abstract class SourceInfoBase implements SourceInfo {
+			
+			protected final String origin;
+			protected final String client;
+			
+			public SourceInfoBase(String origin, String client) {
+				this.origin = Objects.requireNonNull(origin);
+				this.client = Objects.requireNonNull(client);
+			}
+		}
+		
+		protected static final class ExternalSourceInfo extends SourceInfoBase {
+			
+			private final String idec;
+			private final String deviceId;
+			
+			public ExternalSourceInfo(String idec, String deviceId, String origin, String client) {
+				super(origin, client);
+				this.idec = Objects.requireNonNull(idec);
+				this.deviceId = Objects.requireNonNull(deviceId);
 			}
 			
 			@Override
-			public final Playlist ofExternal(SourceInfo source) throws Exception {
-				String body = Net.queryString(
-					"playlist[0][type]", source.type(),
-					"playlist[0][id]", source.idec(),
-					"requestUrl", REQUEST_URI,
-					"requestSource", REQUEST_SOURCE,
-					"type", "html",
-					"canPlayDRM", "false",
-					"streamingProtocol", STREAM_PROTOCOL
+			public URI playlistUri() {
+				String path = Utils.format(
+					PATH_EXTERNAL,
+					"idec", idec,
+					"deviceId", deviceId,
+					"origin", origin,
+					"client", client
 				);
 				
-				String uri;
-				try(Response.OfStream response = Web.requestStream(Request.of(ENDPOINT).POST(body))) {
-					// Some videos that are currently unavailable but will be available in the future
-					// return error code of 500. Display an error message rather than an exception.
-					if(response.statusCode() != 200) {
-						displayError("media_unavailable", "message", extractErrorMessage(source.sourceUri()));
-						return null; // Do not continue
-					}
-					
-					JSONCollection json = JSON.read(response.stream());
-					uri = json.getString("url");
-					
-					if(uri.startsWith("error")) {
-						displayError("media_unavailable", "message", extractErrorMessage(source.sourceUri()));
-						return null; // Do not continue
-					}
-				}
-				
-				return parsePlaylist(Net.uri(uri));
+				return Net.resolve(ENDPOINT, path);
 			}
 		}
 		
-		// The new API that uses the new playlist-vod endpoint (not always supported)
-		private static final class V1 implements API {
+		protected static final class InternalSourceInfo extends SourceInfoBase {
 			
-			private static final VarLoader<API> instance = VarLoader.of(V1::new);
+			private final String versionId;
+			private final String sessionId;
 			
-			private static final URI ENDPOINT;
-			private static final String PATH_EXTERNAL;
-			
-			static {
-				ENDPOINT = Net.uri("https://api.ceskatelevize.cz/video/v1/playlist-vod/v1/");
-				PATH_EXTERNAL = "stream-data/media/external/%{idec}s?canPlayDrm=true";
-			}
-			
-			private V1() {}
-			
-			private static final Playlist.Stream parseStream(JSONCollection collection, String idec) {
-				URI uri = Net.uri(collection.getString("url"));
-				
-				if(!collection.hasCollection("subtitles")) {
-					return new Playlist.Stream(uri, Map.of());
-				}
-				
-				Map<MediaLanguage, List<URI>> subtitles = new LinkedHashMap<>();
-				
-				for(JSONCollection item : collection.getCollection("subtitles").collectionsIterable()) {
-					MediaLanguage language = MediaLanguage.ofCode(item.getString("language"));
-					List<URI> uris = new ArrayList<>();
-					
-					for(JSONCollection file : item.getCollection("files").collectionsIterable()) {
-						uris.add(Net.uri(file.getString("url")));
-					}
-					
-					subtitles.put(language, uris);
-				}
-				
-				// Fix: Sometimes the obtained subtitles files may not actually exist,
-				//      therefore we must check the availability and if they do not exist,
-				//      use an alternative method.
-				for(Entry<MediaLanguage, List<URI>> entry : subtitles.entrySet()) {
-					// It is sufficient to check only one of the URIs, if either one of them
-					// does not exist all of them do not exist.
-					URI subtitleUri = entry.getValue().get(0);
-					
-					try(Response response = Web.peek(Request.of(subtitleUri).HEAD())) {
-						// Existing subtitles return status code of 200 and non-existent return 400,
-						// but check for 'OK' status rather than 'Not found' status.
-						if(response.statusCode() == 200) {
-							continue;
-						}
-						
-						// This simulates a call to the V0 fallback without actually using the V0 fallback.
-						// It should be fine to do so, since the only non-existent subtitles in the V1 API
-						// so far are the hidden subtitles and they are the only ones.
-						URI fallbackUri = Net.uri(Utils.format(
-							"https://imgct.ceskatelevize.cz/cache/data/ivysilani/subtitles/%{idec_prefix}s/%{idec}s/sub.vtt",
-							"idec", idec,
-							"idec_prefix", idec.substring(0, 3)
-						));
-						
-						// Just replace the old subtitles with the fallback ones. Do not check their
-						// existance to speed things up. If they do not exist, then the situation is
-						// actually the same as if we did not do this fallback procedure at all, so
-						// it should be fine.
-						entry.setValue(List.of(fallbackUri));
-					} catch(Exception ex) {
-						// Something went wrong, just ignore it since we cannot probably do anything with it
-					}
-				}
-				
-				return new Playlist.Stream(uri, subtitles);
-			}
-			
-			private static final Playlist parsePlaylist(URI uri, String idec) throws Exception {
-				List<Playlist.Stream> streams = new ArrayList<>();
-				
-				try(Response.OfStream response = Web.requestStream(Request.of(uri).GET())) {
-					JSONCollection json = JSON.read(response.stream());
-					
-					if(json.has("error") || json.has("message")) {
-						return null; // Do not throw exception
-					}
-					
-					for(JSONCollection item : json.getCollection("streams").collectionsIterable()) {
-						Playlist.Stream stream = parseStream(item, idec);
-						
-						if(stream == null) {
-							continue;
-						}
-						
-						streams.add(stream);
-					}
-				}
-				
-				return new Playlist(streams);
-			}
-			
-			public static final API instance() {
-				return instance.value();
+			private InternalSourceInfo(String versionId, String sessionId, String origin, String client) {
+				super(origin, client);
+				this.versionId = Objects.requireNonNull(versionId);
+				this.sessionId = Objects.requireNonNull(sessionId);
 			}
 			
 			@Override
-			public final Playlist ofExternal(SourceInfo source) throws Exception {
-				return parsePlaylist(Net.resolve(ENDPOINT, Utils.format(PATH_EXTERNAL, "idec", source.idec())), source.idec());
+			public URI playlistUri() {
+				String path = Utils.format(
+					PATH_INTERNAL,
+					"versionId", versionId,
+					"sessionId", sessionId,
+					"origin", origin,
+					"client", client
+				);
+				
+				return Net.resolve(ENDPOINT, path);
 			}
 		}
 		
-		protected static interface API {
+		protected static final class BonusSourceInfo extends SourceInfoBase {
 			
-			Playlist ofExternal(SourceInfo source) throws Exception;
+			private final String value;
+			private final String deviceId;
+			
+			public BonusSourceInfo(String value, String deviceId, String origin, String client) {
+				super(origin, client);
+				this.value = Objects.requireNonNull(value);
+				this.deviceId = Objects.requireNonNull(deviceId);
+			}
+			
+			@Override
+			public URI playlistUri() {
+				String path = Utils.format(
+					PATH_BONUS,
+					"value", value,
+					"deviceId", deviceId,
+					"origin", origin,
+					"client", client
+				);
+				
+				return Net.resolve(ENDPOINT, path);
+			}
 		}
 		
 		protected static final class Playlist {
 			
 			private final List<Stream> streams;
+			private final String title;
 			
-			private Playlist(List<Stream> streams) {
+			private Playlist(List<Stream> streams, String title) {
 				this.streams = Objects.requireNonNull(streams);
+				this.title = title; // Optional title
 			}
 			
 			public List<Stream> streams() { return streams; }
+			public String title() { return title; }
 			
 			public static final class Stream {
 				
@@ -1063,84 +970,22 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		}
 	}
 	
-	private static final class IFrameHelper {
-		
-		private static final String URL_IFRAME;
-		
-		static {
-			URL_IFRAME = "https://player.ceskatelevize.cz/?origin=%{origin}s&IDEC=%{idec}s";
-		}
-		
-		public static final String getURL(String origin, String idec) throws Exception {
-			return Utils.format(URL_IFRAME, "origin", origin, "idec", idec);
-		}
-		
-		// Forbid anyone to create an instance of this class
-		private IFrameHelper() {
-		}
-	}
-	
-	private static final class LinkingData {
-		
-		private static LinkingData EMPTY;
-		
-		private final Document document;
-		private final JSONCollection data;
-		private final String type;
-		
-		private LinkingData() {
-			this.document = null;
-			this.data = null;
-			this.type = "none";
-		}
-		
-		private LinkingData(Document document, JSONCollection data) {
-			this.document = Objects.requireNonNull(document);
-			this.data = Objects.requireNonNull(data);
-			this.type = data.getString("@type");
-		}
-		
-		public static final LinkingData empty() {
-			return EMPTY == null ? (EMPTY = new LinkingData()) : EMPTY;
-		}
-		
-		public static final List<LinkingData> from(Document document) {
-			return document.select("script[type='application/ld+json']")
-						.stream()
-						.map((s) -> new LinkingData(document, JSON.read(s.html())))
-						.collect(Collectors.toList());
-		}
-		
-		public final boolean isEmpty() {
-			return data == null;
-		}
-		
-		public final Document document() {
-			return document;
-		}
-		
-		public final JSONCollection data() {
-			return data;
-		}
-		
-		public final String type() {
-			return type;
-		}
-	}
-	
-	private static final class LinkingDataTitle {
+	private static final class MediaTitle {
 		
 		private static final Regex REGEX_SEASON = Regex.of("^(\\d+|[IVXLCDM]+)(\\.\\s+.*)?$");
 		private static final Regex REGEX_EPISODE = Regex.of("^(?:Epizoda\\s+)?([\\d\\s\\+]+)/\\d+(?:\\s+(.*))?$");
 		
-		public static final String ofTVEpisode(LinkingData ld, String defaultValue) throws Exception {
-			if(ld.isEmpty()) return defaultValue;
+		private MediaTitle() {}
+		
+		private static final String ofMedia(NextJS nextJS, String defaultValue) throws Exception {
+			JSONCollection meta = nextJS.collectionOf("MediumMeta");
 			
-			Document document = ld.document();
-			JSONCollection data = ld.data();
+			if(meta == null) {
+				return defaultValue;
+			}
 			
-			String programName = data.getString("partOfTVSeries.name", "");
-			String episodeName = data.getString("name", "");
+			String programName = meta.getString("show.title", "");
+			String episodeName = meta.getString("title", "");
 			String numSeason = "";
 			String numEpisode = "";
 			
@@ -1155,46 +1000,41 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 				episodeName = matcherEpisode.group(2);
 			}
 			
-			Element elData = document.selectFirst("script#__NEXT_DATA__");
-			if(elData != null) {
-				JSONCollection mediaData = JavaScript.readObject(elData.html());
-				JSONCollection meta = mediaData.getCollection("props.pageProps.data.mediaMeta");
-				JSONCollection seasons = meta.getCollection("show.seasons", null);
+			JSONCollection seasons = meta.getCollection("show.seasons", null);
+			
+			// Try to obtain the season number
+			if(seasons != null) {
+				String activeSeasonId = meta.getString("activeSeasonId", null);
 				
-				// Try to obtain the season number
-				if(seasons != null) {
-					String activeSeasonId = meta.getString("activeSeasonId", null);
+				if(activeSeasonId == null || activeSeasonId.equals("null")) {
+					// Some episodes can be visible only on the All episodes page. No season
+					// can therefore be found so just use some invalid value.
+					numSeason = "";
+				} else {
+					String textSeason = Utils.stream(seasons.collectionsIterable())
+							.filter((c) -> c.getString("id", "").equals(activeSeasonId))
+							.map((c) -> c.getString("title", ""))
+							.findFirst().orElse(null);
 					
-					if(activeSeasonId == null || activeSeasonId.equals("null")) {
-						// Some episodes can be visible only on the All episodes page. No season
-						// can therefore be found so just use some invalid value.
-						numSeason = "";
-					} else {
-						String textSeason = Utils.stream(seasons.collectionsIterable())
-								.filter((c) -> c.getString("id", "").equals(activeSeasonId))
-								.map((c) -> c.getString("title", ""))
-								.findFirst().orElse(null);
+					if(textSeason != null) {
+						Matcher matcherSeason = REGEX_SEASON.matcher(textSeason);
 						
-						if(textSeason != null) {
-							Matcher matcherSeason = REGEX_SEASON.matcher(textSeason);
-							
-							if(matcherSeason.matches()) {
-								int num; String numString = matcherSeason.group(1);
-								if(numString.matches("\\d+")) num = Integer.valueOf(numString);
-								else num = Utils.romanToInteger(numString);
-								numSeason = String.format("%02d", num);
-							}
+						if(matcherSeason.matches()) {
+							int num; String numString = matcherSeason.group(1);
+							if(numString.matches("\\d+")) num = Integer.valueOf(numString);
+							else num = Utils.romanToInteger(numString);
+							numSeason = String.format("%02d", num);
 						}
 					}
-					
-					// Try to obtain the episode number within the season, if the first attempt failed
-					if(numEpisode.isBlank()) {
-						String seasonId = "null".equals(activeSeasonId) ? null : activeSeasonId;
-						String episodeId = mediaData.getString("props.pageProps.data.mediaMeta.id");
-						String showIDEC = mediaData.getString("props.pageProps.data.mediaMeta.show.idec");
-						int num = Episodes.indexOf(episodeId, showIDEC, seasonId);
-						if(num != -1) numEpisode = String.format("%02d", num + 1);
-					}
+				}
+				
+				// Try to obtain the episode number within the season, if the first attempt failed
+				if(numEpisode.isBlank()) {
+					String seasonId = "null".equals(activeSeasonId) ? null : activeSeasonId;
+					String episodeId = meta.getString("id");
+					String showIDEC = meta.getString("show.idec");
+					int num = Episodes.indexOf(episodeId, showIDEC, seasonId);
+					if(num != -1) numEpisode = String.format("%02d", num + 1);
 				}
 			}
 			
@@ -1208,15 +1048,13 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			
 			return MediaUtils.mediaTitle(programName, numSeason, numEpisode, episodeName, false);
 		}
-		
-		public static final String ofArticle(LinkingData ld, String defaultValue) throws Exception {
-			return !ld.isEmpty() ? ld.data().getString("headline", defaultValue) : defaultValue;
-		}
 	}
 	
 	private static final class Episodes {
 		
 		private static Map<String, List<String>> cache;
+		
+		private Episodes() {}
 		
 		private static final String programSeasonKey(String programIDEC, String seasonId) {
 			return programIDEC + ':' + seasonId;
@@ -1270,134 +1108,218 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		}
 	}
 	
+	private static final class NextJS {
+		
+		private static final int FLAG_ESCAPED = 1 << 0;
+		private static final int FLAG_QUOTED_SINGLE = 1 << 1;
+		private static final int FLAG_QUOTED_DOUBLE = 1 << 2;
+		private static final int FLAG_QUOTED = FLAG_QUOTED_SINGLE | FLAG_QUOTED_DOUBLE;
+		private static final Regex REGEX_OBJECT_NAME = Regex.of("(?:\"([^\"]+)\":[{\\[]|\\[\\{|,[{\\[])$");
+		
+		private final String json;
+		
+		private NextJS(String json) {
+			this.json = Objects.requireNonNull(json);
+		}
+		
+		// Assuming the start position is not inside a quoted string.
+		private static final int startOfCollection(String string, int start) {
+			for(int i = start, countObject = 0, countArray = 0, flags = 0, c; i >= 0; --i) {
+				switch(c = string.charAt(i)) {
+					case '\"':
+					case '\'': {
+						int run = 0;
+						for(; i - 1 >= 0 && string.charAt(i - 1) == '\\'; ++run, --i);
+						if((run & 1) == 1) continue; // Odd number of backslashes, thus escaped.
+						
+						switch(c) {
+							case '\"': if((flags & FLAG_QUOTED_SINGLE) == 0) flags ^= FLAG_QUOTED_DOUBLE; break;
+							case '\'': if((flags & FLAG_QUOTED_DOUBLE) == 0) flags ^= FLAG_QUOTED_SINGLE; break;
+						}
+						
+						break;
+					}
+					case '}': if((flags & FLAG_QUOTED) == 0) ++countObject; break;
+					case ']': if((flags & FLAG_QUOTED) == 0) ++countArray;  break;
+					case '{': if((flags & FLAG_QUOTED) == 0 && countObject-- == 0 && countArray  == 0) return i; break;
+					case '[': if((flags & FLAG_QUOTED) == 0 && countArray--  == 0 && countObject == 0) return i; break;
+				}
+			}
+			
+			return -1;
+		}
+		
+		// Assuming the start position is at an object boundary, i.e. the output of startOfObject.
+		private static final int endOfCollection(String string, int start) {
+			for(int i = start, countObject = 0, countArray = 0, flags = 0, l = string.length(); i < l; ++i) {
+				if((flags & FLAG_ESCAPED) != 0) {
+					flags ^= FLAG_ESCAPED;
+					continue; // Escaped, skip the character.
+				}
+				
+				switch(string.charAt(i)) {
+					case '\\': flags ^= FLAG_ESCAPED; continue;
+					case '\"': if((flags & FLAG_QUOTED_SINGLE) == 0) flags ^= FLAG_QUOTED_DOUBLE; break;
+					case '\'': if((flags & FLAG_QUOTED_DOUBLE) == 0) flags ^= FLAG_QUOTED_SINGLE; break;
+					case '{':  if((flags & FLAG_QUOTED) == 0) ++countObject; break;
+					case '[':  if((flags & FLAG_QUOTED) == 0) ++countArray;  break;
+					case '}':  if((flags & FLAG_QUOTED) == 0 && --countObject == 0 && countArray  == 0) return i; break;
+					case ']':  if((flags & FLAG_QUOTED) == 0 && --countArray  == 0 && countObject == 0) return i; break;
+				}
+			}
+			
+			return -1;
+		}
+		
+		// Assuming the start and end positions being inside the same array.
+		private static final int countItems(String string, int start, int end) {
+			int count = 0;
+			
+			for(int i = start, countObject = 0, countArray = 0, flags = 0; i < end; ++i) {
+				if((flags & FLAG_ESCAPED) != 0) {
+					flags ^= FLAG_ESCAPED;
+					continue; // Escaped, skip the character.
+				}
+				
+				switch(string.charAt(i)) {
+					case '\\': flags ^= FLAG_ESCAPED; continue;
+					case '\"': if((flags & FLAG_QUOTED_SINGLE) == 0) flags ^= FLAG_QUOTED_DOUBLE; break;
+					case '\'': if((flags & FLAG_QUOTED_DOUBLE) == 0) flags ^= FLAG_QUOTED_SINGLE; break;
+					case '{':  if((flags & FLAG_QUOTED) == 0) ++countObject; break;
+					case '}':  if((flags & FLAG_QUOTED) == 0) --countObject; break;
+					case '[':  if((flags & FLAG_QUOTED) == 0) ++countArray;  break;
+					case ']':  if((flags & FLAG_QUOTED) == 0) --countArray; break;
+					case ',':  if((flags & FLAG_QUOTED) == 0 && countObject == 0 && countArray == 0) ++count; break;
+				}
+			}
+			
+			return count;
+		}
+		
+		// Assuming the start position is inside the object we're trying to find.
+		private static final NamedObject outerNamedObject(String string, int start) {
+			int end;
+			if((start = startOfCollection(string, start)) < 0) return null;
+			if((end   =   endOfCollection(string, start)) < 0) return null;
+			
+			String content = string.substring(start, end + 1);
+			List<String> names = new ArrayList<>();
+			Matcher matcher = REGEX_OBJECT_NAME.matcher(string);
+			
+			// We need to extract the object's name. We do this by iteratively finding
+			// the parent's object's name. Each found segment is in region defined as
+			// <parent_start, object_start> and is of pattern `REGEX_OBJECT_NAME`.
+			// We extract the name by using a RegExp fixed from the end, thus the `$`.
+			// For an object inside an array its captured name would be null, in that
+			// case we count objects before it, which results in its index within that
+			// array. All of this will yield the name chain in reversed order.
+			while(
+				matcher
+					.region(start = startOfCollection(string, (end = start) - 1), end + 1)
+					.find()
+				&& names.add(
+					matcher.group(1) == null
+						? String.valueOf(countItems(string, start + 1, end))
+						: matcher.group(1)
+				)
+				&& start > 0
+			);
+			
+			Collections.reverse(names);
+			String name = String.join(".", names);
+			
+			return new NamedObject(name, JSON.read(content));
+		}
+		
+		public static final NextJS extract(Document document) {
+			Element script = document.selectFirst("script[type='application/json']#__NEXT_DATA__");
+			
+			if(script == null) {
+				throw new IllegalStateException("Document doesn't contain Next data");
+			}
+			
+			return new NextJS(script.html());
+		}
+		
+		public final Stream<NamedObject> objectsOf(String typename) {
+			Regex regex = Regex.of(String.format(
+				"(?uis)\"__typename\"\\s*:\\s*\"%1$s\"",
+				Regex.quote(typename)
+			));
+			
+			return (
+				regex.matcher(json).results()
+					.map((mr) -> outerNamedObject(json, mr.start() - 1))
+					.filter(Objects::nonNull)
+			);
+		}
+		
+		public final JSONCollection collectionOf(String typename) {
+			return objectsOf(typename).findFirst().map(NamedObject::object).orElse(null);
+		}
+		
+		public static final class NamedObject {
+			
+			private final String name;
+			private final JSONCollection object;
+			
+			public NamedObject(String name, JSONCollection object) {
+				this.name = Objects.requireNonNull(name);
+				this.object = Objects.requireNonNull(object);
+			}
+			
+			public String name() { return name; }
+			public JSONCollection object() { return object; }
+		}
+	}
+	
 	private static interface CT {
 		
 		void extractJobs(URI sourceUri, Document document, List<ExtractJob> jobs) throws Exception;
 		boolean isCompatible(URI uri);
 	}
 	
-	// Context-dependant Singleton instantiator
-	private static final class _Singleton {
-		
-		private static final Map<Class<?>, _Singleton> instances = new HashMap<>();
-		
-		private final Class<?> clazz;
-		private Object instance;
-		
-		private _Singleton(Class<?> clazz) {
-			this.clazz = clazz;
-		}
-		
-		public static final <T> T getInstance() {
-			Class<?> clazz = StackWalker.getInstance(Option.RETAIN_CLASS_REFERENCE).walk((stream) -> {
-				return stream.filter((p) -> p.getDeclaringClass() != _Singleton.class)
-						 .map(StackFrame::getDeclaringClass)
-						 .findFirst().get();
-			});
-			
-			return instances.computeIfAbsent(clazz, _Singleton::new).instance();
-		}
-		
-		private final <T> T newInstance() {
-			try {
-				@SuppressWarnings("unchecked")
-				Constructor<T> ctor = (Constructor<T>) clazz.getDeclaredConstructor();
-				Reflection.setAccessible(ctor, true);
-				T instance = ctor.newInstance();
-				Reflection.setAccessible(ctor, false);
-				return instance;
-			} catch(Exception ex) {
-				// Assume, the class is instantiable
-			}
-			
-			// This should not happen
-			return null;
-		}
-		
-		protected final <T> T instance() {
-			@SuppressWarnings("unchecked")
-			T obj = (T) (instance == null ? (instance = newInstance()) : instance);
-			return obj;
-		}
-	}
-	
-	private static final class CT_iVysilani implements CT {
+	private static enum CT_iVysilani implements CT {
+		INSTANCE;
 		
 		private static final String SUBDOMAIN = "www";
-		private static final String PATH_PREFIX = "/ivysilani/";
 		
-		private CT_iVysilani() {}
-		public static final CT_iVysilani getInstance() { return _Singleton.getInstance(); }
+		private static final String API_ORIGIN = "ivysilani";
+		private static final String API_CLIENT = "iVysilaniWeb";
 		
 		@Override
 		public final void extractJobs(URI sourceUri, Document document, List<ExtractJob> jobs) throws Exception {
-			WebMediaMetadata metadata = WebMediaMetadataExtractor.extract(document, false);
+			NextJS nextJS = NextJS.extract(document);
+			Stream<JSONCollection> objects = nextJS.objectsOf("MediumMeta")
+				.filter((v) -> "props.pageProps.data.mediaMeta".equals(v.name()))
+				.map(NextJS.NamedObject::object);
+			String deviceId = randomUUID();
+			String title = MediaTitle.ofMedia(nextJS, "Unknown");
 			
-			if(metadata == null) {
-				return; // Unable to obtain the ID
+			for(JSONCollection object : Utils.iterable(objects.iterator())) {
+				String idec = object.getString("idec");
+				VOD.ExternalSourceInfo source = new VOD.ExternalSourceInfo(idec, deviceId, API_ORIGIN, API_CLIENT);
+				jobs.add(new SourceInfoExtractJob(sourceUri, source, title));
 			}
-			
-			SourceInfo source = SourceInfo.ofEpisode(sourceUri, metadata.idec());
-			
-			// Try to obtain the media title from its linking data and document
-			LinkingData ld = LinkingData.from(document).stream()
-					.filter((d) -> d.type().equals("TVEpisode"))
-					.findFirst().orElseGet(LinkingData::empty);
-			String title = LinkingDataTitle.ofTVEpisode(ld, document.title());
-			
-			URI uri = Net.uri(document.baseUri());
-			jobs.add(new ExtractJob(uri, ExtractMethod.SOURCE_INFO, source, title));
 		}
 		
 		@Override
 		public final boolean isCompatible(URI uri) {
-			return checkURLSubdomain(uri, SUBDOMAIN) && uri.getPath().startsWith(PATH_PREFIX);
+			return checkURLSubdomain(uri, SUBDOMAIN);
 		}
 	}
 	
-	private static final class CT_Porady implements CT {
-		
-		private static final String SUBDOMAIN = "www";
-		private static final String PATH_PREFIX = "/porady/";
-		private static final String ORIGIN = "iVysilani";
-		
-		private CT_Porady() {}
-		public static final CT_Porady getInstance() { return _Singleton.getInstance(); }
-		
-		@Override
-		public final void extractJobs(URI sourceUri, Document document, List<ExtractJob> jobs) throws Exception {
-			WebMediaMetadata metadata = WebMediaMetadataExtractor.extract(document, false);
-			
-			if(metadata == null) {
-				return; // Unable to obtain the ID
-			}
-			
-			SourceInfo source = SourceInfo.ofEpisode(sourceUri, metadata.idec());
-			
-			// Try to obtain the media title from its linking data and document
-			LinkingData ld = LinkingData.from(document).stream()
-				.filter((d) -> d.type().equals("TVEpisode"))
-				.findFirst().orElseGet(LinkingData::empty);
-			String title = LinkingDataTitle.ofTVEpisode(ld, document.title());
-			
-			URI uri = Net.uri(IFrameHelper.getURL(ORIGIN, source.idec()));
-			jobs.add(new ExtractJob(uri, ExtractMethod.SOURCE_INFO, source, title));
-		}
-		
-		@Override
-		public final boolean isCompatible(URI uri) {
-			return checkURLSubdomain(uri, SUBDOMAIN) && uri.getPath().startsWith(PATH_PREFIX);
-		}
-	}
-	
-	private static final class CT_Decko implements CT {
+	private static enum CT_Decko implements CT {
+		INSTANCE;
 		
 		private static final String SUBDOMAIN = "decko";
+		
 		private static final String FORMAT_SHOW_URL = "https://www.ceskatelevize.cz/porady/%{show_id}s-%{show_code}s/";
+		private static final Regex REGEX_VIDEO = Regex.of("^https?://decko.ceskatelevize.cz/video/([^/]+)/?$");
 		private static final Regex REGEX_SHOW_CODE = Regex.of("^https?://decko.ceskatelevize.cz/([^/]+)/?$");
 		
-		private CT_Decko() {}
-		public static final CT_Decko getInstance() { return _Singleton.getInstance(); }
+		private static final String API_ORIGIN = "decko";
+		private static final String API_CLIENT = "DeckoWeb";
 		
 		@Override
 		public final void extractJobs(URI sourceUri, Document document, List<ExtractJob> jobs) throws Exception {
@@ -1420,13 +1342,27 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 				return; // Invalid URL
 			}
 			
-			Matcher matcherURL = REGEX_SHOW_CODE.matcher(url);
+			Matcher matcherUrl;
 			
-			if(!matcherURL.matches()) {
+			// Support direct video links as well
+			if((matcherUrl = REGEX_VIDEO.matcher(url)).matches()) {
+				String deviceId = randomUUID();
+				
+				// Use the video player query attribute rather than the URL's, just to be safe
+				for(Element elPlayer : document.select(".media-player-plain__video")) {
+					String query = elPlayer.attr("data-player-query").replace(" ", "").replace("/", "");
+					QueryArgument args = Net.queryDestruct(query);
+					String idec = args.valueOf("IDEC");
+					VOD.ExternalSourceInfo source = new VOD.ExternalSourceInfo(idec, deviceId, API_ORIGIN, API_CLIENT);
+					jobs.add(new SourceInfoExtractJob(sourceUri, source, null));
+				}
+			}
+			
+			if(!(matcherUrl = REGEX_SHOW_CODE.matcher(url)).matches()) {
 				return; // Cannot obtain the show code
 			}
 			
-			String showCode = matcherURL.group(1);
+			String showCode = matcherUrl.group(1);
 			String showId = API.getShowId(showCode);
 			String showURL = Utils.format(FORMAT_SHOW_URL, "show_id", showId, "show_code", showCode);
 			Program program = new Program(Net.uri(showURL), showCode);
@@ -1438,9 +1374,9 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			
 			task.startAndWait();
 			
-			CT_Porady ctInstance = CT_Porady.getInstance();
+			CT_iVysilani ctInstance = CT_iVysilani.INSTANCE;
 			for(Episode episode : task.list()) {
-				ctInstance.extractJobs(null, HTML.from(episode.uri()), jobs);
+				ctInstance.extractJobs(sourceUri, HTML.from(episode.uri()), jobs);
 			}
 		}
 		
@@ -1450,51 +1386,27 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		}
 	}
 	
-	private static final class CT_24 implements CT {
+	private static enum CT_24 implements CT {
+		INSTANCE;
 		
 		private static final String SUBDOMAIN = "ct24";
-		private static final String SELECTOR_VIDEO = ".video-player > .media-ivysilani-placeholder";
-		private static final String URL_PLAYER_IFRAME;
-		private static final Regex REGEX_PLAYER_HASH;
 		
-		static {
-			URL_PLAYER_IFRAME = "%{url}s&hash=%{hash}s";
-			REGEX_PLAYER_HASH = Regex.of("media_ivysilani:\\{hash:\"(.*?)\"\\}");
-		}
-		
-		private CT_24() {}
-		public static final CT_24 getInstance() { return _Singleton.getInstance(); }
+		private static final String API_ORIGIN = "ct24";
+		private static final String API_CLIENT = "CT24Web";
 		
 		@Override
 		public final void extractJobs(URI sourceUri, Document document, List<ExtractJob> jobs) throws Exception {
-			String playerHash = null;
+			NextJS nextJS = NextJS.extract(document);
+			Stream<JSONCollection> objects = nextJS.objectsOf("Video_Out")
+				.filter((v) -> "props.pageProps.videoModel".equals(v.name()))
+				.map(NextJS.NamedObject::object);
+			String sessionId = randomUUID();
 			
-			for(Element elScript : document.select("script")) {
-				Matcher matcher = REGEX_PLAYER_HASH.matcher(elScript.html());
-				
-				if(matcher.find()) {
-					playerHash = matcher.group(1);
-					break;
-				}
-			}
-			
-			if(playerHash != null) {
-				// The data-idec attribute contains spaces and slashes, we must remove them manually
-				Regex regexSanitizeIdec = Regex.of("[\\s/]+");
-				
-				// Try to obtain the media title from its linking data and document
-				LinkingData ld = LinkingData.from(document).stream()
-						.filter((d) -> d.type().equals("Article"))
-						.findFirst().orElseGet(LinkingData::empty);
-				String title = LinkingDataTitle.ofArticle(ld, document.title());
-				
-				// Add all the videos on the page
-				for(Element elVideo : document.select(SELECTOR_VIDEO)) {
-					String idec = regexSanitizeIdec.replaceAll(elVideo.attr("data-idec"), "");
-					SourceInfo source = SourceInfo.ofEpisode(sourceUri, idec);
-					URI uri = Net.uri(Utils.format(URL_PLAYER_IFRAME, "url", elVideo.attr("data-url"), "hash", playerHash));
-					jobs.add(new ExtractJob(uri, ExtractMethod.SOURCE_INFO, source, title));
-				}
+			for(JSONCollection object : Utils.iterable(objects.iterator())) {
+				String versionId = object.getString("origin.versionId");
+				String title = object.getString("title");
+				VOD.InternalSourceInfo source = new VOD.InternalSourceInfo(versionId, sessionId, API_ORIGIN, API_CLIENT);
+				jobs.add(new SourceInfoExtractJob(sourceUri, source, title));
 			}
 		}
 		
@@ -1504,93 +1416,25 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		}
 	}
 	
-	private static final class CT_Sport implements CT {
+	private static enum CT_Sport implements CT {
+		INSTANCE;
 		
 		private static final String SUBDOMAIN = "sport";
-		private static final String API_URL = "https://playlist.ceskatelevize.cz/";
-		private static final String SELECTOR_VIDEO = ""
-				+ "#article [data-ctcomp-data][data-ctcomp='Video'],"
-				+ "#article [data-ctcomp-data][data-ctcomp='VideoGallery']";
 		
-		private CT_Sport() {}
-		public static final CT_Sport getInstance() { return _Singleton.getInstance(); }
+		private static final String API_ORIGIN = "sport";
+		private static final String API_CLIENT = "SportWeb";
 		
 		@Override
 		public final void extractJobs(URI sourceUri, Document document, List<ExtractJob> jobs) throws Exception {
-			Set<String> allowedNames = Set.of("id", "key", "date", "requestSource", "quality", "region", "title");
-			List<JSONCollection> items = new ArrayList<>();
-			Set<String> ids = new HashSet<>();
+			NextJS nextJS = NextJS.extract(document);
+			Stream<JSONCollection> objects = nextJS.objectsOf("Video_Out").map(NextJS.NamedObject::object);
+			String sessionId = randomUUID();
 			
-			// Sometimes the data-ctcomp-data attribute has incorrectly escaped HTML entities,
-			// therefore we must fix it manually. Currently, the only issue are quotes.
-			Regex regexFixAttr = Regex.of("&u?o?t?;");
-			
-			for(Element elVideo : document.select(SELECTOR_VIDEO)) {
-				JSONCollection data = JSON.read(regexFixAttr.replaceAll(elVideo.attr("data-ctcomp-data"), "\""));
-				
-				List<JSONCollection> children = new ArrayList<>();
-				if(data.hasCollection("items")) { // VideoGallery
-					for(JSONCollection item : data.getCollection("items").collectionsIterable()) {
-						children.add(item.getCollection("video.data"));
-					}
-				} else { // Video
-					children.add(data);
-				}
-				
-				for(JSONCollection child : children) {
-					JSONCollection playlist = child.getCollection("source.playlist");
-					
-					// Collect individual playlist item's information
-					for(JSONCollection item : playlist.collectionsIterable()) {
-						String id = item.getString("id", "");
-						
-						if(ids.contains(id)) {
-							continue;
-						}
-						
-						ids.add(id);
-						
-						JSONCollection newItem = JSONCollection.empty();
-						String type = item.getString("type", "vod").toLowerCase();
-						newItem.set("type", type);
-						newItem.set("playerType", "dash");
-						newItem.set("drm", 0);
-						newItem.set("canBePlay", 1);
-						StreamSupport.stream(item.objectsIterable().spliterator(), false)
-									 .filter((o) -> allowedNames.contains(o.name()))
-									 .forEach((o) -> newItem.set(o.name(), o));
-						
-						items.add(newItem);
-					}
-				}
-			}
-			
-			URI apiUri = Net.uri(API_URL);
-			for(JSONCollection item : items) {
-				// Construct the HTTP POST body as a JSON object
-				JSONCollection coll = JSONCollection.empty();
-				JSONCollection array = JSONCollection.emptyArray();
-				String contentType = item.getString("type");
-				String title = item.getString("title");
-				item.remove("type");
-				item.remove("title");
-				array.add(item);
-				coll.set("contentType", contentType);
-				coll.set("items", array);
-				
-				String body = Net.queryString("data", coll.toString(true));
-				Request request = Request.of(apiUri).POST(body);
-				
-				// Do the request to obtain the stream URLs
-				try(Response.OfStream response = Web.requestStream(request)) {
-					JSONCollection result = JSON.read(response.stream());
-					
-					for(JSONCollection playlistItem : result.getCollection("RESULT.playlist").collectionsIterable()) {
-						SourceInfo source = SourceInfo.ofEpisode(sourceUri, playlistItem.getString("id"));
-						URI uri = Net.uri(playlistItem.getString("streamUrls.main"));
-						jobs.add(new ExtractJob(uri, ExtractMethod.NONE, source, title));
-					}
-				}
+			for(JSONCollection object : Utils.iterable(objects.iterator())) {
+				String versionId = object.getString("origin.versionId");
+				String title = object.getString("title");
+				VOD.InternalSourceInfo source = new VOD.InternalSourceInfo(versionId, sessionId, API_ORIGIN, API_CLIENT);
+				jobs.add(new SourceInfoExtractJob(sourceUri, source, title));
 			}
 		}
 		
@@ -1600,36 +1444,39 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		}
 	}
 	
-	private static final class CT_Art implements CT {
+	private static enum CT_Art implements CT {
+		INSTANCE;
 		
 		private static final String SUBDOMAIN = "art";
 		private static final String SELECTOR_VIDEO = ".popup-video";
 		
-		private CT_Art() {}
-		public static final CT_Art getInstance() { return _Singleton.getInstance(); }
+		private static final String API_ORIGIN = "artzona";
+		private static final String API_CLIENT = "ArtWeb";
+		
+		private static final String fixPlayerUri(String uri) {
+			String[] parts = Utils.OfString.split(uri, "?", 2);
+			if(parts.length != 2) return uri;
+			return parts[0] + '?' + parts[1].replace(" ", "%20").replace("/", "%2F");
+		}
 		
 		@Override
 		public final void extractJobs(URI sourceUri, Document document, List<ExtractJob> jobs) throws Exception {
-			// Try to obtain the document's title from meta tags first, then from the title tag
-			String title = Opt.of(document.selectFirst("meta[property='og:title']"))
-				.ifTrue(Objects::nonNull)
-				.map((e) -> e.attr("content"))
-				.ifTrue((t) -> t != null && !t.isBlank())
-				.orElseGet(document::title);
+			String deviceId = randomUUID();
 			
 			// Extract all the videos on the page
 			for(Element elVideo : document.select(SELECTOR_VIDEO)) {
-				URI uri = Net.uri(Net.uriFix(elVideo.attr("href")));
-				
+				URI uri = Net.uri(Net.uriFix(fixPlayerUri(elVideo.absUrl("href"))));
 				QueryArgument query = Net.queryDestruct(uri);
-				QueryArgument bonus = query.argumentOf("bonus");
 				
-				if(bonus == null) {
-					continue; // Unsupported
+				QueryArgument arg;
+				if((arg = query.argumentOf("bonus")) != null) {
+					VOD.BonusSourceInfo source = new VOD.BonusSourceInfo(arg.value(), deviceId, API_ORIGIN, API_CLIENT);
+					jobs.add(new SourceInfoExtractJob(sourceUri, source, null));
+				} else if((arg = query.argumentOf("IDEC")) != null) {
+					String idec = arg.value().replace(" ", "").replace("/", "");
+					VOD.ExternalSourceInfo source = new VOD.ExternalSourceInfo(idec, deviceId, API_ORIGIN, API_CLIENT);
+					jobs.add(new SourceInfoExtractJob(sourceUri, source, null));
 				}
-				
-				SourceInfo source = SourceInfo.ofBonus(sourceUri, bonus.value());
-				jobs.add(new ExtractJob(uri, ExtractMethod.SOURCE_INFO, source, title));
 			}
 		}
 		
@@ -1639,39 +1486,23 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		}
 	}
 	
-	private static final class CT_Edu implements CT {
+	private static enum CT_Edu implements CT {
+		INSTANCE;
 		
 		private static final String SUBDOMAIN = "edu";
-		private static final String SELECTOR_VIDEO = ".video-player";
-		private static final String URL = "https://edu.ceskatelevize.cz";
+		private static final String SELECTOR_PLAYER = ".video-player";
 		
-		private CT_Edu() {}
-		public static final CT_Edu getInstance() { return _Singleton.getInstance(); }
+		private static final String API_ORIGIN = "edu";
+		private static final String API_CLIENT = "EduWeb";
 		
 		@Override
 		public final void extractJobs(URI sourceUri, Document document, List<ExtractJob> jobs) throws Exception {
-			// Try to obtain the document's title from linking data first, then from the title tag
-			String title = Opt.of(LinkingData.from(document).stream()
-			                        .filter((l) -> l.type().equals("VideoObject"))
-			                        .findFirst().orElse(null))
-			                  .ifTrue(Objects::nonNull)
-			                  .map((l) -> l.data().getString("name"))
-			                  .orElseGet(document::title);
+			String deviceId = randomUUID();
 			
-			// Extract all the videos on the page
-			for(Element elVideo : document.select(SELECTOR_VIDEO)) {
-				Map<String, String> data = elVideo.attributes().dataset();
-				String endpoint = data.remove("endpoint");
-				String urlData = data.entrySet().stream()
-					.filter((e) -> !e.getValue().isEmpty())
-					.map((e) -> JavaScript.encodeURIComponent(e.getKey().equals("idec")
-					                                              ? e.getKey().toUpperCase()
-					                                              : e.getKey().toLowerCase()) + '='
-					          + JavaScript.encodeURIComponent(e.getValue()))
-					.reduce("", (a, b) -> a + '&' + b);
-				SourceInfo source = SourceInfo.ofEpisode(sourceUri, elVideo.attr("data-idec"));
-				URI uri = Net.uri(URL + endpoint + '?' + urlData.substring(1));
-				jobs.add(new ExtractJob(uri, ExtractMethod.SOURCE_INFO, source, title));
+			for(Element elPlayer : document.select(SELECTOR_PLAYER)) {
+				String idec = elPlayer.attr("data-idec");
+				VOD.ExternalSourceInfo source = new VOD.ExternalSourceInfo(idec, deviceId, API_ORIGIN, API_CLIENT);
+				jobs.add(new SourceInfoExtractJob(sourceUri, source, null));
 			}
 		}
 		
