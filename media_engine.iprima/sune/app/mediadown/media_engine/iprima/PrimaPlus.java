@@ -237,7 +237,7 @@ final class PrimaPlus implements IPrima {
 			JSONObject objSeason = nuxtData.getObject("additionals.seasonNumber");
 			JSONObject objEpisode = nuxtData.getObject("additionals.episodeNumber");
 			if(objSeason != null) numSeason = objSeason.stringValue();
-			if(objEpisode != null) numEpisode = objSeason.stringValue();
+			if(objEpisode != null) numEpisode = objEpisode.stringValue();
 			
 			if(programName.isEmpty()) {
 				programName = episodeName;
