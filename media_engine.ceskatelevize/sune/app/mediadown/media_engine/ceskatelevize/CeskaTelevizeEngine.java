@@ -977,17 +977,17 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		
 		private MediaTitle() {}
 		
-		private static final String ofMedia(NextJS nextJS, String defaultValue) throws Exception {
-			JSONCollection meta = nextJS.collectionOf("MediumMeta");
-			
-			if(meta == null) {
-				return defaultValue;
-			}
-			
-			String programName = meta.getString("show.title", "");
-			String episodeName = meta.getString("title", "");
+		private static final String ofMedia(JSONCollection data) throws Exception {
+			String programName = data.getString("show.title", "");
+			String episodeName = data.getString("title", "");
 			String numSeason = "";
 			String numEpisode = "";
+			
+			// For movies, the `show` object is not present, we need to use the `title` instead.
+			if(programName.isBlank()) {
+				programName = episodeName;
+				episodeName = "";
+			}
 			
 			// Try to obtain the episode number
 			Matcher matcherEpisode = REGEX_EPISODE.matcher(episodeName);
@@ -1000,11 +1000,11 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 				episodeName = matcherEpisode.group(2);
 			}
 			
-			JSONCollection seasons = meta.getCollection("show.seasons", null);
+			JSONCollection seasons = data.getCollection("show.seasons", null);
 			
 			// Try to obtain the season number
 			if(seasons != null) {
-				String activeSeasonId = meta.getString("activeSeasonId", null);
+				String activeSeasonId = data.getString("activeSeasonId", null);
 				
 				if(activeSeasonId == null || activeSeasonId.equals("null")) {
 					// Some episodes can be visible only on the All episodes page. No season
@@ -1031,8 +1031,8 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 				// Try to obtain the episode number within the season, if the first attempt failed
 				if(numEpisode.isBlank()) {
 					String seasonId = "null".equals(activeSeasonId) ? null : activeSeasonId;
-					String episodeId = meta.getString("id");
-					String showIDEC = meta.getString("show.idec");
+					String episodeId = data.getString("id");
+					String showIDEC = data.getString("show.idec");
 					int num = Episodes.indexOf(episodeId, showIDEC, seasonId);
 					if(num != -1) numEpisode = String.format("%02d", num + 1);
 				}
@@ -1254,10 +1254,6 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			);
 		}
 		
-		public final JSONCollection collectionOf(String typename) {
-			return objectsOf(typename).findFirst().map(NamedObject::object).orElse(null);
-		}
-		
 		public static final class NamedObject {
 			
 			private final String name;
@@ -1290,14 +1286,20 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 		@Override
 		public final void extractJobs(URI sourceUri, Document document, List<ExtractJob> jobs) throws Exception {
 			NextJS nextJS = NextJS.extract(document);
-			Stream<JSONCollection> objects = nextJS.objectsOf("MediumMeta")
-				.filter((v) -> "props.pageProps.data.mediaMeta".equals(v.name()))
-				.map(NextJS.NamedObject::object);
+			Stream<JSONCollection> objects = (
+				Stream.concat(
+					nextJS.objectsOf("MediumMeta")
+						.filter((v) -> "props.pageProps.data.mediaMeta".equals(v.name())),
+					nextJS.objectsOf("Show")
+						.filter((v) -> "props.pageProps.data.show".equals(v.name()))
+				)
+				.map(NextJS.NamedObject::object)
+			);
 			String deviceId = randomUUID();
-			String title = MediaTitle.ofMedia(nextJS, "Unknown");
 			
 			for(JSONCollection object : Utils.iterable(objects.iterator())) {
 				String idec = object.getString("idec");
+				String title = MediaTitle.ofMedia(object);
 				VOD.ExternalSourceInfo source = new VOD.ExternalSourceInfo(idec, deviceId, API_ORIGIN, API_CLIENT);
 				jobs.add(new SourceInfoExtractJob(sourceUri, source, title));
 			}
