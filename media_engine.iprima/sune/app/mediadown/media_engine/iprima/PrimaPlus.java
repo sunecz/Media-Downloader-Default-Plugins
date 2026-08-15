@@ -348,13 +348,18 @@ final class PrimaPlus implements IPrima {
 					}
 					
 					nuxtData = Utils.stream(nuxt.data().collectionsIterable())
-						.filter((c) -> c.hasString("playId"))
+						.filter((c) -> c.hasString("playId") || c.hasCollection("content"))
 						.findFirst().orElse(null);
 					
 					if(nuxtData == null) {
 						throw new IllegalStateException(
 							"Unable to extract information about media content"
 						);
+					}
+					
+					// Some links (mostly movies) still have the `content` object present.
+					if(nuxtData.hasCollection("content")) {
+						nuxtData = nuxtData.getCollection("content");
 					}
 					
 					String videoPlayId = nuxtData.getString("playId", null);
