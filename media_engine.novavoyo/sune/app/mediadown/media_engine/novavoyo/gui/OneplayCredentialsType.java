@@ -3,6 +3,8 @@ package sune.app.mediadown.media_engine.novavoyo.gui;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.UnaryOperator;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
@@ -267,15 +269,20 @@ public class OneplayCredentialsType extends CredentialsType<OneplayCredentials> 
 		protected final boolean doLoadItems() throws Exception {
 			progressText(translation.getSingle("progress.accounts"));
 			
-			List<Account> accounts = accounts();
 			Account automaticAccount = automaticAccount();
-			accounts.add(0, automaticAccount);
+			List<Account> items = (
+				Stream.concat(
+					Stream.of(automaticAccount),
+					accounts().stream()
+				)
+				.collect(Collectors.toList())
+			);
 			
-			Account selected = accounts.stream()
+			Account selected = items.stream()
 				.filter((d) -> d.id().equals(loadedValue))
 				.findFirst().orElse(automaticAccount);
 			
-			setItems(accounts, selected);
+			setItems(items, selected);
 			return true;
 		}
 		
