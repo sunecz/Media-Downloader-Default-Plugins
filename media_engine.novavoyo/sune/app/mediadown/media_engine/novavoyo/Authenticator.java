@@ -157,7 +157,12 @@ public final class Authenticator {
 		LoginResult result;
 		
 		if("ShowAccountChooserStep".equals(schema)) {
-			JSONCollection rawAccounts = data.getCollection("step.accounts");
+			List<JSONCollection> rawAccounts = (
+				Utils.stream(data.getCollection("step.groups").collectionsIterator())
+					.flatMap((v) -> Utils.stream(v.getCollection("accounts").collectionsIterator()))
+					.collect(Collectors.toList())
+			);
+			
 			Logging.logDebug("[Auth] Available accounts: %s", rawAccounts);
 			
 			// Allow account selection override
@@ -183,7 +188,7 @@ public final class Authenticator {
 				));
 			}
 			
-			Accounts.setAccounts((JSONCollection) null);
+			Accounts.setAccounts((List<JSONCollection>) null);
 			result = new LoginResult(new SelectedAccount("", authToken), List.of());
 		}
 		
@@ -228,8 +233,7 @@ public final class Authenticator {
 		return credentialsToAuthData(credentials).equals(data);
 	}
 	
-	private static final Account selectAccount(List<Account> accounts, String accountId)
-			throws Exception {
+	private static final Account selectAccount(List<Account> accounts, String accountId) {
 		if(accounts.isEmpty()) {
 			throw new IllegalStateException("No accounts");
 		}
@@ -552,13 +556,16 @@ public final class Authenticator {
 		
 		private static final List<Account> setAccounts(String accounts) {
 			if(accounts == null || accounts.isEmpty()) {
-				return setAccounts((JSONCollection) null);
+				return setAccounts((List<JSONCollection>) null);
 			}
 			
-			return setAccounts(JSON.read(accounts));
+			return setAccounts(
+				Utils.stream(JSON.read(accounts).collectionsIterator())
+					.collect(Collectors.toList())
+			);
 		}
 		
-		private static final List<Account> setAccounts(JSONCollection accounts) {
+		private static final List<Account> setAccounts(List<JSONCollection> accounts) {
 			cached.clear();
 			
 			if(accounts == null || accounts.isEmpty()) {
@@ -573,7 +580,7 @@ public final class Authenticator {
 				return cached;
 			}
 			
-			Utils.stream(accounts.collectionsIterator())
+			accounts.stream()
 				.map(Accounts::parseAccount)
 				.forEachOrdered(cached::add);
 			
