@@ -75,7 +75,7 @@
 	<target name="build-plugin">
 		<echo message="Compiling Java files..." />
 		<javac debug="true" debuglevel="${debuglevel}" encoding="UTF-8" destdir="${var.bin}" deprecation="false"
-				includeantruntime="false" source="${source}" target="${target}"
+				includeantruntime="false" release="${release}"
 				modulepathref="modulepath.plugin">
 			<src path="${var.src}" />
 			<classpath refid="classpath.plugin" />
