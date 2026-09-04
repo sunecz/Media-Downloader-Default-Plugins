@@ -5,12 +5,12 @@ import sune.app.mediadown.entity.Downloaders;
 import sune.app.mediadown.plugin.Plugin;
 import sune.app.mediadown.plugin.PluginBase;
 
-@Plugin(name          = "downloader.smf",
-	    title         = "plugin.downloader.smf.title",
-	    version       = "00.02.09-0008",
-	    author        = "Sune",
-	    updateBaseURL = "https://app.sune.tech/mediadown/dat/plugin/0002/downloader/smf/",
-	    updatable     = true)
+@Plugin(
+	name    = "downloader.smf",
+	title   = "plugin.downloader.smf.title",
+	version = "0.2.9-8",
+	author  = "Sune"
+)
 public final class SMFDownloaderPlugin extends PluginBase {
 	
 	private static final String NAME = "smf";

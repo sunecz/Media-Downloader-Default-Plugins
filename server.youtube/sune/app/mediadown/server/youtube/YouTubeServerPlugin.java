@@ -5,14 +5,14 @@ import sune.app.mediadown.entity.Servers;
 import sune.app.mediadown.plugin.Plugin;
 import sune.app.mediadown.plugin.PluginBase;
 
-@Plugin(name          = "server.youtube",
-	    title         = "plugin.server.youtube.title",
-	    version       = "00.02.09-0006",
-	    author        = "Sune",
-	    updateBaseURL = "https://app.sune.tech/mediadown/dat/plugin/0002/server/youtube/",
-	    updatable     = true,
-	    url           = "https://youtube.com",
-	    icon          = "resources/server/youtube/icon/youtube.png")
+@Plugin(
+	name    = "server.youtube",
+	title   = "plugin.server.youtube.title",
+	version = "0.2.9-6",
+	author  = "Sune",
+	url     = "https://youtube.com",
+	icon    = "resources/server/youtube/icon/youtube.png"
+)
 public final class YouTubeServerPlugin extends PluginBase {
 	
 	private static final String NAME = "youtube";

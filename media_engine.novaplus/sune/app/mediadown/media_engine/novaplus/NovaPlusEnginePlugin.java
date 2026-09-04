@@ -5,14 +5,14 @@ import sune.app.mediadown.entity.MediaEngines;
 import sune.app.mediadown.plugin.Plugin;
 import sune.app.mediadown.plugin.PluginBase;
 
-@Plugin(name          = "media_engine.novaplus",
-	    title         = "plugin.media_engine.novaplus.title",
-	    version       = "00.02.09-0012",
-	    author        = "Sune",
-	    updateBaseURL = "https://app.sune.tech/mediadown/dat/plugin/0002/media_engine/novaplus/",
-	    updatable     = true,
-	    url           = "https://tv.nova.cz/",
-	    icon          = "resources/media_engine/novaplus/icon/novaplus.png")
+@Plugin(
+	name    = "media_engine.novaplus",
+	title   = "plugin.media_engine.novaplus.title",
+	version = "0.2.9-12",
+	author  = "Sune",
+	url     = "https://tv.nova.cz/",
+	icon    = "resources/media_engine/novaplus/icon/novaplus.png"
+)
 public final class NovaPlusEnginePlugin extends PluginBase {
 	
 	private static final String NAME = "novaplus";

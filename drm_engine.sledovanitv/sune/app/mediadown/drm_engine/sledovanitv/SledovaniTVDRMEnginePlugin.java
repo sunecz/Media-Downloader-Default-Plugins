@@ -5,14 +5,14 @@ import sune.app.mediadown.drm.DRMEngines;
 import sune.app.mediadown.plugin.Plugin;
 import sune.app.mediadown.plugin.PluginBase;
 
-@Plugin(name          = "drm_engine.sledovanitv",
-	    title         = "plugin.drm_engine.sledovanitv.title",
-	    version       = "00.02.09-0003",
-	    author        = "Sune",
-	    updateBaseURL = "https://app.sune.tech/mediadown/dat/plugin/0002/drm_engine/sledovanitv/",
-	    updatable     = true,
-	    url           = "https://sledovanitv.cz/",
-	    icon          = "resources/drm_engine/sledovanitv/icon/sledovanitv.png")
+@Plugin(
+	name    = "drm_engine.sledovanitv",
+	title   = "plugin.drm_engine.sledovanitv.title",
+	version = "0.2.9-3",
+	author  = "Sune",
+	url     = "https://sledovanitv.cz/",
+	icon    = "resources/drm_engine/sledovanitv/icon/sledovanitv.png"
+)
 public final class SledovaniTVDRMEnginePlugin extends PluginBase {
 	
 	private static final String NAME = "sledovanitv";

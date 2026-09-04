@@ -23,14 +23,14 @@ import sune.app.mediadown.util.Password;
 // Note: The website is no longer Nova Voyo, but we keep the same name for backward compatibility
 //       and for not having to remove the old plugin. This will be probably changed later.
 
-@Plugin(name          = "media_engine.novavoyo", // Keep the old name
-	    title         = "plugin.media_engine.novavoyo.title",
-	    version       = "00.02.09-0034",
-	    author        = "Sune",
-	    updateBaseURL = "https://app.sune.tech/mediadown/dat/plugin/0002/media_engine/novavoyo/", // Keep the old URL
-	    updatable     = true,
-	    url           = "https://www.oneplay.cz/",
-	    icon          = "resources/media_engine/novavoyo/icon/oneplay.png")
+@Plugin(
+	name    = "media_engine.novavoyo", // Keep the old name
+	title   = "plugin.media_engine.novavoyo.title",
+	version = "0.2.9-34",
+	author  = "Sune",
+	url     = "https://www.oneplay.cz/",
+	icon    = "resources/media_engine/novavoyo/icon/oneplay.png"
+)
 public final class OneplayEnginePlugin extends PluginBase {
 	
 	private static final String NAME = "oneplay";

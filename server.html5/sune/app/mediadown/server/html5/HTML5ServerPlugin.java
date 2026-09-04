@@ -5,14 +5,14 @@ import sune.app.mediadown.entity.Servers;
 import sune.app.mediadown.plugin.Plugin;
 import sune.app.mediadown.plugin.PluginBase;
 
-@Plugin(name          = "server.html5",
-	    title         = "plugin.server.html5.title",
-	    version       = "00.02.08-0003",
-	    author        = "Sune",
-	    updateBaseURL = "https://app.sune.tech/mediadown/dat/plugin/0002/server/html5/",
-	    updatable     = true,
-	    url           = "",
-	    icon          = "resources/server/html5/icon/html5.png")
+@Plugin(
+	name    = "server.html5",
+	title   = "plugin.server.html5.title",
+	version = "0.2.8-3",
+	author  = "Sune",
+	url     = "",
+	icon    = "resources/server/html5/icon/html5.png"
+)
 public final class HTML5ServerPlugin extends PluginBase {
 	
 	private static final String NAME = "html5";

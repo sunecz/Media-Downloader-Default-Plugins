@@ -5,14 +5,14 @@ import sune.app.mediadown.entity.MediaEngines;
 import sune.app.mediadown.plugin.Plugin;
 import sune.app.mediadown.plugin.PluginBase;
 
-@Plugin(name          = "media_engine.tvautosalon",
-	    title         = "plugin.media_engine.tvautosalon.title",
-	    version       = "00.02.09-0004",
-	    author        = "Sune",
-	    updateBaseURL = "https://app.sune.tech/mediadown/dat/plugin/0002/media_engine/tvautosalon/",
-	    updatable     = true,
-	    url           = "https://autosalon.tv/",
-	    icon          = "resources/media_engine/tvautosalon/icon/tvautosalon.png")
+@Plugin(
+	name    = "media_engine.tvautosalon",
+	title   = "plugin.media_engine.tvautosalon.title",
+	version = "0.2.9-4",
+	author  = "Sune",
+	url     = "https://autosalon.tv/",
+	icon    = "resources/media_engine/tvautosalon/icon/tvautosalon.png"
+)
 public final class TVAutosalonEnginePlugin extends PluginBase {
 	
 	private static final String NAME = "tvautosalon";

@@ -5,14 +5,14 @@ import sune.app.mediadown.entity.Servers;
 import sune.app.mediadown.plugin.Plugin;
 import sune.app.mediadown.plugin.PluginBase;
 
-@Plugin(name          = "server.rtvs",
-	    title         = "plugin.server.rtvs.title",
-	    version       = "00.02.09-0004",
-	    author        = "Sune",
-	    updateBaseURL = "https://app.sune.tech/mediadown/dat/plugin/0002/server/rtvs/",
-	    updatable     = true,
-	    url           = "https://www.stvr.sk/",
-	    icon          = "resources/server/rtvs/icon/stvr.png")
+@Plugin(
+	name    = "server.rtvs",
+	title   = "plugin.server.rtvs.title",
+	version = "0.2.9-4",
+	author  = "Sune",
+	url     = "https://www.stvr.sk/",
+	icon    = "resources/server/rtvs/icon/stvr.png"
+)
 public final class STVRServerPlugin extends PluginBase {
 	
 	private static final String NAME = "stvr";

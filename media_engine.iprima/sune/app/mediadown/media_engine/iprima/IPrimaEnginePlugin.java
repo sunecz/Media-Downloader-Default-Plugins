@@ -33,14 +33,14 @@ import sune.app.mediadown.util.FXUtils;
 import sune.app.mediadown.util.NIO;
 import sune.app.mediadown.util.Password;
 
-@Plugin(name          = "media_engine.iprima",
-	    title         = "plugin.media_engine.iprima.title",
-	    version       = "00.02.09-0031",
-	    author        = "Sune",
-	    updateBaseURL = "https://app.sune.tech/mediadown/dat/plugin/0002/media_engine/iprima/",
-	    updatable     = true,
-	    url           = "https://iprima.cz",
-	    icon          = "resources/media_engine/iprima/icon/iprima.png")
+@Plugin(
+	name    = "media_engine.iprima",
+	title   = "plugin.media_engine.iprima.title",
+	version = "0.2.9-31",
+	author  = "Sune",
+	url     = "https://iprima.cz",
+	icon    = "resources/media_engine/iprima/icon/iprima.png"
+)
 public final class IPrimaEnginePlugin extends PluginBase {
 	
 	private static final String NAME = "iprima";

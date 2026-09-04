@@ -5,14 +5,14 @@ import sune.app.mediadown.drm.DRMEngines;
 import sune.app.mediadown.plugin.Plugin;
 import sune.app.mediadown.plugin.PluginBase;
 
-@Plugin(name          = "drm_engine.novaplus",
-	    title         = "plugin.drm_engine.novaplus.title",
-	    version       = "00.02.09-0002",
-	    author        = "Sune",
-	    updateBaseURL = "https://app.sune.tech/mediadown/dat/plugin/0002/drm_engine/novaplus/",
-	    updatable     = true,
-	    url           = "https://tv.nova.cz/",
-	    icon          = "resources/drm_engine/novaplus/icon/novaplus.png")
+@Plugin(
+	name    = "drm_engine.novaplus",
+	title   = "plugin.drm_engine.novaplus.title",
+	version = "0.2.9-2",
+	author  = "Sune",
+	url     = "https://tv.nova.cz/",
+	icon    = "resources/drm_engine/novaplus/icon/novaplus.png"
+)
 public final class NovaPlusDRMEnginePlugin extends PluginBase {
 	
 	private static final String NAME = "novaplus";

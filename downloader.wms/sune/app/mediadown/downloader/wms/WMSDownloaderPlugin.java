@@ -10,12 +10,12 @@ import sune.app.mediadown.plugin.PluginConfiguration;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.update.Version;
 
-@Plugin(name          = "downloader.wms",
-	    title         = "plugin.downloader.wms.title",
-	    version       = "00.02.09-0010",
-	    author        = "Sune",
-	    updateBaseURL = "https://app.sune.tech/mediadown/dat/plugin/0002/downloader/wms/",
-	    updatable     = true)
+@Plugin(
+	name    = "downloader.wms",
+	title   = "plugin.downloader.wms.title",
+	version = "0.2.9-10",
+	author  = "Sune"
+)
 public final class WMSDownloaderPlugin extends PluginBase {
 	
 	private static final String NAME = "wms";
@@ -50,7 +50,7 @@ public final class WMSDownloaderPlugin extends PluginBase {
 		MediaDownloader.UpdateTriggers.OfPlugin.add(
 			plugin.getContext().getPlugin().instance().name(),
 			Version.ZERO,
-			Version.of("00.02.09-0008"),
+			Version.of("0.2.9-8"),
 			() -> {
 				PluginConfiguration configuration = plugin.getContext().getConfiguration();
 				final int oldDefaultValue = 1000;

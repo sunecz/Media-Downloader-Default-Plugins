@@ -5,14 +5,14 @@ import sune.app.mediadown.entity.MediaEngines;
 import sune.app.mediadown.plugin.Plugin;
 import sune.app.mediadown.plugin.PluginBase;
 
-@Plugin(name          = "media_engine.markizaplus",
-	    title         = "plugin.media_engine.markizaplus.title",
-	    version       = "00.02.09-0007",
-	    author        = "Sune",
-	    updateBaseURL = "https://app.sune.tech/mediadown/dat/plugin/0002/media_engine/markizaplus/",
-	    updatable     = true,
-	    url           = "https://videoarchiv.markiza.sk/",
-	    icon          = "resources/media_engine/markizaplus/icon/markizaplus.png")
+@Plugin(
+	name    = "media_engine.markizaplus",
+	title   = "plugin.media_engine.markizaplus.title",
+	version = "0.2.9-7",
+	author  = "Sune",
+	url     = "https://videoarchiv.markiza.sk/",
+	icon    = "resources/media_engine/markizaplus/icon/markizaplus.png"
+)
 public final class MarkizaPlusEnginePlugin extends PluginBase {
 	
 	private static final String NAME = "markizaplus";

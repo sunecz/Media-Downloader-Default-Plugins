@@ -5,14 +5,14 @@ import sune.app.mediadown.entity.MediaEngines;
 import sune.app.mediadown.plugin.Plugin;
 import sune.app.mediadown.plugin.PluginBase;
 
-@Plugin(name          = "media_engine.tvprimadoma",
-	    title         = "plugin.media_engine.tvprimadoma.title",
-	    version       = "00.02.09-0002",
-	    author        = "Sune",
-	    updateBaseURL = "https://app.sune.tech/mediadown/dat/plugin/0002/media_engine/tvprimadoma/",
-	    updatable     = true,
-	    url           = "https://primadoma.tv/",
-	    icon          = "resources/media_engine/tvprimadoma/icon/tvprimadoma.png")
+@Plugin(
+	name    = "media_engine.tvprimadoma",
+	title   = "plugin.media_engine.tvprimadoma.title",
+	version = "0.2.9-2",
+	author  = "Sune",
+	url     = "https://primadoma.tv/",
+	icon    = "resources/media_engine/tvprimadoma/icon/tvprimadoma.png"
+)
 public final class TVPrimaDomaEnginePlugin extends PluginBase {
 	
 	private static final String NAME = "tvprimadoma";

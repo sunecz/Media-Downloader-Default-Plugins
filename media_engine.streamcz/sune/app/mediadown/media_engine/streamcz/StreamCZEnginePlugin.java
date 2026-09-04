@@ -5,14 +5,14 @@ import sune.app.mediadown.entity.MediaEngines;
 import sune.app.mediadown.plugin.Plugin;
 import sune.app.mediadown.plugin.PluginBase;
 
-@Plugin(name          = "media_engine.streamcz",
-	    title         = "plugin.media_engine.streamcz.title",
-	    version       = "00.02.09-0003",
-	    author        = "Sune",
-	    updateBaseURL = "https://app.sune.tech/mediadown/dat/plugin/0002/media_engine/streamcz/",
-	    updatable     = true,
-	    url           = "https://www.stream.cz/",
-	    icon          = "resources/media_engine/streamcz/icon/streamcz.png")
+@Plugin(
+	name    = "media_engine.streamcz",
+	title   = "plugin.media_engine.streamcz.title",
+	version = "0.2.9-3",
+	author  = "Sune",
+	url     = "https://www.stream.cz/",
+	icon    = "resources/media_engine/streamcz/icon/streamcz.png"
+)
 public final class StreamCZEnginePlugin extends PluginBase {
 	
 	private static final String NAME = "streamcz";

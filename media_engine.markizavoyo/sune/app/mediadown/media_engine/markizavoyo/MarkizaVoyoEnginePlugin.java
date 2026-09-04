@@ -15,14 +15,14 @@ import sune.app.mediadown.plugin.PluginConfiguration;
 import sune.app.mediadown.util.NIO;
 import sune.app.mediadown.util.Password;
 
-@Plugin(name          = "media_engine.markizavoyo",
-	    title         = "plugin.media_engine.markizavoyo.title",
-	    version       = "00.02.09-0010",
-	    author        = "Sune",
-	    updateBaseURL = "https://app.sune.tech/mediadown/dat/plugin/0002/media_engine/markizavoyo/",
-	    updatable     = true,
-	    url           = "https://voyo.markiza.sk/",
-	    icon          = "resources/media_engine/markizavoyo/icon/markizavoyo.png")
+@Plugin(
+	name    = "media_engine.markizavoyo",
+	title   = "plugin.media_engine.markizavoyo.title",
+	version = "0.2.9-10",
+	author  = "Sune",
+	url     = "https://voyo.markiza.sk/",
+	icon    = "resources/media_engine/markizavoyo/icon/markizavoyo.png"
+)
 public final class MarkizaVoyoEnginePlugin extends PluginBase {
 	
 	private static final String NAME = "markizavoyo";

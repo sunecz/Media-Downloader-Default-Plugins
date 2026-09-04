@@ -15,14 +15,14 @@ import sune.app.mediadown.plugin.PluginConfiguration;
 import sune.app.mediadown.util.NIO;
 import sune.app.mediadown.util.Password;
 
-@Plugin(name          = "media_engine.jojplay",
-	    title         = "plugin.media_engine.jojplay.title",
-	    version       = "00.02.09-0009",
-	    author        = "Sune",
-	    updateBaseURL = "https://app.sune.tech/mediadown/dat/plugin/0002/media_engine/jojplay/",
-	    updatable     = true,
-	    url           = "https://play.joj.sk/",
-	    icon          = "resources/media_engine/jojplay/icon/jojplay.png")
+@Plugin(
+	name    = "media_engine.jojplay",
+	title   = "plugin.media_engine.jojplay.title",
+	version = "0.2.9-9",
+	author  = "Sune",
+	url     = "https://play.joj.sk/",
+	icon    = "resources/media_engine/jojplay/icon/jojplay.png"
+)
 public final class JOJPlayEnginePlugin extends PluginBase {
 	
 	private static final String NAME = "jojplay";

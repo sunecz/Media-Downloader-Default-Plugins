@@ -15,14 +15,14 @@ import sune.app.mediadown.plugin.PluginConfiguration;
 import sune.app.mediadown.util.NIO;
 import sune.app.mediadown.util.Password;
 
-@Plugin(name          = "media_engine.tvbarrandov",
-	    title         = "plugin.media_engine.tvbarrandov.title",
-	    version       = "00.02.09-0006",
-	    author        = "Sune",
-	    updateBaseURL = "https://app.sune.tech/mediadown/dat/plugin/0002/media_engine/tvbarrandov/",
-	    updatable     = true,
-	    url           = "https://barrandov.tv",
-	    icon          = "resources/media_engine/tvbarrandov/icon/tvbarrandov.png")
+@Plugin(
+	name    = "media_engine.tvbarrandov",
+	title   = "plugin.media_engine.tvbarrandov.title",
+	version = "0.2.9-6",
+	author  = "Sune",
+	url     = "https://barrandov.tv",
+	icon    = "resources/media_engine/tvbarrandov/icon/tvbarrandov.png"
+)
 public final class TVBarrandovEnginePlugin extends PluginBase {
 	
 	private static final String NAME = "tvbarrandov";

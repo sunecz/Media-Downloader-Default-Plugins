@@ -5,14 +5,14 @@ import sune.app.mediadown.entity.MediaEngines;
 import sune.app.mediadown.plugin.Plugin;
 import sune.app.mediadown.plugin.PluginBase;
 
-@Plugin(name          = "media_engine.tncz",
-	    title         = "plugin.media_engine.tncz.title",
-	    version       = "00.02.09-0005",
-	    author        = "Sune",
-	    updateBaseURL = "https://app.sune.tech/mediadown/dat/plugin/0002/media_engine/tncz/",
-	    updatable     = true,
-	    url           = "https://tn.nova.cz/",
-	    icon          = "resources/media_engine/tncz/icon/tncz.png")
+@Plugin(
+	name    = "media_engine.tncz",
+	title   = "plugin.media_engine.tncz.title",
+	version = "0.2.9-5",
+	author  = "Sune",
+	url     = "https://tn.nova.cz/",
+	icon    = "resources/media_engine/tncz/icon/tncz.png"
+)
 public final class TNCZEnginePlugin extends PluginBase {
 	
 	private static final String NAME = "tncz";

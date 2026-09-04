@@ -5,14 +5,14 @@ import sune.app.mediadown.drm.DRMEngines;
 import sune.app.mediadown.plugin.Plugin;
 import sune.app.mediadown.plugin.PluginBase;
 
-@Plugin(name          = "drm_engine.iprima",
-	    title         = "plugin.drm_engine.iprima.title",
-	    version       = "00.02.09-0003",
-	    author        = "Sune",
-	    updateBaseURL = "https://app.sune.tech/mediadown/dat/plugin/0002/drm_engine/iprima/",
-	    updatable     = true,
-	    url           = "https://iprima.cz/",
-	    icon          = "resources/drm_engine/iprima/icon/iprima.png")
+@Plugin(
+	name    = "drm_engine.iprima",
+	title   = "plugin.drm_engine.iprima.title",
+	version = "0.2.9-3",
+	author  = "Sune",
+	url     = "https://iprima.cz/",
+	icon    = "resources/drm_engine/iprima/icon/iprima.png"
+)
 public final class IPrimaDRMEnginePlugin extends PluginBase {
 	
 	private static final String NAME = "iprima";

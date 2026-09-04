@@ -19,14 +19,14 @@ import sune.app.mediadown.server.sledovanitv.gui.SledovaniTVCredentialsType;
 import sune.app.mediadown.util.NIO;
 import sune.app.mediadown.util.Password;
 
-@Plugin(name          = "server.sledovanitv",
-	    title         = "plugin.server.sledovanitv.title",
-	    version       = "00.02.09-0011",
-	    author        = "Sune",
-	    updateBaseURL = "https://app.sune.tech/mediadown/dat/plugin/0002/server/sledovanitv/",
-	    updatable     = true,
-	    url           = "https://sledovanitv.cz/",
-	    icon          = "resources/server/sledovanitv/icon/sledovanitv.png")
+@Plugin(
+	name    = "server.sledovanitv",
+	title   = "plugin.server.sledovanitv.title",
+	version = "0.2.9-11",
+	author  = "Sune",
+	url     = "https://sledovanitv.cz/",
+	icon    = "resources/server/sledovanitv/icon/sledovanitv.png"
+)
 public final class SledovaniTVServerPlugin extends PluginBase {
 	
 	private static final String NAME = "sledovanitv";
