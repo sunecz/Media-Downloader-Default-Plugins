@@ -90,7 +90,7 @@
 		</copy>
 		
 		<echo message="Building ${var.type}.${var.name}..." />
-		<jar destfile="${dp.path.build}/${var.type}/${var.name}/plugin.jar">
+		<jar destfile="${dp.path.build}/${var.type}.${var.name}/plugin.jar">
 			<manifest>
 				<attribute name="Class-Path" value="." />
 			</manifest>
@@ -103,13 +103,13 @@
 		</jar>
 		
 		<echo message="Building ${var.type}.${var.name} source..." />
-		<zip destfile="${dp.path.build}/${var.type}/${var.name}/source.jar" basedir="${dp.path.cwd}/${var.type}.${var.name}/" />
+		<zip destfile="${dp.path.build}/${var.type}.${var.name}/source.jar" basedir="${dp.path.cwd}/${var.type}.${var.name}/" />
 	</target>
 	
 	<target name="build-single-maybe-copy" depends="build-single" if="should.copy-to-app">
 		<property name="var.jar" value="${var.prefix}${var.name}.jar" />
 		<echo message="Copying to application plugins..." />
-		<copy file="${dp.path.build}/${var.type}/${var.name}/plugin.jar" tofile="${dp.path.plg}/${var.jar}" />
+		<copy file="${dp.path.build}/${var.type}.${var.name}/plugin.jar" tofile="${dp.path.plg}/${var.jar}" />
 	</target>
 	
 	<target name="build-single">
