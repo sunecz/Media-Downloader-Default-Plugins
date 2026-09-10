@@ -8,7 +8,7 @@ import sune.app.mediadown.plugin.PluginBase;
 @Plugin(
 	name    = "server.youtube",
 	title   = "plugin.server.youtube.title",
-	version = "0.2.9-6",
+	version = "0.2.9-7.alpha.1",
 	author  = "Sune",
 	url     = "https://youtube.com",
 	icon    = "resources/server/youtube/icon/youtube.png"

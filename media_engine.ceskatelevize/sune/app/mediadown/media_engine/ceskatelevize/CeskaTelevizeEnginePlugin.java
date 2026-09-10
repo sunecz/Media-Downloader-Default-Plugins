@@ -8,7 +8,7 @@ import sune.app.mediadown.plugin.PluginBase;
 @Plugin(
 	name    = "media_engine.ceskatelevize",
 	title   = "plugin.media_engine.ceskatelevize.title",
-	version = "0.2.9-12",
+	version = "0.2.9-13.alpha.1",
 	author  = "Sune",
 	url     = "https://ceskatelevize.cz",
 	icon    = "resources/media_engine/ceskatelevize/icon/ceskatelevize.png"

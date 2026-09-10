@@ -36,7 +36,7 @@ import sune.app.mediadown.util.Password;
 @Plugin(
 	name    = "media_engine.iprima",
 	title   = "plugin.media_engine.iprima.title",
-	version = "0.2.9-31",
+	version = "0.2.9-32.alpha.1",
 	author  = "Sune",
 	url     = "https://iprima.cz",
 	icon    = "resources/media_engine/iprima/icon/iprima.png"

@@ -8,7 +8,7 @@ import sune.app.mediadown.plugin.PluginBase;
 @Plugin(
 	name    = "media_engine.novaplus",
 	title   = "plugin.media_engine.novaplus.title",
-	version = "0.2.9-12",
+	version = "0.2.9-13.alpha.1",
 	author  = "Sune",
 	url     = "https://tv.nova.cz/",
 	icon    = "resources/media_engine/novaplus/icon/novaplus.png"

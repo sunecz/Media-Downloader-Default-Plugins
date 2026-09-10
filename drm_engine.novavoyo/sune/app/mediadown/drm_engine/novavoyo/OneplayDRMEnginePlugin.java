@@ -11,7 +11,7 @@ import sune.app.mediadown.plugin.PluginBase;
 @Plugin(
 	name    = "drm_engine.novavoyo", // Keep the old name
 	title   = "plugin.drm_engine.novavoyo.title",
-	version = "0.2.9-3",
+	version = "0.2.9-4.alpha.1",
 	author  = "Sune",
 	url     = "https://www.oneplay.cz/",
 	icon    = "resources/drm_engine/novavoyo/icon/oneplay.png"

@@ -8,7 +8,7 @@ import sune.app.mediadown.plugin.PluginBase;
 @Plugin(
 	name    = "media_engine.tncz",
 	title   = "plugin.media_engine.tncz.title",
-	version = "0.2.9-5",
+	version = "0.2.9-6.alpha.1",
 	author  = "Sune",
 	url     = "https://tn.nova.cz/",
 	icon    = "resources/media_engine/tncz/icon/tncz.png"

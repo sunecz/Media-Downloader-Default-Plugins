@@ -8,7 +8,7 @@ import sune.app.mediadown.plugin.PluginBase;
 @Plugin(
 	name    = "media_engine.markizaplus",
 	title   = "plugin.media_engine.markizaplus.title",
-	version = "0.2.9-7",
+	version = "0.2.9-8.alpha.1",
 	author  = "Sune",
 	url     = "https://videoarchiv.markiza.sk/",
 	icon    = "resources/media_engine/markizaplus/icon/markizaplus.png"

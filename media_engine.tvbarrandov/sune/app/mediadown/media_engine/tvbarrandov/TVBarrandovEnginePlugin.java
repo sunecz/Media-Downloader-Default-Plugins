@@ -18,7 +18,7 @@ import sune.app.mediadown.util.Password;
 @Plugin(
 	name    = "media_engine.tvbarrandov",
 	title   = "plugin.media_engine.tvbarrandov.title",
-	version = "0.2.9-6",
+	version = "0.2.9-7.alpha.1",
 	author  = "Sune",
 	url     = "https://barrandov.tv",
 	icon    = "resources/media_engine/tvbarrandov/icon/tvbarrandov.png"

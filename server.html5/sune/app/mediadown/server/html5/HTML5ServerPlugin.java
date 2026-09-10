@@ -8,7 +8,7 @@ import sune.app.mediadown.plugin.PluginBase;
 @Plugin(
 	name    = "server.html5",
 	title   = "plugin.server.html5.title",
-	version = "0.2.8-3",
+	version = "0.2.9-1.alpha.1",
 	author  = "Sune",
 	url     = "",
 	icon    = "resources/server/html5/icon/html5.png"

@@ -8,7 +8,7 @@ import sune.app.mediadown.plugin.PluginBase;
 @Plugin(
 	name    = "media_engine.streamcz",
 	title   = "plugin.media_engine.streamcz.title",
-	version = "0.2.9-3",
+	version = "0.2.9-4.alpha.1",
 	author  = "Sune",
 	url     = "https://www.stream.cz/",
 	icon    = "resources/media_engine/streamcz/icon/streamcz.png"

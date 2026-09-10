@@ -8,7 +8,7 @@ import sune.app.mediadown.plugin.PluginBase;
 @Plugin(
 	name    = "drm_engine.markizavoyo",
 	title   = "plugin.drm_engine.markizavoyo.title",
-	version = "0.2.9-2",
+	version = "0.2.9-3.alpha.1",
 	author  = "Sune",
 	url     = "https://voyo.markiza.sk/",
 	icon    = "resources/drm_engine/markizavoyo/icon/markizavoyo.png"

@@ -18,7 +18,7 @@ import sune.app.mediadown.util.Password;
 @Plugin(
 	name    = "media_engine.markizavoyo",
 	title   = "plugin.media_engine.markizavoyo.title",
-	version = "0.2.9-10",
+	version = "0.2.9-11.alpha.1",
 	author  = "Sune",
 	url     = "https://voyo.markiza.sk/",
 	icon    = "resources/media_engine/markizavoyo/icon/markizavoyo.png"

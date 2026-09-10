@@ -18,7 +18,7 @@ import sune.app.mediadown.util.Password;
 @Plugin(
 	name    = "media_engine.jojplay",
 	title   = "plugin.media_engine.jojplay.title",
-	version = "0.2.9-9",
+	version = "0.2.9-10.alpha.1",
 	author  = "Sune",
 	url     = "https://play.joj.sk/",
 	icon    = "resources/media_engine/jojplay/icon/jojplay.png"

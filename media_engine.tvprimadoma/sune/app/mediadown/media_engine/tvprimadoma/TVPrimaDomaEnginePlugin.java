@@ -8,7 +8,7 @@ import sune.app.mediadown.plugin.PluginBase;
 @Plugin(
 	name    = "media_engine.tvprimadoma",
 	title   = "plugin.media_engine.tvprimadoma.title",
-	version = "0.2.9-2",
+	version = "0.2.9-3.alpha.1",
 	author  = "Sune",
 	url     = "https://primadoma.tv/",
 	icon    = "resources/media_engine/tvprimadoma/icon/tvprimadoma.png"

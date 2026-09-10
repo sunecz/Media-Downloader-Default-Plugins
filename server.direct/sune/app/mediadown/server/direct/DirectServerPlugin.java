@@ -8,7 +8,7 @@ import sune.app.mediadown.plugin.PluginBase;
 @Plugin(
 	name    = "server.direct",
 	title   = "plugin.server.direct.title",
-	version = "0.2.9-1",
+	version = "0.2.9-2.alpha.1",
 	author  = "Sune",
 	url     = "",
 	icon    = "resources/server/direct/icon/direct.png"

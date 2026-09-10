@@ -13,7 +13,7 @@ import sune.app.mediadown.update.Version;
 @Plugin(
 	name    = "downloader.wms",
 	title   = "plugin.downloader.wms.title",
-	version = "0.2.9-10",
+	version = "0.2.9-11.alpha.1",
 	author  = "Sune"
 )
 public final class WMSDownloaderPlugin extends PluginBase {

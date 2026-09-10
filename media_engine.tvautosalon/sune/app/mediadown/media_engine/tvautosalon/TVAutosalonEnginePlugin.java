@@ -8,7 +8,7 @@ import sune.app.mediadown.plugin.PluginBase;
 @Plugin(
 	name    = "media_engine.tvautosalon",
 	title   = "plugin.media_engine.tvautosalon.title",
-	version = "0.2.9-4",
+	version = "0.2.9-5.alpha.1",
 	author  = "Sune",
 	url     = "https://autosalon.tv/",
 	icon    = "resources/media_engine/tvautosalon/icon/tvautosalon.png"

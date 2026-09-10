@@ -26,7 +26,7 @@ import sune.app.mediadown.util.Password;
 @Plugin(
 	name    = "media_engine.novavoyo", // Keep the old name
 	title   = "plugin.media_engine.novavoyo.title",
-	version = "0.2.9-34",
+	version = "0.2.9-35.alpha.1",
 	author  = "Sune",
 	url     = "https://www.oneplay.cz/",
 	icon    = "resources/media_engine/novavoyo/icon/oneplay.png"

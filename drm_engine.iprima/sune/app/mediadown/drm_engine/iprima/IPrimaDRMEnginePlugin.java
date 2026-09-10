@@ -8,7 +8,7 @@ import sune.app.mediadown.plugin.PluginBase;
 @Plugin(
 	name    = "drm_engine.iprima",
 	title   = "plugin.drm_engine.iprima.title",
-	version = "0.2.9-3",
+	version = "0.2.9-4.alpha.1",
 	author  = "Sune",
 	url     = "https://iprima.cz/",
 	icon    = "resources/drm_engine/iprima/icon/iprima.png"

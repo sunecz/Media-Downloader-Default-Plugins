@@ -22,7 +22,7 @@ import sune.app.mediadown.util.Password;
 @Plugin(
 	name    = "server.sledovanitv",
 	title   = "plugin.server.sledovanitv.title",
-	version = "0.2.9-11",
+	version = "0.2.9-12.alpha.1",
 	author  = "Sune",
 	url     = "https://sledovanitv.cz/",
 	icon    = "resources/server/sledovanitv/icon/sledovanitv.png"

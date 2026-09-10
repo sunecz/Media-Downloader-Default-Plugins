@@ -8,7 +8,7 @@ import sune.app.mediadown.plugin.PluginBase;
 @Plugin(
 	name    = "server.rtvs",
 	title   = "plugin.server.rtvs.title",
-	version = "0.2.9-4",
+	version = "0.2.9-5.alpha.1",
 	author  = "Sune",
 	url     = "https://www.stvr.sk/",
 	icon    = "resources/server/rtvs/icon/stvr.png"
