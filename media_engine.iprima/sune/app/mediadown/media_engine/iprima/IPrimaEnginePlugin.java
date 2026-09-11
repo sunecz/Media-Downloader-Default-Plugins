@@ -23,13 +23,13 @@ import sune.app.mediadown.gui.GUI.CredentialsRegistry;
 import sune.app.mediadown.gui.GUI.CredentialsRegistry.CredentialsEntry;
 import sune.app.mediadown.gui.GUI.CredentialsRegistry.CredentialsType;
 import sune.app.mediadown.gui.control.PasswordFieldPane;
+import sune.app.mediadown.gui.util.FXUtils;
 import sune.app.mediadown.language.Translation;
 import sune.app.mediadown.media_engine.iprima.PrimaAuthenticator.Profiles.Profile;
 import sune.app.mediadown.plugin.Plugin;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginConfiguration;
 import sune.app.mediadown.plugin.PluginLoaderContext;
-import sune.app.mediadown.util.FXUtils;
 import sune.app.mediadown.util.NIO;
 import sune.app.mediadown.util.Password;
 

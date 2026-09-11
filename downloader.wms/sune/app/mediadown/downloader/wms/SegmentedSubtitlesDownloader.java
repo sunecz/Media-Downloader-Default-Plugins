@@ -8,7 +8,7 @@ import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
-import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Constructor;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -26,9 +26,9 @@ import sune.app.mediadown.media.MediaMetadata;
 import sune.app.mediadown.media.MediaMimeType;
 import sune.app.mediadown.util.Pair;
 import sune.app.mediadown.util.Ref;
-import sune.app.mediadown.util.Reflection3;
 import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
+import sune.app.mediadown.util.unsafe.Reflection;
 
 public final class SegmentedSubtitlesDownloader extends FileDownloader {
 	
@@ -133,14 +133,9 @@ public final class SegmentedSubtitlesDownloader extends FileDownloader {
 			
 			private final Object newInstance(Class<?> clazz) {
 				try {
-					return Reflection3.newInstance(clazz);
-				} catch(NoSuchMethodException
-							| NoSuchFieldException
-							| IllegalArgumentException
-							| IllegalAccessException
-							| InstantiationException
-							| InvocationTargetException
-							| SecurityException ex) {
+					Constructor<?> ctor = Reflection.getConstructor(clazz);
+					return Reflection.newInstance(ctor);
+				} catch(IllegalArgumentException | SecurityException ex) {
 					throw new RuntimeException(ex);
 				}
 			}

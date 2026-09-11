@@ -41,6 +41,7 @@ import sune.app.mediadown.entity.MediaGetters;
 import sune.app.mediadown.entity.Program;
 import sune.app.mediadown.exception.IncorrectCredentials;
 import sune.app.mediadown.gui.control.IntegerTextField;
+import sune.app.mediadown.gui.util.FXUtils;
 import sune.app.mediadown.language.Translation;
 import sune.app.mediadown.media.Media;
 import sune.app.mediadown.media.MediaConstants;
@@ -59,7 +60,6 @@ import sune.app.mediadown.net.Web.Response;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.task.ListTask;
-import sune.app.mediadown.util.FXUtils;
 import sune.app.mediadown.util.JSON;
 import sune.app.mediadown.util.JSON.JSONCollection;
 import sune.app.mediadown.util.JavaScript;
@@ -86,18 +86,17 @@ public final class TVBarrandovEngine implements MediaEngine {
 	private static final String SELECTOR_PROGRAMS = SELECTOR_GRID;
 	private static final String SELECTOR_EPISODES = SELECTOR_GRID + " > .show-box:not(.show-box--date)";
 	
-	private static Regex REGEX_EPISODE_URL;
+	private static final Regex REGEX_EPISODE_URL = Regex.of(
+		"/video/\\d+((?:-[^-]+)+)-(\\d{1,2})-(\\d{1,2})-(\\d{4})$"
+	);
 	
 	// Allow to create an instance when registering the engine
 	TVBarrandovEngine() {
 	}
 	
 	private static final String maybeImproveEpisodeTitle(Program program, URI url, String title) {
-		if(REGEX_EPISODE_URL == null) {
-			REGEX_EPISODE_URL = Regex.of("/video/\\d+((?:-[^-]+)+)-(\\d{1,2})-(\\d{1,2})-(\\d{4})$");
-		}
-		
 		Matcher matcher = REGEX_EPISODE_URL.matcher(url.getRawPath());
+		
 		if(matcher.find()) {
 			// Try to convert the program's title to URL-like text
 			String normalizedName = Utils.normalize(program.title()).replaceAll("\\s+", "-").toLowerCase();

@@ -15,7 +15,6 @@ import sune.app.mediadown.media_engine.iprima.IPrimaHelper.SnippetEpisodeObtaine
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper.SnippetProgramObtainer;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper.StaticEpisodeObtainer;
 import sune.app.mediadown.media_engine.iprima.IPrimaHelper.StaticProgramObtainer;
-import sune.app.mediadown.media_engine.iprima.IPrimaHelper._Singleton;
 import sune.app.mediadown.plugin.PluginBase;
 import sune.app.mediadown.plugin.PluginLoaderContext;
 import sune.app.mediadown.task.ListTask;
@@ -31,12 +30,12 @@ public final class IPrimaEngine implements MediaEngine {
 	public static final Image  ICON    = PLUGIN.getIcon();
 	
 	private static final IPrima[] SUPPORTED_WEBS = {
-		PrimaPlus.getInstance(),
-		ZoomIPrima.getInstance(),
-		CNNIPrima.getInstance(),
-		FreshIPrima.getInstance(),
-		ZenyIPrima.getInstance(),
-		CoolIPrima.getInstance(),
+		PrimaPlus.INSTANCE,
+		ZoomIPrima.INSTANCE,
+		CNNIPrima.INSTANCE,
+		FreshIPrima.INSTANCE,
+		ZenyIPrima.INSTANCE,
+		CoolIPrima.INSTANCE,
 	};
 	
 	// Allow to create an instance when registering the engine
@@ -192,13 +191,11 @@ public final class IPrimaEngine implements MediaEngine {
 		int features();
 	}
 	
-	private static final class ZoomIPrima implements IPrima {
+	private static enum ZoomIPrima implements IPrima {
+		INSTANCE;
 		
 		private static final int FEATURES = Features.ALL;
 		private static final String SUBDOMAIN = "zoom";
-		
-		private ZoomIPrima() {}
-		public static final ZoomIPrima getInstance() { return _Singleton.getInstance(); }
 		
 		@Override
 		public ListTask<Program> getPrograms() throws Exception {
@@ -226,14 +223,12 @@ public final class IPrimaEngine implements MediaEngine {
 		}
 	}
 	
-	private static final class CNNIPrima implements IPrima {
+	private static enum CNNIPrima implements IPrima {
+		INSTANCE;
 		
 		private static final int FEATURES = Features.ALL;
 		private static final String SUBDOMAIN = "cnn";
 		private static final String URL_PROGRAMS = "https://cnn.iprima.cz/porady";
-		
-		private CNNIPrima() {}
-		public static final CNNIPrima getInstance() { return _Singleton.getInstance(); }
 		
 		@Override
 		public ListTask<Program> getPrograms() throws Exception {
@@ -261,14 +256,12 @@ public final class IPrimaEngine implements MediaEngine {
 		}
 	}
 	
-	private static final class FreshIPrima implements IPrima {
+	private static enum FreshIPrima implements IPrima {
+		INSTANCE;
 		
 		private static final int FEATURES = Features.MEDIA;
 		private static final String SUBDOMAIN = "fresh";
 		
-		private FreshIPrima() {}
-		public static final FreshIPrima getInstance() { return _Singleton.getInstance(); }
-		
 		@Override
 		public ListTask<Media> getMedia(IPrimaEngine engine, URI uri) throws Exception {
 			return DefaultMediaObtainer.getMedia(uri, engine);
@@ -285,14 +278,12 @@ public final class IPrimaEngine implements MediaEngine {
 		}
 	}
 	
-	private static final class ZenyIPrima implements IPrima {
+	private static enum ZenyIPrima implements IPrima {
+		INSTANCE;
 		
 		private static final int FEATURES = Features.MEDIA;
 		private static final String SUBDOMAIN = "zeny";
 		
-		private ZenyIPrima() {}
-		public static final ZenyIPrima getInstance() { return _Singleton.getInstance(); }
-		
 		@Override
 		public ListTask<Media> getMedia(IPrimaEngine engine, URI uri) throws Exception {
 			return DefaultMediaObtainer.getMedia(uri, engine);
@@ -309,13 +300,11 @@ public final class IPrimaEngine implements MediaEngine {
 		}
 	}
 	
-	private static final class CoolIPrima implements IPrima {
+	private static enum CoolIPrima implements IPrima {
+		INSTANCE;
 		
 		private static final int FEATURES = Features.MEDIA;
 		private static final String SUBDOMAIN = "cool";
-		
-		private CoolIPrima() {}
-		public static final CoolIPrima getInstance() { return _Singleton.getInstance(); }
 		
 		@Override
 		public ListTask<Media> getMedia(IPrimaEngine engine, URI uri) throws Exception {

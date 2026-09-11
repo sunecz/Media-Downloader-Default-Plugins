@@ -28,7 +28,6 @@ import sune.app.mediadown.media.VideoMediaContainer;
 import sune.app.mediadown.media.type.SeparatedVideoMediaContainer;
 import sune.app.mediadown.media_engine.iprima.IPrimaEngine.Features;
 import sune.app.mediadown.media_engine.iprima.IPrimaEngine.IPrima;
-import sune.app.mediadown.media_engine.iprima.IPrimaHelper._Singleton;
 import sune.app.mediadown.media_engine.iprima.PrimaCommon.MessageException;
 import sune.app.mediadown.media_engine.iprima.PrimaCommon.Nuxt;
 import sune.app.mediadown.media_engine.iprima.PrimaCommon.RPC;
@@ -44,13 +43,11 @@ import sune.app.mediadown.util.JSON.JSONObject;
 import sune.app.mediadown.util.Regex;
 import sune.app.mediadown.util.Utils;
 
-final class PrimaPlus implements IPrima {
+enum PrimaPlus implements IPrima {
+	INSTANCE;
 	
 	private static final int FEATURES = Features.ALL;
 	private static final String SUBDOMAIN = "www";
-	
-	PrimaPlus() {}
-	public static final PrimaPlus getInstance() { return _Singleton.getInstance(); }
 	
 	@Override
 	public ListTask<Program> getPrograms() throws Exception {
