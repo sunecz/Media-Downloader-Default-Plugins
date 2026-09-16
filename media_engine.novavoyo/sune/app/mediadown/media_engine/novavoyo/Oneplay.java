@@ -147,10 +147,12 @@ public final class Oneplay {
 	}
 	
 	private final JSONCollection successData(Response response) throws MessageException {
-		MessageException ex;
-		if(!response.isSuccess()
-				&& (ex = resultError(response.data())) != null) {
-			throw ex; // Explicit throw
+		if(!response.isSuccess()) {
+			JSONCollection data = response.data();
+			// Synchronous errors contain the envelope; asynchronous errors contain its result.
+			// An ignored API event code is still a failed request, not playable content.
+			throw new MessageException(data.getString("result.message",
+				data.getString("message", "Unknown error")));
 		}
 		
 		return response.data();
