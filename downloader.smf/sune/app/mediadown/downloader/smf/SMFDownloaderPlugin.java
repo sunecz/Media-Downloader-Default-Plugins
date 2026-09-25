@@ -8,7 +8,7 @@ import sune.app.mediadown.plugin.PluginBase;
 @Plugin(
 	name    = "downloader.smf",
 	title   = "plugin.downloader.smf.title",
-	version = "0.2.9-9.alpha.1",
+	version = "0.2.9-9.alpha.2",
 	author  = "Sune"
 )
 public final class SMFDownloaderPlugin extends PluginBase {
