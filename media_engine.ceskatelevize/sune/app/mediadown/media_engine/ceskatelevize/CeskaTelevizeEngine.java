@@ -724,7 +724,7 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			List<String> seasons = null;
 			
 			if(extractSeasons) {
-				JSONCollection jsonSeasons = JSON.read(content).getCollection("props.pageProps.data.show.seasons");
+				JSONCollection jsonSeasons = JSON.read(content).getCollection("props.pageProps.data.programme.seasons");
 				seasons = new ArrayList<>();
 				
 				for(JSONCollection item : jsonSeasons.collectionsIterable()) {
@@ -1289,9 +1289,9 @@ public final class CeskaTelevizeEngine implements MediaEngine {
 			Stream<JSONCollection> objects = (
 				Stream.concat(
 					nextJS.objectsOf("MediumMeta")
-						.filter((v) -> "props.pageProps.data.mediaMeta".equals(v.name())),
+						.filter((v) -> "props.pageProps.data.episode".equals(v.name())),
 					nextJS.objectsOf("Show")
-						.filter((v) -> "props.pageProps.data.show".equals(v.name()))
+						.filter((v) -> "props.pageProps.data.programme".equals(v.name()))
 				)
 				.map(NextJS.NamedObject::object)
 			);
