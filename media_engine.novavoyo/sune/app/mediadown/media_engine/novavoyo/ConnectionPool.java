@@ -41,7 +41,7 @@ public final class ConnectionPool implements AutoCloseable {
 		scheduleFutures = new ScheduledFuture[capacity];
 	}
 	
-	private final ConnectionItem acquire() throws InterruptedException {
+	private final ConnectionItem acquire() throws Exception {
 		if(!isActive) {
 			throw new IllegalStateException("Not active");
 		}
@@ -186,7 +186,7 @@ public final class ConnectionPool implements AutoCloseable {
 		}
 	}
 	
-	public ConnectionItem get() throws InterruptedException {
+	public ConnectionItem get() throws Exception {
 		return acquire();
 	}
 	
@@ -209,7 +209,7 @@ public final class ConnectionPool implements AutoCloseable {
 			this.idx = idx;
 		}
 		
-		private final void acquire() {
+		private final void acquire() throws Exception {
 			Connection con;
 			if((con = this.connection) == null) {
 				con = new Connection(Common.newUUID(), device);

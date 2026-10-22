@@ -14,7 +14,7 @@ public final class WS {
 	private final WebSocket ws;
 	private final Listener listener;
 	
-	public WS(Request request, Listener listener) {
+	public WS(Request request, Listener listener) throws Exception {
 		this.listener = Objects.requireNonNull(listener);
 		this.ws = Web.newWebSocket(Objects.requireNonNull(request), new WebSocketListener());
 	}

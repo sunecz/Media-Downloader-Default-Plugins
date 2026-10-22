@@ -107,7 +107,7 @@ public final class Connection implements AutoCloseable {
 		}
 	}
 	
-	private final void doOpen() {
+	private final void doOpen() throws Exception {
 		Web.Request req = Web.Request.of(URI_WS_BASE.resolve(clientId)).GET();
 		ws = new WS(req, new WSListener());
 		
@@ -181,7 +181,7 @@ public final class Connection implements AutoCloseable {
 		ws.send("{\"schema\":\"Pong\"}");
 	}
 	
-	public Connection open() {
+	public Connection open() throws Exception {
 		if(!isOpen) {
 			synchronized(this) {
 				if(!isOpen) {
