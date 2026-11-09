@@ -179,7 +179,7 @@ public final class Authenticator {
 			String authToken;
 			
 			if(!response.isSuccess()
-					|| (authToken = response.data().getString("step.bearerToken")) == null) {
+					|| (authToken = response.data().getString("step.user.bearerToken")) == null) {
 				Logging.logDebug("[Auth] Erroneous response: %s", response.data());
 				
 				throw new MessageException(String.format(
