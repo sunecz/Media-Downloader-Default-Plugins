@@ -759,7 +759,7 @@ public final class Oneplay {
 							JSONCollection lPayload = payloads[item.idx()];
 							lPayload.set("paging.position", (p - 1) * itemsPerPage + 1);
 							Connection con = item.connection();
-							return successData(con.request("carousel.display", payload));
+							return successData(con.request("carousel.display", lPayload));
 						});
 						
 						List<Program> lp = ListTask.<Program>of((t) -> {
